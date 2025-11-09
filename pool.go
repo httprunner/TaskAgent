@@ -49,12 +49,14 @@ type JobRunner interface {
 
 // Config controls DevicePoolAgent behavior.
 type Config struct {
-	PollInterval   time.Duration
-	MaxTasksPerJob int
-	OSType         string
-	Provider       DeviceProvider
-	TaskManager    TaskManager
-	FeishuConfig   *FeishuTaskConfig
+	PollInterval    time.Duration
+	MaxTasksPerJob  int
+	MaxJobRetries   int
+	JobRetryBackoff time.Duration
+	OSType          string
+	Provider        DeviceProvider
+	TaskManager     TaskManager
+	FeishuConfig    *FeishuTaskConfig
 }
 
 // DevicePoolAgent coordinates plug-and-play devices with a task source.
@@ -99,6 +101,12 @@ func NewDevicePoolAgent(cfg Config, runner JobRunner) (*DevicePoolAgent, error) 
 	}
 	if cfg.MaxTasksPerJob <= 0 {
 		cfg.MaxTasksPerJob = 1
+	}
+	if cfg.MaxJobRetries <= 0 {
+		cfg.MaxJobRetries = 2
+	}
+	if cfg.JobRetryBackoff <= 0 {
+		cfg.JobRetryBackoff = 5 * time.Second
 	}
 
 	provider := cfg.Provider
@@ -325,10 +333,50 @@ func (a *DevicePoolAgent) runDeviceJob(ctx context.Context, dev *deviceState, jo
 		Int("task_count", len(job.tasks)).
 		Msg("start device job")
 
-	err := a.jobRunner.RunJob(ctx, JobRequest{
-		DeviceSerial: job.deviceSerial,
-		Tasks:        job.tasks,
-	})
+	maxAttempts := a.cfg.MaxJobRetries
+	if maxAttempts <= 0 {
+		maxAttempts = 1
+	}
+	backoff := a.cfg.JobRetryBackoff
+	if backoff <= 0 {
+		backoff = 5 * time.Second
+	}
+
+	var err error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		err = a.jobRunner.RunJob(ctx, JobRequest{
+			DeviceSerial: job.deviceSerial,
+			Tasks:        job.tasks,
+		})
+		if err == nil {
+			if attempt > 1 {
+				log.Info().
+					Str("serial", job.deviceSerial).
+					Int("attempts", attempt).
+					Msg("device job recovered after retry")
+			}
+			break
+		}
+
+		if attempt == maxAttempts {
+			break
+		}
+
+		log.Warn().
+			Err(err).
+			Str("serial", job.deviceSerial).
+			Int("attempt", attempt).
+			Int("max_attempts", maxAttempts).
+			Dur("backoff", backoff).
+			Msg("device job failed, scheduling retry")
+
+		select {
+		case <-ctx.Done():
+			err = ctx.Err()
+			attempt = maxAttempts
+		case <-time.After(backoff):
+		}
+	}
 
 	if hookErr := a.taskManager.OnTasksCompleted(context.Background(), job.deviceSerial, job.tasks, err); hookErr != nil {
 		log.Error().Err(hookErr).Str("serial", job.deviceSerial).Msg("task completion hook failed")

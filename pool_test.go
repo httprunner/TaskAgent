@@ -72,6 +72,23 @@ func (r *channelJobRunner) RunJob(ctx context.Context, req JobRequest) error {
 	return r.resultErr
 }
 
+type flakyJobRunner struct {
+	failures       int
+	attemptCounter int
+	ch             chan JobRequest
+}
+
+func (r *flakyJobRunner) RunJob(ctx context.Context, req JobRequest) error {
+	if r.ch != nil {
+		r.ch <- req
+	}
+	r.attemptCounter++
+	if r.attemptCounter <= r.failures {
+		return errors.New("boom")
+	}
+	return nil
+}
+
 func TestDevicePoolAgentDispatchesAcrossIdleDevices(t *testing.T) {
 	ctx := context.Background()
 	provider := &stubDeviceProvider{devices: []string{"device-A", "device-B", "device-C"}}
@@ -179,10 +196,12 @@ func TestDevicePoolAgentPropagatesJobError(t *testing.T) {
 	runner := &channelJobRunner{ch: jobCh, resultErr: errors.New("boom")}
 
 	agent, err := NewDevicePoolAgent(Config{
-		PollInterval:   time.Millisecond,
-		MaxTasksPerJob: 1,
-		Provider:       provider,
-		TaskManager:    manager,
+		PollInterval:    time.Millisecond,
+		MaxTasksPerJob:  1,
+		MaxJobRetries:   1,
+		JobRetryBackoff: time.Millisecond,
+		Provider:        provider,
+		TaskManager:     manager,
 	}, runner)
 	if err != nil {
 		t.Fatalf("NewDevicePoolAgent returned error: %v", err)
@@ -200,5 +219,52 @@ func TestDevicePoolAgentPropagatesJobError(t *testing.T) {
 	defer manager.mu.Unlock()
 	if manager.lastErr == nil {
 		t.Fatalf("expected job error propagated")
+	}
+}
+
+func TestDevicePoolAgentRetriesFailedJobs(t *testing.T) {
+	ctx := context.Background()
+	provider := &stubDeviceProvider{devices: []string{"device-retry"}}
+	manager := &stubTaskManager{
+		tasks:  []*Task{{ID: "retry-task"}},
+		doneCh: make(chan struct{}),
+	}
+	jobCh := make(chan JobRequest, 2)
+	runner := &flakyJobRunner{failures: 1, ch: jobCh}
+
+	agent, err := NewDevicePoolAgent(Config{
+		PollInterval:    time.Millisecond,
+		MaxTasksPerJob:  1,
+		MaxJobRetries:   2,
+		JobRetryBackoff: time.Millisecond,
+		Provider:        provider,
+		TaskManager:     manager,
+	}, runner)
+	if err != nil {
+		t.Fatalf("NewDevicePoolAgent returned error: %v", err)
+	}
+	if err := agent.RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce error: %v", err)
+	}
+
+	select {
+	case <-jobCh:
+	case <-time.After(time.Second):
+		t.Fatalf("expected job request to be sent")
+	}
+
+	select {
+	case <-manager.doneCh:
+	case <-time.After(time.Second):
+		t.Fatalf("completion hook not called after retries")
+	}
+
+	if runner.attemptCounter != 2 {
+		t.Fatalf("expected 2 attempts, got %d", runner.attemptCounter)
+	}
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	if manager.lastErr != nil {
+		t.Fatalf("expected final job success, got %v", manager.lastErr)
 	}
 }
