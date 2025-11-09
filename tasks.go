@@ -82,7 +82,7 @@ func (m *feishuTargetTaskManager) OnTasksDispatched(ctx context.Context, deviceS
 	if strings.TrimSpace(m.dispatchStatus) == "" {
 		return nil
 	}
-	return m.updateStatuses(ctx, tasks, m.dispatchStatus)
+	return m.updateStatuses(ctx, tasks, m.dispatchStatus, deviceSerial)
 }
 
 func (m *feishuTargetTaskManager) OnTasksCompleted(ctx context.Context, deviceSerial string, tasks []*Task, jobErr error) error {
@@ -93,15 +93,15 @@ func (m *feishuTargetTaskManager) OnTasksCompleted(ctx context.Context, deviceSe
 	if strings.TrimSpace(status) == "" {
 		return nil
 	}
-	return m.updateStatuses(ctx, tasks, status)
+	return m.updateStatuses(ctx, tasks, status, deviceSerial)
 }
 
-func (m *feishuTargetTaskManager) updateStatuses(ctx context.Context, tasks []*Task, status string) error {
+func (m *feishuTargetTaskManager) updateStatuses(ctx context.Context, tasks []*Task, status, deviceSerial string) error {
 	feishuTasks, err := extractFeishuTasks(tasks)
 	if err != nil {
 		return err
 	}
-	return updateFeishuTaskStatuses(ctx, feishuTasks, status)
+	return updateFeishuTaskStatuses(ctx, feishuTasks, status, deviceSerial)
 }
 
 func (m *feishuTargetTaskManager) now() time.Time {
@@ -139,7 +139,7 @@ func (s *FeishuTaskService) UpdateTaskStatuses(ctx context.Context, tasks []*Fei
 	if s == nil {
 		return errors.New("feishu: task service not initialized")
 	}
-	return updateFeishuTaskStatuses(ctx, tasks, status)
+	return updateFeishuTaskStatuses(ctx, tasks, status, "")
 }
 
 // FeishuTask represents a pending capture job fetched from Feishu bitable.
@@ -165,6 +165,7 @@ type feishuTaskSource struct {
 type targetTableClient interface {
 	FetchTargetTableWithOptions(ctx context.Context, rawURL string, override *feishusvc.TargetFields, opts *feishusvc.TargetQueryOptions) (*feishusvc.TargetTable, error)
 	UpdateTargetStatus(ctx context.Context, table *feishusvc.TargetTable, taskID int64, newStatus string) error
+	UpdateTargetFields(ctx context.Context, table *feishusvc.TargetTable, taskID int64, fields map[string]any) error
 }
 
 const (
@@ -392,7 +393,7 @@ func buildFeishuStatusClause(fields feishusvc.TargetFields, status string) strin
 	return fmt.Sprintf("%s = \"%s\"", ref, escapeBitableFilterValue(status))
 }
 
-func updateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status string) error {
+func updateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status string, deviceSerial string) error {
 	if len(tasks) == 0 {
 		return nil
 	}
@@ -400,6 +401,7 @@ func updateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 	if status == "" {
 		return errors.New("feishu: status cannot be empty")
 	}
+	deviceSerial = strings.TrimSpace(deviceSerial)
 
 	grouped := make(map[*feishuTaskSource][]*FeishuTask, len(tasks))
 	for _, task := range tasks {
@@ -411,8 +413,24 @@ func updateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 
 	var errs []string
 	for source, subset := range grouped {
+		statusField := strings.TrimSpace(source.table.Fields.Status)
+		if statusField == "" {
+			return errors.New("feishu: status field is not configured in target table")
+		}
+		deviceField := strings.TrimSpace(source.table.Fields.DeviceSerial)
+		updateSerial := deviceSerial != "" && deviceField != ""
+		if deviceSerial != "" && deviceField == "" {
+			log.Warn().Msg("feishu target table missing DeviceSerial column; skip binding device serial")
+		}
+
 		for _, task := range subset {
-			if err := source.client.UpdateTargetStatus(ctx, source.table, task.TaskID, status); err != nil {
+			fields := map[string]any{
+				statusField: status,
+			}
+			if updateSerial {
+				fields[deviceField] = deviceSerial
+			}
+			if err := source.client.UpdateTargetFields(ctx, source.table, task.TaskID, fields); err != nil {
 				errs = append(errs, fmt.Sprintf("task %d: %v", task.TaskID, err))
 			}
 		}

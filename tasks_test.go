@@ -132,6 +132,10 @@ func (s *stubTargetClient) UpdateTargetStatus(ctx context.Context, table *feishu
 	return nil
 }
 
+func (s *stubTargetClient) UpdateTargetFields(ctx context.Context, table *feishusvc.TargetTable, taskID int64, fields map[string]any) error {
+	return nil
+}
+
 func timePtr(t time.Time) *time.Time {
 	v := t
 	return &v
@@ -218,6 +222,10 @@ func (f *filterAwareTargetClient) UpdateTargetStatus(ctx context.Context, table 
 	return nil
 }
 
+func (f *filterAwareTargetClient) UpdateTargetFields(ctx context.Context, table *feishusvc.TargetTable, taskID int64, fields map[string]any) error {
+	return nil
+}
+
 func collectTaskIDs(tasks []*FeishuTask) []int64 {
 	result := make([]int64, 0, len(tasks))
 	for _, task := range tasks {
@@ -239,4 +247,56 @@ func equalIDs(a, b []int64) bool {
 		}
 	}
 	return true
+}
+
+type recordingTargetClient struct {
+	updates []map[string]any
+}
+
+func (r *recordingTargetClient) FetchTargetTableWithOptions(ctx context.Context, rawURL string, override *feishusvc.TargetFields, opts *feishusvc.TargetQueryOptions) (*feishusvc.TargetTable, error) {
+	return nil, nil
+}
+
+func (r *recordingTargetClient) UpdateTargetStatus(ctx context.Context, table *feishusvc.TargetTable, taskID int64, newStatus string) error {
+	return nil
+}
+
+func (r *recordingTargetClient) UpdateTargetFields(ctx context.Context, table *feishusvc.TargetTable, taskID int64, fields map[string]any) error {
+	cp := make(map[string]any, len(fields))
+	for k, v := range fields {
+		cp[k] = v
+	}
+	r.updates = append(r.updates, cp)
+	return nil
+}
+
+func TestUpdateFeishuTaskStatusesAssignsDeviceSerial(t *testing.T) {
+	client := &recordingTargetClient{}
+	table := &feishusvc.TargetTable{
+		Ref:    feishusvc.BitableRef{AppToken: "app", TableID: "tbl"},
+		Fields: feishusvc.DefaultTargetFields,
+	}
+	task := &FeishuTask{
+		TaskID: 1,
+		source: &feishuTaskSource{
+			client: client,
+			table:  table,
+		},
+	}
+
+	if err := updateFeishuTaskStatuses(context.Background(), []*FeishuTask{task}, "dispatched", "device-xyz"); err != nil {
+		t.Fatalf("updateFeishuTaskStatuses returned error: %v", err)
+	}
+	if len(client.updates) != 1 {
+		t.Fatalf("expected 1 update, got %d", len(client.updates))
+	}
+	statusField := feishusvc.DefaultTargetFields.Status
+	serialField := feishusvc.DefaultTargetFields.DeviceSerial
+	update := client.updates[0]
+	if got := update[statusField]; got != "dispatched" {
+		t.Fatalf("expected status field=%s got=%v", statusField, got)
+	}
+	if got := update[serialField]; got != "device-xyz" {
+		t.Fatalf("expected device serial field=%s got=%v", serialField, got)
+	}
 }

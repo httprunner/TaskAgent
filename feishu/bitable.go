@@ -191,6 +191,18 @@ func (t *TargetTable) updateLocalStatus(taskID int64, status string) {
 	}
 }
 
+func (t *TargetTable) updateLocalDeviceSerial(taskID int64, serial string) {
+	if t == nil {
+		return
+	}
+	for i := range t.Rows {
+		if t.Rows[i].TaskID == taskID {
+			t.Rows[i].DeviceSerial = serial
+			break
+		}
+	}
+}
+
 // IsBitableURL returns true if the url matches a supported Feishu Bitable link.
 func IsBitableURL(raw string) bool {
 	_, err := ParseBitableURL(raw)
@@ -346,23 +358,42 @@ func (c *Client) ensureBitableAppToken(ctx context.Context, ref *BitableRef) err
 
 // UpdateTargetStatus updates the status field for a given TaskID using a previously fetched table.
 func (c *Client) UpdateTargetStatus(ctx context.Context, table *TargetTable, taskID int64, newStatus string) error {
+	if strings.TrimSpace(newStatus) == "" {
+		return errors.New("feishu: new status cannot be empty")
+	}
+	return c.UpdateTargetFields(ctx, table, taskID, map[string]any{
+		table.Fields.Status: newStatus,
+	})
+}
+
+// UpdateTargetFields updates arbitrary fields for a given TaskID using a previously fetched table.
+func (c *Client) UpdateTargetFields(ctx context.Context, table *TargetTable, taskID int64, fields map[string]any) error {
 	if c == nil {
 		return errors.New("feishu: client is nil")
 	}
 	if table == nil {
 		return errors.New("feishu: target table is nil")
 	}
-	if strings.TrimSpace(newStatus) == "" {
-		return errors.New("feishu: new status cannot be empty")
+	if len(fields) == 0 {
+		return errors.New("feishu: no fields provided for update")
 	}
 	recordID, ok := table.RecordIDByTaskID(taskID)
 	if !ok {
 		return fmt.Errorf("feishu: task id %d not found in table", taskID)
 	}
-	if err := c.updateBitableRecord(ctx, table.Ref, recordID, map[string]any{table.Fields.Status: newStatus}); err != nil {
+	if err := c.updateBitableRecord(ctx, table.Ref, recordID, fields); err != nil {
 		return err
 	}
-	table.updateLocalStatus(taskID, newStatus)
+	if statusField := strings.TrimSpace(table.Fields.Status); statusField != "" {
+		if val, ok := fields[statusField]; ok {
+			table.updateLocalStatus(taskID, toString(val))
+		}
+	}
+	if deviceField := strings.TrimSpace(table.Fields.DeviceSerial); deviceField != "" {
+		if val, ok := fields[deviceField]; ok {
+			table.updateLocalDeviceSerial(taskID, toString(val))
+		}
+	}
 	return nil
 }
 
