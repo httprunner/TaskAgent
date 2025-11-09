@@ -31,6 +31,10 @@ type feishuTargetTaskManager struct {
 }
 
 func newFeishuTaskManager(cfg *FeishuTaskConfig) (TaskManager, error) {
+	return newFeishuTargetTaskManager(cfg)
+}
+
+func newFeishuTargetTaskManager(cfg *FeishuTaskConfig) (*feishuTargetTaskManager, error) {
 	if cfg == nil {
 		return nil, errors.New("feishu task config is nil")
 	}
@@ -55,15 +59,22 @@ func newFeishuTaskManager(cfg *FeishuTaskConfig) (TaskManager, error) {
 }
 
 func (m *feishuTargetTaskManager) FetchAvailableTasks(ctx context.Context, maxTasks int) ([]*Task, error) {
-	tasks, err := fetchTodayPendingFeishuTasks(ctx, m.client, m.bitableURL, m.app, maxTasks, m.now())
+	feishuTasks, err := m.fetchFeishuTasks(ctx, maxTasks)
 	if err != nil {
 		return nil, err
 	}
-	result := make([]*Task, 0, len(tasks))
-	for _, t := range tasks {
+	result := make([]*Task, 0, len(feishuTasks))
+	for _, t := range feishuTasks {
 		result = append(result, &Task{ID: strconv.FormatInt(t.TaskID, 10), Payload: t})
 	}
 	return result, nil
+}
+
+func (m *feishuTargetTaskManager) fetchFeishuTasks(ctx context.Context, maxTasks int) ([]*FeishuTask, error) {
+	if m == nil {
+		return nil, errors.New("feishu: task manager is nil")
+	}
+	return fetchTodayPendingFeishuTasks(ctx, m.client, m.bitableURL, m.app, maxTasks, m.now())
 }
 
 func (m *feishuTargetTaskManager) OnTasksDispatched(ctx context.Context, deviceSerial string, tasks []*Task) error {
@@ -97,6 +108,37 @@ func (m *feishuTargetTaskManager) now() time.Time {
 		return m.clock()
 	}
 	return time.Now()
+}
+
+// FeishuTaskService exposes reusable helpers for fetching and updating Feishu bitable tasks
+// outside of the device pool workflow.
+type FeishuTaskService struct {
+	manager *feishuTargetTaskManager
+}
+
+// NewFeishuTaskService builds a standalone Feishu task service using the provided config.
+func NewFeishuTaskService(cfg *FeishuTaskConfig) (*FeishuTaskService, error) {
+	manager, err := newFeishuTargetTaskManager(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &FeishuTaskService{manager: manager}, nil
+}
+
+// FetchPendingTasks returns pending Feishu tasks capped by maxTasks.
+func (s *FeishuTaskService) FetchPendingTasks(ctx context.Context, maxTasks int) ([]*FeishuTask, error) {
+	if s == nil || s.manager == nil {
+		return nil, errors.New("feishu: task service not initialized")
+	}
+	return s.manager.fetchFeishuTasks(ctx, maxTasks)
+}
+
+// UpdateTaskStatuses updates the Feishu rows backing the provided tasks.
+func (s *FeishuTaskService) UpdateTaskStatuses(ctx context.Context, tasks []*FeishuTask, status string) error {
+	if s == nil {
+		return errors.New("feishu: task service not initialized")
+	}
+	return updateFeishuTaskStatuses(ctx, tasks, status)
 }
 
 // FeishuTask represents a pending capture job fetched from Feishu bitable.
