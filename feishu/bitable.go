@@ -90,6 +90,7 @@ type ResultFields struct {
 	ItemID       string
 	ItemCaption  string
 	ItemURL      string
+	ItemDuration string
 	UserName     string
 	UserID       string
 	Tags         string
@@ -107,6 +108,7 @@ var DefaultResultFields = ResultFields{
 	ItemID:       "ItemID",
 	ItemCaption:  "ItemCaption",
 	ItemURL:      "ItemURL",
+	ItemDuration: "ItemDuration",
 	UserName:     "UserName",
 	UserID:       "UserID",
 	Tags:         "Tags",
@@ -119,20 +121,21 @@ var DefaultResultFields = ResultFields{
 // PayloadJSON accepts either a JSON-serializable Go value, a json.RawMessage,
 // []byte, or a string that contains valid JSON.
 type ResultRecordInput struct {
-	Datetime     *time.Time
-	DatetimeRaw  string
-	DeviceSerial string
-	App          string
-	Scene        string
-	Params       string
-	ItemID       string
-	ItemCaption  string
-	ItemURL      string
-	UserName     string
-	UserID       string
-	Tags         string
-	SubTaskID    string
-	PayloadJSON  any
+	Datetime            *time.Time
+	DatetimeRaw         string
+	DeviceSerial        string
+	App                 string
+	Scene               string
+	Params              string
+	ItemID              string
+	ItemCaption         string
+	ItemURL             string
+	ItemDurationSeconds *float64
+	UserName            string
+	UserID              string
+	Tags                string
+	SubTaskID           string
+	PayloadJSON         any
 }
 
 // TargetStatusUpdate links a TaskID to the status value it should adopt.
@@ -551,6 +554,9 @@ func (fields ResultFields) merge(override ResultFields) ResultFields {
 	if strings.TrimSpace(override.ItemURL) != "" {
 		result.ItemURL = override.ItemURL
 	}
+	if strings.TrimSpace(override.ItemDuration) != "" {
+		result.ItemDuration = override.ItemDuration
+	}
 	if strings.TrimSpace(override.UserName) != "" {
 		result.UserName = override.UserName
 	}
@@ -616,6 +622,7 @@ func buildResultRecordPayloads(records []ResultRecordInput, fields ResultFields)
 		addOptionalField(row, fields.ItemID, rec.ItemID)
 		addOptionalField(row, fields.ItemCaption, rec.ItemCaption)
 		addOptionalField(row, fields.ItemURL, rec.ItemURL)
+		addOptionalNumber(row, fields.ItemDuration, rec.ItemDurationSeconds)
 		addOptionalField(row, fields.UserName, rec.UserName)
 		addOptionalField(row, fields.UserID, rec.UserID)
 		addOptionalField(row, fields.Tags, rec.Tags)
@@ -638,6 +645,13 @@ func addOptionalField(dst map[string]any, column, value string) {
 		return
 	}
 	dst[column] = value
+}
+
+func addOptionalNumber(dst map[string]any, column string, value *float64) {
+	if strings.TrimSpace(column) == "" || value == nil {
+		return
+	}
+	dst[column] = *value
 }
 
 func formatRecordDatetimeString(dt *time.Time, raw string) string {

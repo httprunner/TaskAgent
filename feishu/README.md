@@ -44,7 +44,7 @@ recordID, err := client.CreateTargetRecord(ctx, taskTableURL, feishu.TargetRecor
 
 - Datetime（毫秒时间戳或可解析时间字符串）
 - DeviceSerial / App / Scene / Params
-- ItemID / ItemCaption / ItemURL
+- ItemID / ItemCaption / ItemURL / ItemDuration（秒）
 - UserName / UserID / Tags
 - SubTaskID
 - PayloadJSON（完整资源信息 JSON）
@@ -52,6 +52,7 @@ recordID, err := client.CreateTargetRecord(ctx, taskTableURL, feishu.TargetRecor
 API 使用 `ResultFields` / `ResultRecordInput`：
 
 ```go
+durationSeconds := 180.0
 resID, err := client.CreateResultRecord(ctx, resultTableURL, feishu.ResultRecordInput{
     DeviceSerial: "dev-001",
     App:          "douyin",
@@ -60,6 +61,8 @@ resID, err := client.CreateResultRecord(ctx, resultTableURL, feishu.ResultRecord
     ItemID:       "vid123",
     ItemCaption:  "示例标题",
     ItemURL:      "https://cdn.example.com/vid123.mp4",
+    // 可选：新增 ItemDuration，单位为秒
+    ItemDurationSeconds: &durationSeconds,
     UserName:     "作者",
     UserID:       "user123",
     Tags:         "热门,音乐",
