@@ -2,6 +2,8 @@ package pool
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,16 +30,18 @@ func TestFilterFeishuTasksByDate(t *testing.T) {
 	}
 
 	filtered := filterFeishuTasksByDate(tasks, dayStart, dayEnd, now)
-	if len(filtered) != 2 {
+	expected := []int64{1, 2, 5}
+	if len(filtered) != len(expected) {
 		bt := make([]int64, 0, len(filtered))
 		for _, task := range filtered {
 			bt = append(bt, task.TaskID)
 		}
-		t.Fatalf("expected 2 tasks, got %d: %#v", len(filtered), bt)
+		t.Fatalf("expected %d tasks, got %d: %#v", len(expected), len(filtered), bt)
 	}
-	if filtered[0].TaskID != 1 || filtered[1].TaskID != 2 {
-		ids := []int64{filtered[0].TaskID, filtered[1].TaskID}
-		t.Fatalf("unexpected task order: %#v", ids)
+	for i, id := range expected {
+		if filtered[i].TaskID != id {
+			t.Fatalf("unexpected task order: got %d at position %d, want %d", filtered[i].TaskID, i, id)
+		}
 	}
 }
 
@@ -69,11 +73,14 @@ func TestFetchFeishuTasksWithStrategyFiltersInvalidTasks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetchFeishuTasksWithStrategy returned error: %v", err)
 	}
-	if len(tasks) != 1 {
-		t.Fatalf("expected 1 task, got %d", len(tasks))
+	expectedIDs := []int64{1, 4}
+	if len(tasks) != len(expectedIDs) {
+		t.Fatalf("expected %d tasks, got %d", len(expectedIDs), len(tasks))
 	}
-	if tasks[0].TaskID != 1 {
-		t.Fatalf("expected task 1, got %d", tasks[0].TaskID)
+	for i, id := range expectedIDs {
+		if tasks[i].TaskID != id {
+			t.Fatalf("unexpected task order: got %d at position %d, want %d", tasks[i].TaskID, i, id)
+		}
 	}
 }
 
@@ -128,4 +135,108 @@ func (s *stubTargetClient) UpdateTargetStatus(ctx context.Context, table *feishu
 func timePtr(t time.Time) *time.Time {
 	v := t
 	return &v
+}
+
+func TestFetchTodayPendingFeishuTasksFillsWithFallback(t *testing.T) {
+	ctx := context.Background()
+	loc := time.FixedZone("UTC+8", 8*3600)
+	now := time.Date(2025, 11, 9, 10, 0, 0, 0, loc)
+	client := &filterAwareTargetClient{
+		withDatetimeRows: []feishusvc.TargetRow{
+			{TaskID: 1, Params: "A", App: "com.app", Datetime: timePtr(time.Date(2025, 11, 9, 8, 0, 0, 0, loc))},
+			{TaskID: 2, Params: "B", App: "com.app", Datetime: timePtr(time.Date(2025, 11, 9, 9, 0, 0, 0, loc))},
+		},
+		fallbackRows: []feishusvc.TargetRow{
+			{TaskID: 2, Params: "B-duplicate", App: "com.app"},
+			{TaskID: 3, Params: "C", App: "com.app"},
+			{TaskID: 4, Params: "D", App: "com.app"},
+			{TaskID: 5, Params: "E", App: "com.app"},
+			{TaskID: 6, Params: "F", App: "com.app"},
+		},
+	}
+	tasks, err := fetchTodayPendingFeishuTasks(ctx, client, "https://example.com/bitable/foo", "com.app", 5, now)
+	if err != nil {
+		t.Fatalf("fetchTodayPendingFeishuTasks returned error: %v", err)
+	}
+	ids := collectTaskIDs(tasks)
+	expected := []int64{1, 2, 3, 4, 5}
+	if !equalIDs(ids, expected) {
+		t.Fatalf("unexpected task ids: got %v, want %v", ids, expected)
+	}
+}
+
+func TestFetchTodayPendingFeishuTasksSkipsFallbackWhenSufficient(t *testing.T) {
+	ctx := context.Background()
+	loc := time.FixedZone("UTC+8", 8*3600)
+	now := time.Date(2025, 11, 9, 10, 0, 0, 0, loc)
+	withDatetime := make([]feishusvc.TargetRow, 0, 6)
+	for i := 0; i < 6; i++ {
+		hour := 4 + i
+		withDatetime = append(withDatetime, feishusvc.TargetRow{
+			TaskID:   int64(10 + i),
+			Params:   fmt.Sprintf("task-%d", 10+i),
+			App:      "com.app",
+			Datetime: timePtr(time.Date(2025, 11, 9, hour, 0, 0, 0, loc)),
+		})
+	}
+	client := &filterAwareTargetClient{
+		withDatetimeRows: withDatetime,
+		fallbackRows: []feishusvc.TargetRow{
+			{TaskID: 99, Params: "Z", App: "com.app"},
+		},
+	}
+	tasks, err := fetchTodayPendingFeishuTasks(ctx, client, "https://example.com/bitable/bar", "com.app", 5, now)
+	if err != nil {
+		t.Fatalf("fetchTodayPendingFeishuTasks returned error: %v", err)
+	}
+	ids := collectTaskIDs(tasks)
+	expected := []int64{10, 11, 12, 13, 14}
+	if !equalIDs(ids, expected) {
+		t.Fatalf("unexpected ids: got %v, want %v", ids, expected)
+	}
+}
+
+type filterAwareTargetClient struct {
+	withDatetimeRows []feishusvc.TargetRow
+	fallbackRows     []feishusvc.TargetRow
+}
+
+func (f *filterAwareTargetClient) FetchTargetTableWithOptions(ctx context.Context, rawURL string, override *feishusvc.TargetFields, opts *feishusvc.TargetQueryOptions) (*feishusvc.TargetTable, error) {
+	rows := f.fallbackRows
+	if strings.Contains(opts.Filter, "[Datetime]") {
+		rows = f.withDatetimeRows
+	}
+	clone := make([]feishusvc.TargetRow, len(rows))
+	copy(clone, rows)
+	return &feishusvc.TargetTable{
+		Rows:   clone,
+		Fields: feishusvc.DefaultTargetFields,
+	}, nil
+}
+
+func (f *filterAwareTargetClient) UpdateTargetStatus(ctx context.Context, table *feishusvc.TargetTable, taskID int64, newStatus string) error {
+	return nil
+}
+
+func collectTaskIDs(tasks []*FeishuTask) []int64 {
+	result := make([]int64, 0, len(tasks))
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		result = append(result, task.TaskID)
+	}
+	return result
+}
+
+func equalIDs(a, b []int64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

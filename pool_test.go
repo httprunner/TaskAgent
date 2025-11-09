@@ -3,6 +3,7 @@ package pool
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -69,6 +70,51 @@ type channelJobRunner struct {
 func (r *channelJobRunner) RunJob(ctx context.Context, req JobRequest) error {
 	r.ch <- req
 	return r.resultErr
+}
+
+func TestDevicePoolAgentDispatchesAcrossIdleDevices(t *testing.T) {
+	ctx := context.Background()
+	provider := &stubDeviceProvider{devices: []string{"device-A", "device-B", "device-C"}}
+	manager := &stubTaskManager{
+		tasks: make([]*Task, 15),
+	}
+	for i := range manager.tasks {
+		manager.tasks[i] = &Task{ID: fmt.Sprintf("task-%d", i+1)}
+	}
+	jobCh := make(chan JobRequest, 3)
+	runner := &channelJobRunner{ch: jobCh}
+
+	agent, err := NewDevicePoolAgent(Config{
+		PollInterval:   time.Millisecond,
+		MaxTasksPerJob: 5,
+		Provider:       provider,
+		TaskManager:    manager,
+	}, runner)
+	if err != nil {
+		t.Fatalf("NewDevicePoolAgent returned error: %v", err)
+	}
+	if err := agent.RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce error: %v", err)
+	}
+
+	got := make(map[string]JobRequest)
+	for i := 0; i < 3; i++ {
+		select {
+		case req := <-jobCh:
+			got[req.DeviceSerial] = req
+		case <-time.After(time.Second):
+			t.Fatalf("expected job %d to be scheduled", i+1)
+		}
+	}
+
+	if len(got) != 3 {
+		t.Fatalf("expected jobs for 3 devices, got %d", len(got))
+	}
+	for serial, req := range got {
+		if len(req.Tasks) != 5 {
+			t.Fatalf("device %s expected 5 tasks, got %d", serial, len(req.Tasks))
+		}
+	}
 }
 
 func TestDevicePoolAgentAssignsTasks(t *testing.T) {

@@ -192,14 +192,27 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient,
 
 	statusPriority := []string{"", "failed"}
 
+	result := make([]*FeishuTask, 0, limit)
+	seen := make(map[int64]struct{}, limit)
+
 	withDatetime, err := fetchFeishuTasksWithStrategy(ctx, client, bitableURL, fields, app, dayStart, dayEnd, now, statusPriority, limit, true)
 	if err != nil {
 		return nil, err
 	}
-	if len(withDatetime) > 0 {
-		return withDatetime, nil
+	result = appendUniqueFeishuTasks(result, withDatetime, limit, seen)
+	if len(result) >= limit {
+		return result[:limit], nil
 	}
-	return fetchFeishuTasksWithStrategy(ctx, client, bitableURL, fields, app, dayStart, dayEnd, now, statusPriority, limit, false)
+
+	withoutDatetime, err := fetchFeishuTasksWithStrategy(ctx, client, bitableURL, fields, app, dayStart, dayEnd, now, statusPriority, limit, false)
+	if err != nil {
+		return nil, err
+	}
+	result = appendUniqueFeishuTasks(result, withoutDatetime, limit, seen)
+	if len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
 }
 
 func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient, bitableURL string, fields feishusvc.TargetFields, app string, dayStart, dayEnd, now time.Time, statuses []string, limit int, includeDatetime bool) ([]*FeishuTask, error) {
@@ -294,7 +307,11 @@ func filterFeishuTasksByDate(tasks []*FeishuTask, start, end, now time.Time) []*
 	}
 	inWindow := make([]*FeishuTask, 0, len(tasks))
 	for _, task := range tasks {
-		if task == nil || task.Datetime == nil {
+		if task == nil {
+			continue
+		}
+		if task.Datetime == nil {
+			inWindow = append(inWindow, task)
 			continue
 		}
 		dt := task.Datetime
@@ -424,4 +441,24 @@ func bitableFieldRef(name string) string {
 
 func escapeBitableFilterValue(value string) string {
 	return strings.ReplaceAll(value, "\"", "\\\"")
+}
+
+func appendUniqueFeishuTasks(dst []*FeishuTask, src []*FeishuTask, limit int, seen map[int64]struct{}) []*FeishuTask {
+	if len(src) == 0 {
+		return dst
+	}
+	for _, task := range src {
+		if task == nil {
+			continue
+		}
+		if _, ok := seen[task.TaskID]; ok {
+			continue
+		}
+		seen[task.TaskID] = struct{}{}
+		dst = append(dst, task)
+		if limit > 0 && len(dst) >= limit {
+			break
+		}
+	}
+	return dst
 }
