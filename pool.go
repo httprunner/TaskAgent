@@ -154,6 +154,7 @@ func defaultTaskManager(cfg Config) (TaskManager, error) {
 
 // Start begins the polling loop until the context is cancelled.
 func (a *DevicePoolAgent) Start(ctx context.Context) error {
+	log.Info().Msg("start device pool agent")
 	if ctx == nil {
 		return errors.New("context cannot be nil")
 	}
@@ -190,6 +191,7 @@ func (a *DevicePoolAgent) runCycle(ctx context.Context) error {
 }
 
 func (a *DevicePoolAgent) refreshDevices(ctx context.Context) error {
+	log.Info().Msg("refresh devices for device pool agent")
 	serials, err := a.deviceProvider.ListDevices(ctx)
 	if err != nil {
 		return err
@@ -236,14 +238,24 @@ func (a *DevicePoolAgent) refreshDevices(ctx context.Context) error {
 func (a *DevicePoolAgent) dispatch(ctx context.Context) error {
 	idle := a.idleDevices()
 	if len(idle) == 0 {
+		log.Info().Msg("device pool dispatch skipped: no idle devices")
 		return nil
 	}
 	maxTasks := len(idle) * a.cfg.MaxTasksPerJob
+	log.Info().
+		Int("idle_devices", len(idle)).
+		Int("max_tasks_per_job", a.cfg.MaxTasksPerJob).
+		Int("max_fetch", maxTasks).
+		Msg("device pool dispatch requesting tasks")
 	tasks, err := a.taskManager.FetchAvailableTasks(ctx, maxTasks)
 	if err != nil {
 		return err
 	}
 	if len(tasks) == 0 {
+		log.Info().
+			Int("idle_devices", len(idle)).
+			Int("max_fetch", maxTasks).
+			Msg("device pool dispatch found no available tasks")
 		return nil
 	}
 
@@ -266,6 +278,10 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context) error {
 			log.Error().Err(err).Str("serial", dev.serial).Msg("task dispatch hook failed")
 			continue
 		}
+		log.Info().
+			Str("serial", dev.serial).
+			Int("assigned_tasks", len(selected)).
+			Msg("device pool dispatched tasks to device")
 		a.startDeviceJob(ctx, dev, selected)
 	}
 	return nil
