@@ -13,10 +13,15 @@ import (
 	"sync"
 	"time"
 
+	envload "github.com/httprunner/TaskAgent/internal"
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 	larkauth "github.com/larksuite/oapi-sdk-go/v3/service/auth/v3"
 )
+
+func init() {
+	_ = envload.Ensure()
+}
 
 const (
 	defaultBaseURL      = "https://open.feishu.cn"

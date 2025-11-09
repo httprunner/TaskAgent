@@ -15,6 +15,7 @@ const (
 	liveReadableBitableURL = "https://bytedance.larkoffice.com/wiki/DKKwwF9XRincITkd0g1c6udUnHe?table=tblLUmsGgp5SECWF&view=vew9Kwl9uR"
 	liveWritableBitableURL = "https://bytedance.larkoffice.com/wiki/DKKwwF9XRincITkd0g1c6udUnHe?table=tblLUmsGgp5SECWF"
 	liveResultBitableURL   = "https://bytedance.larkoffice.com/wiki/DKKwwF9XRincITkd0g1c6udUnHe?table=tblzoZuR6aminfye&view=vewTF27mJQ"
+	liveTargetApp          = "com.smile.gifmaker"
 )
 
 func TestParseSpreadsheetURL(t *testing.T) {
@@ -778,6 +779,42 @@ func TestFetchTargetTableExampleLive(t *testing.T) {
 	first := table.Rows[0]
 	t.Logf("live table row sample: TaskID=%d params=%s app=%s scene=%s datetime=%s status=%s",
 		first.TaskID, first.Params, first.App, first.Scene, first.DatetimeRaw, first.Status)
+}
+
+func TestFetchTargetTableWithOptionsLive(t *testing.T) {
+	if os.Getenv("FEISHU_LIVE_TEST") != "1" {
+		t.Skip("set FEISHU_LIVE_TEST=1 to run live Feishu integration test")
+	}
+	if os.Getenv("FEISHU_APP_ID") == "" || os.Getenv("FEISHU_APP_SECRET") == "" {
+		t.Skip("FEISHU_APP_ID/FEISHU_APP_SECRET not configured")
+	}
+	ctx := context.Background()
+	client, err := NewClientFromEnv()
+	if err != nil {
+		t.Fatalf("NewClientFromEnv error: %v", err)
+	}
+	appRef := fmt.Sprintf("CurrentValue.[%s]", DefaultTargetFields.App)
+	filter := fmt.Sprintf("%s = \"%s\"", appRef, liveTargetApp)
+	opts := &TargetQueryOptions{Filter: filter, Limit: 5}
+	table, err := client.FetchTargetTableWithOptions(ctx, liveReadableBitableURL, nil, opts)
+	if err != nil {
+		t.Fatalf("FetchTargetTableWithOptions live call failed: %v", err)
+	}
+	if table == nil || len(table.Rows) == 0 {
+		t.Fatalf("expected rows for %s, got %+v", liveTargetApp, table)
+	}
+	for i, row := range table.Rows {
+		if row.TaskID == 0 {
+			t.Fatalf("row %d missing task id", i)
+		}
+		if strings.TrimSpace(row.Params) == "" {
+			t.Fatalf("row %d missing params", i)
+		}
+		if row.App != liveTargetApp {
+			t.Fatalf("row %d app mismatch: got %s", i, row.App)
+		}
+	}
+	t.Logf("fetched %d live rows for %s with filter %s", len(table.Rows), liveTargetApp, filter)
 }
 
 func TestTargetRecordLifecycleLive(t *testing.T) {

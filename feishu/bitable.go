@@ -853,6 +853,18 @@ func bitableOptionalString(fields map[string]any, name string) string {
 }
 
 func parseBitableTime(raw string) (time.Time, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return time.Time{}, fmt.Errorf("unable to parse datetime %q", raw)
+	}
+	if num, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+		switch {
+		case len(trimmed) >= 13 || num > 1e12:
+			return time.UnixMilli(num).In(time.Local), nil
+		default:
+			return time.Unix(num, 0).In(time.Local), nil
+		}
+	}
 	layouts := []string{
 		time.RFC3339,
 		"2006-01-02T15:04:05.000",
