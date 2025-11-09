@@ -7,11 +7,16 @@ import (
 	"sync"
 	"time"
 
+	envload "github.com/httprunner/TaskAgent/internal"
 	adbprovider "github.com/httprunner/TaskAgent/providers/adb"
 	gadb "github.com/httprunner/httprunner/v5/pkg/gadb"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 )
+
+func init() {
+	envload.Ensure()
+}
 
 // Task represents a single unit of work to be executed on a device.
 type Task struct {

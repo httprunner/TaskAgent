@@ -3,17 +3,12 @@ package feishu
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
-
-	"github.com/joho/godotenv"
 )
 
 const (
@@ -762,7 +757,6 @@ func TestUpdateTargetStatuses(t *testing.T) {
 }
 
 func TestFetchTargetTableExampleLive(t *testing.T) {
-	ensureFeishuEnvLoaded(t)
 	if os.Getenv("FEISHU_LIVE_TEST") != "1" {
 		t.Skip("set FEISHU_LIVE_TEST=1 to run live Feishu integration test")
 	}
@@ -787,7 +781,6 @@ func TestFetchTargetTableExampleLive(t *testing.T) {
 }
 
 func TestTargetRecordLifecycleLive(t *testing.T) {
-	ensureFeishuEnvLoaded(t)
 	if os.Getenv("FEISHU_LIVE_TEST") != "1" {
 		t.Skip("set FEISHU_LIVE_TEST=1 to run live Feishu lifecycle test")
 	}
@@ -884,7 +877,6 @@ func TestTargetRecordLifecycleLive(t *testing.T) {
 }
 
 func TestResultRecordCreateLive(t *testing.T) {
-	ensureFeishuEnvLoaded(t)
 	if os.Getenv("FEISHU_LIVE_TEST") != "1" {
 		t.Skip("set FEISHU_LIVE_TEST=1 to run live result record test")
 	}
@@ -944,53 +936,4 @@ func TestResultRecordCreateLive(t *testing.T) {
 		t.Fatalf("payload json invalid: %s", payloadStr)
 	}
 	t.Logf("live result record created id=%s item_id=%s tags=%s", id, record.ItemID, record.Tags)
-}
-
-var (
-	dotenvOnce     sync.Once
-	dotenvErr      error
-	dotenvFilePath string
-)
-
-func ensureFeishuEnvLoaded(t *testing.T) {
-	t.Helper()
-	if err := loadFeishuDotEnv(); err != nil {
-		t.Fatalf("failed to load .env: %v", err)
-	}
-}
-
-func loadFeishuDotEnv() error {
-	dotenvOnce.Do(func() {
-		path, err := findDotEnv()
-		if err != nil {
-			dotenvErr = err
-			return
-		}
-		if path == "" {
-			return
-		}
-		dotenvFilePath = path
-		dotenvErr = godotenv.Load(path)
-	})
-	return dotenvErr
-}
-
-func findDotEnv() (string, error) {
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	for {
-		candidate := filepath.Join(wd, ".env")
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return "", err
-		}
-		parent := filepath.Dir(wd)
-		if parent == wd {
-			return "", nil
-		}
-		wd = parent
-	}
 }
