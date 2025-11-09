@@ -9,6 +9,7 @@ import (
 	"time"
 
 	feishusvc "github.com/httprunner/TaskAgent/feishu"
+	"github.com/rs/zerolog/log"
 )
 
 // FeishuTaskConfig describes how to pull/update tasks from Feishu bitable.
@@ -167,10 +168,10 @@ type targetTableClient interface {
 }
 
 const (
-	feishuTaskFilterLayout = "2006-01-02 15:04:05"
-	maxFeishuTasksPerApp   = 5
+	feishuTaskFilterLayout  = "2006-01-02 15:04:05"
+	maxFeishuTasksPerApp    = 5
 	fallbackFetchMultiplier = 5
-	maxFeishuFallbackFetch = 100
+	maxFeishuFallbackFetch  = 100
 )
 
 func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient, bitableURL, app string, limit int, now time.Time) ([]*FeishuTask, error) {
@@ -191,17 +192,17 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient,
 
 	statusPriority := []string{"", "failed"}
 
-	withDatetime, err := fetchFeishuTasksWithStrategy(ctx, client, bitableURL, fields, app, dayStart, dayEnd, statusPriority, limit, true)
+	withDatetime, err := fetchFeishuTasksWithStrategy(ctx, client, bitableURL, fields, app, dayStart, dayEnd, now, statusPriority, limit, true)
 	if err != nil {
 		return nil, err
 	}
 	if len(withDatetime) > 0 {
 		return withDatetime, nil
 	}
-	return fetchFeishuTasksWithStrategy(ctx, client, bitableURL, fields, app, dayStart, dayEnd, statusPriority, limit, false)
+	return fetchFeishuTasksWithStrategy(ctx, client, bitableURL, fields, app, dayStart, dayEnd, now, statusPriority, limit, false)
 }
 
-func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient, bitableURL string, fields feishusvc.TargetFields, app string, dayStart, dayEnd time.Time, statuses []string, limit int, includeDatetime bool) ([]*FeishuTask, error) {
+func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient, bitableURL string, fields feishusvc.TargetFields, app string, dayStart, dayEnd, now time.Time, statuses []string, limit int, includeDatetime bool) ([]*FeishuTask, error) {
 	if len(statuses) == 0 {
 		return nil, nil
 	}
@@ -229,8 +230,15 @@ func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient,
 		if err != nil {
 			return nil, err
 		}
-		if !includeDatetime {
-			subset = filterFeishuTasksByDate(subset, dayStart, dayEnd)
+		subset = filterFeishuTasksByDate(subset, dayStart, dayEnd, now)
+		if len(subset) > 0 {
+			log.Info().
+				Str("app", app).
+				Str("status_filter", status).
+				Bool("include_datetime", includeDatetime).
+				Int("selected", len(subset)).
+				Interface("tasks", summarizeFeishuTasks(subset)).
+				Msg("feishu tasks selected after filtering")
 		}
 		result = append(result, subset...)
 	}
@@ -280,25 +288,49 @@ func fetchFeishuTasksWithFilter(ctx context.Context, client targetTableClient, b
 	return tasks, nil
 }
 
-func filterFeishuTasksByDate(tasks []*FeishuTask, start, end time.Time) []*FeishuTask {
-	if start.IsZero() || end.IsZero() || len(tasks) == 0 {
-		return tasks
+func filterFeishuTasksByDate(tasks []*FeishuTask, start, end, now time.Time) []*FeishuTask {
+	if len(tasks) == 0 || start.IsZero() || end.IsZero() || now.IsZero() {
+		return nil
 	}
 	inWindow := make([]*FeishuTask, 0, len(tasks))
-	noDatetime := make([]*FeishuTask, 0)
+	for _, task := range tasks {
+		if task == nil || task.Datetime == nil {
+			continue
+		}
+		dt := task.Datetime
+		if dt.Before(start) || !dt.Before(end) {
+			continue
+		}
+		if dt.After(now) {
+			continue
+		}
+		inWindow = append(inWindow, task)
+	}
+	return inWindow
+}
+
+func summarizeFeishuTasks(tasks []*FeishuTask) []map[string]any {
+	const tsLayout = "2006-01-02 15:04:05"
+	result := make([]map[string]any, 0, len(tasks))
 	for _, task := range tasks {
 		if task == nil {
 			continue
 		}
-		if task.Datetime == nil {
-			noDatetime = append(noDatetime, task)
-			continue
+		entry := map[string]any{
+			"task_id": task.TaskID,
+			"params":  task.Params,
+			"scene":   task.Scene,
+			"status":  task.Status,
+			"user":    task.User,
 		}
-		if !task.Datetime.Before(start) && task.Datetime.Before(end) {
-			inWindow = append(inWindow, task)
+		if task.Datetime != nil {
+			entry["datetime"] = task.Datetime.In(task.Datetime.Location()).Format(tsLayout)
+		} else {
+			entry["datetime"] = ""
 		}
+		result = append(result, entry)
 	}
-	return append(inWindow, noDatetime...)
+	return result
 }
 
 func buildFeishuFilterExpression(fields feishusvc.TargetFields, app string, start, end time.Time, status string, includeDatetime bool) string {
