@@ -533,7 +533,7 @@ func TestBuildResultRecordPayloads(t *testing.T) {
 			UserName:     "tester",
 			UserID:       "author-1",
 			Tags:         "tag1,tag2",
-			SubTaskID:    "sub-1",
+			TaskID:       101,
 			PayloadJSON:  map[string]any{"foo": "bar"},
 		},
 	}, DefaultResultFields)
@@ -967,7 +967,7 @@ func TestResultRecordCreateLive(t *testing.T) {
 		UserName:     "test-suite",
 		UserID:       "suite",
 		Tags:         "integration,auto",
-		SubTaskID:    fmt.Sprintf("sub-%d", now.UnixNano()),
+		TaskID:       now.UnixMilli(),
 		PayloadJSON: map[string]any{
 			"ts":     now.UnixMilli(),
 			"status": "ok",

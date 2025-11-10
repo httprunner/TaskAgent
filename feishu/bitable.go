@@ -109,7 +109,7 @@ type ResultFields struct {
 	UserName     string
 	UserID       string
 	Tags         string
-	SubTaskID    string
+	TaskID       string
 	PayloadJSON  string
 }
 
@@ -127,7 +127,7 @@ var DefaultResultFields = ResultFields{
 	UserName:     "UserName",
 	UserID:       "UserID",
 	Tags:         "Tags",
-	SubTaskID:    "SubTaskID",
+	TaskID:       "TaskID",
 	PayloadJSON:  "PayloadJSON",
 }
 
@@ -149,7 +149,7 @@ type ResultRecordInput struct {
 	UserName            string
 	UserID              string
 	Tags                string
-	SubTaskID           string
+	TaskID              int64
 	PayloadJSON         any
 }
 
@@ -700,8 +700,8 @@ func (fields ResultFields) merge(override ResultFields) ResultFields {
 	if strings.TrimSpace(override.Tags) != "" {
 		result.Tags = override.Tags
 	}
-	if strings.TrimSpace(override.SubTaskID) != "" {
-		result.SubTaskID = override.SubTaskID
+	if strings.TrimSpace(override.TaskID) != "" {
+		result.TaskID = override.TaskID
 	}
 	if strings.TrimSpace(override.PayloadJSON) != "" {
 		result.PayloadJSON = override.PayloadJSON
@@ -773,7 +773,9 @@ func buildResultRecordPayloads(records []ResultRecordInput, fields ResultFields)
 		addOptionalField(row, fields.UserName, rec.UserName)
 		addOptionalField(row, fields.UserID, rec.UserID)
 		addOptionalField(row, fields.Tags, rec.Tags)
-		addOptionalField(row, fields.SubTaskID, rec.SubTaskID)
+		if strings.TrimSpace(fields.TaskID) != "" && rec.TaskID != 0 {
+			row[fields.TaskID] = rec.TaskID
+		}
 		if payload, err := encodePayloadJSON(rec.PayloadJSON); err != nil {
 			return nil, fmt.Errorf("feishu: result record %d invalid payload json: %w", idx, err)
 		} else if payload != "" && strings.TrimSpace(fields.PayloadJSON) != "" {

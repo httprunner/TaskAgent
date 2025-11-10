@@ -49,7 +49,7 @@ recordID, err := client.CreateTargetRecord(ctx, taskTableURL, feishu.TargetRecor
 - DeviceSerial / App / Scene / Params
 - ItemID / ItemCaption / ItemURL / ItemDuration（秒）
 - UserName / UserID / Tags
-- SubTaskID
+- TaskID
 - PayloadJSON（完整资源信息 JSON）
 
 API 使用 `ResultFields` / `ResultRecordInput`：
@@ -69,7 +69,7 @@ resID, err := client.CreateResultRecord(ctx, resultTableURL, feishu.ResultRecord
     UserName:     "作者",
     UserID:       "user123",
     Tags:         "热门,音乐",
-    SubTaskID:    "sub-task-id",
+    TaskID:       123456,
     PayloadJSON: map[string]any{
         "duration": 180,
         "metrics":  map[string]int{"likes": 123},
