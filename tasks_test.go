@@ -284,7 +284,8 @@ func TestUpdateFeishuTaskStatusesAssignsDispatchedDevice(t *testing.T) {
 		},
 	}
 
-	if err := updateFeishuTaskStatuses(context.Background(), []*FeishuTask{task}, "dispatched", "device-xyz"); err != nil {
+	dispatchedAt := time.Date(2025, 11, 10, 10, 0, 0, 0, time.UTC)
+	if err := updateFeishuTaskStatuses(context.Background(), []*FeishuTask{task}, "dispatched", "device-xyz", &taskStatusMeta{dispatchedAt: &dispatchedAt}); err != nil {
 		t.Fatalf("updateFeishuTaskStatuses returned error: %v", err)
 	}
 	if len(client.updates) != 1 {
@@ -292,11 +293,50 @@ func TestUpdateFeishuTaskStatusesAssignsDispatchedDevice(t *testing.T) {
 	}
 	statusField := feishusvc.DefaultTargetFields.Status
 	serialField := feishusvc.DefaultTargetFields.DispatchedDevice
+	dispatchedField := feishusvc.DefaultTargetFields.DispatchedTime
 	update := client.updates[0]
 	if got := update[statusField]; got != "dispatched" {
 		t.Fatalf("expected status field=%s got=%v", statusField, got)
 	}
 	if got := update[serialField]; got != "device-xyz" {
 		t.Fatalf("expected device serial field=%s got=%v", serialField, got)
+	}
+	if got := update[dispatchedField]; strings.TrimSpace(fmt.Sprint(got)) == "" {
+		t.Fatalf("expected dispatched time field=%s to be set", dispatchedField)
+	}
+	if task.DispatchedTime == nil || !task.DispatchedTime.Equal(dispatchedAt) {
+		t.Fatalf("task dispatched time not recorded: %#v", task.DispatchedTime)
+	}
+}
+
+func TestUpdateFeishuTaskStatusesAssignsElapsedSeconds(t *testing.T) {
+	client := &recordingTargetClient{}
+	table := &feishusvc.TargetTable{
+		Ref:    feishusvc.BitableRef{AppToken: "app", TableID: "tbl"},
+		Fields: feishusvc.DefaultTargetFields,
+	}
+	dispatchedAt := time.Date(2025, 11, 10, 9, 0, 0, 0, time.UTC)
+	task := &FeishuTask{
+		TaskID:         2,
+		DispatchedTime: &dispatchedAt,
+		source: &feishuTaskSource{
+			client: client,
+			table:  table,
+		},
+	}
+	completedAt := dispatchedAt.Add(95 * time.Second)
+	if err := updateFeishuTaskStatuses(context.Background(), []*FeishuTask{task}, "success", "", &taskStatusMeta{completedAt: &completedAt}); err != nil {
+		t.Fatalf("updateFeishuTaskStatuses returned error: %v", err)
+	}
+	if len(client.updates) != 1 {
+		t.Fatalf("expected 1 update, got %d", len(client.updates))
+	}
+	elapsedField := feishusvc.DefaultTargetFields.ElapsedSeconds
+	update := client.updates[0]
+	if got := update[elapsedField]; got == nil {
+		t.Fatalf("expected elapsed seconds field=%s to be set", elapsedField)
+	}
+	if task.ElapsedSeconds != 95 {
+		t.Fatalf("expected task elapsed seconds to be 95, got %d", task.ElapsedSeconds)
 	}
 }

@@ -101,7 +101,28 @@ func (m *feishuTargetTaskManager) updateStatuses(ctx context.Context, tasks []*T
 	if err != nil {
 		return err
 	}
-	return updateFeishuTaskStatuses(ctx, feishuTasks, status, deviceSerial)
+	return updateFeishuTaskStatuses(ctx, feishuTasks, status, deviceSerial, m.statusUpdateMeta(status))
+}
+
+func (m *feishuTargetTaskManager) statusUpdateMeta(status string) *taskStatusMeta {
+	if m == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(status)
+	if trimmed == "" {
+		return nil
+	}
+	if dispatch := strings.TrimSpace(m.dispatchStatus); dispatch != "" && trimmed == dispatch {
+		ts := m.now()
+		return &taskStatusMeta{dispatchedAt: &ts}
+	}
+	success := strings.TrimSpace(m.successStatus)
+	failure := strings.TrimSpace(m.failureStatus)
+	if (success != "" && trimmed == success) || (failure != "" && trimmed == failure) {
+		ts := m.now()
+		return &taskStatusMeta{completedAt: &ts}
+	}
+	return nil
 }
 
 func (m *feishuTargetTaskManager) now() time.Time {
@@ -136,24 +157,27 @@ func (s *FeishuTaskService) FetchPendingTasks(ctx context.Context, maxTasks int)
 
 // UpdateTaskStatuses updates the Feishu rows backing the provided tasks.
 func (s *FeishuTaskService) UpdateTaskStatuses(ctx context.Context, tasks []*FeishuTask, status string) error {
-	if s == nil {
+	if s == nil || s.manager == nil {
 		return errors.New("feishu: task service not initialized")
 	}
-	return updateFeishuTaskStatuses(ctx, tasks, status, "")
+	return updateFeishuTaskStatuses(ctx, tasks, status, "", s.manager.statusUpdateMeta(status))
 }
 
 // FeishuTask represents a pending capture job fetched from Feishu bitable.
 type FeishuTask struct {
-	TaskID           int64
-	Params           string
-	App              string
-	Scene            string
-	Status           string
-	User             string
-	DeviceSerial     string
-	DispatchedDevice string
-	Datetime         *time.Time
-	DatetimeRaw      string
+	TaskID            int64
+	Params            string
+	App               string
+	Scene             string
+	Status            string
+	User              string
+	DeviceSerial      string
+	DispatchedDevice  string
+	Datetime          *time.Time
+	DatetimeRaw       string
+	DispatchedTime    *time.Time
+	DispatchedTimeRaw string
+	ElapsedSeconds    int64
 
 	source *feishuTaskSource
 }
@@ -285,17 +309,20 @@ func fetchFeishuTasksWithFilter(ctx context.Context, client targetTableClient, b
 			continue
 		}
 		tasks = append(tasks, &FeishuTask{
-			TaskID:           row.TaskID,
-			Params:           params,
-			App:              row.App,
-			Scene:            row.Scene,
-			Status:           row.Status,
-			User:             row.User,
-			DeviceSerial:     row.DeviceSerial,
-			DispatchedDevice: row.DispatchedDevice,
-			Datetime:         row.Datetime,
-			DatetimeRaw:      row.DatetimeRaw,
-			source:           source,
+			TaskID:            row.TaskID,
+			Params:            params,
+			App:               row.App,
+			Scene:             row.Scene,
+			Status:            row.Status,
+			User:              row.User,
+			DeviceSerial:      row.DeviceSerial,
+			DispatchedDevice:  row.DispatchedDevice,
+			Datetime:          row.Datetime,
+			DatetimeRaw:       row.DatetimeRaw,
+			DispatchedTime:    row.DispatchedTime,
+			DispatchedTimeRaw: row.DispatchedTimeRaw,
+			ElapsedSeconds:    row.ElapsedSeconds,
+			source:            source,
 		})
 		if limit > 0 && len(tasks) >= limit {
 			break
@@ -395,7 +422,12 @@ func buildFeishuStatusClause(fields feishusvc.TargetFields, status string) strin
 	return fmt.Sprintf("%s = \"%s\"", ref, escapeBitableFilterValue(status))
 }
 
-func updateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status string, deviceSerial string) error {
+type taskStatusMeta struct {
+	dispatchedAt *time.Time
+	completedAt  *time.Time
+}
+
+func updateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status string, deviceSerial string, meta *taskStatusMeta) error {
 	if len(tasks) == 0 {
 		return nil
 	}
@@ -414,6 +446,18 @@ func updateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 	}
 
 	var errs []string
+	var dispatchedAtValue *time.Time
+	var dispatchedAtFormatted string
+	if meta != nil && meta.dispatchedAt != nil && !meta.dispatchedAt.IsZero() {
+		dispatchedAtValue = meta.dispatchedAt
+		dispatchedAtFormatted = meta.dispatchedAt.Format(time.RFC3339)
+	}
+	var completedAtValue *time.Time
+	if meta != nil && meta.completedAt != nil && !meta.completedAt.IsZero() {
+		completed := meta.completedAt
+		completedAtValue = completed
+	}
+
 	for source, subset := range grouped {
 		statusField := strings.TrimSpace(source.table.Fields.Status)
 		if statusField == "" {
@@ -424,6 +468,8 @@ func updateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 		if deviceSerial != "" && dispatchedField == "" {
 			log.Warn().Msg("feishu target table missing DispatchedDevice column; skip binding device serial")
 		}
+		dispatchedTimeField := strings.TrimSpace(source.table.Fields.DispatchedTime)
+		elapsedField := strings.TrimSpace(source.table.Fields.ElapsedSeconds)
 
 		for _, task := range subset {
 			fields := map[string]any{
@@ -431,6 +477,17 @@ func updateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 			}
 			if updateSerial {
 				fields[dispatchedField] = deviceSerial
+			}
+			if dispatchedTimeField != "" && dispatchedAtValue != nil {
+				fields[dispatchedTimeField] = dispatchedAtFormatted
+				task.DispatchedTime = dispatchedAtValue
+				task.DispatchedTimeRaw = dispatchedAtFormatted
+			}
+			if elapsedField != "" && completedAtValue != nil {
+				if secs, ok := elapsedSecondsForTask(task, *completedAtValue); ok {
+					fields[elapsedField] = secs
+					task.ElapsedSeconds = secs
+				}
 			}
 			if err := source.client.UpdateTargetFields(ctx, source.table, task.TaskID, fields); err != nil {
 				errs = append(errs, fmt.Sprintf("task %d: %v", task.TaskID, err))
@@ -441,6 +498,20 @@ func updateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 		return errors.New(strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+func elapsedSecondsForTask(task *FeishuTask, completedAt time.Time) (int64, bool) {
+	if task == nil || task.DispatchedTime == nil || completedAt.IsZero() {
+		return 0, false
+	}
+	if completedAt.Before(*task.DispatchedTime) {
+		return 0, true
+	}
+	secs := int64(completedAt.Sub(*task.DispatchedTime) / time.Second)
+	if secs < 0 {
+		secs = 0
+	}
+	return secs, true
 }
 
 func extractFeishuTasks(tasks []*Task) ([]*FeishuTask, error) {

@@ -38,6 +38,8 @@ type TargetFields struct {
 	User             string
 	DeviceSerial     string
 	DispatchedDevice string
+	DispatchedTime   string
+	ElapsedSeconds   string
 }
 
 // DefaultTargetFields matches the schema provided in the requirements.
@@ -51,37 +53,45 @@ var DefaultTargetFields = TargetFields{
 	User:             "User",
 	DeviceSerial:     "DeviceSerial",
 	DispatchedDevice: "DispatchedDevice",
+	DispatchedTime:   "DispatchedTime",
+	ElapsedSeconds:   "ElapsedSeconds",
 }
 
 // TargetRow represents a single task row stored inside the target table.
 type TargetRow struct {
-	RecordID         string
-	TaskID           int64
-	Params           string
-	App              string
-	Scene            string
-	User             string
-	Datetime         *time.Time
-	DatetimeRaw      string
-	Status           string
-	DeviceSerial     string
-	DispatchedDevice string
+	RecordID          string
+	TaskID            int64
+	Params            string
+	App               string
+	Scene             string
+	User              string
+	Datetime          *time.Time
+	DatetimeRaw       string
+	Status            string
+	DeviceSerial      string
+	DispatchedDevice  string
+	DispatchedTime    *time.Time
+	DispatchedTimeRaw string
+	ElapsedSeconds    int64
 }
 
 // TargetRecordInput describes the payload needed to create a new record.
 // If TaskID is zero, the field is omitted so Feishu can auto-increment it.
 // DatetimeRaw takes precedence if both it and Datetime are set.
 type TargetRecordInput struct {
-	TaskID           int64
-	Params           string
-	App              string
-	Scene            string
-	Datetime         *time.Time
-	DatetimeRaw      string
-	Status           string
-	User             string
-	DeviceSerial     string
-	DispatchedDevice string
+	TaskID            int64
+	Params            string
+	App               string
+	Scene             string
+	Datetime          *time.Time
+	DatetimeRaw       string
+	Status            string
+	User              string
+	DeviceSerial      string
+	DispatchedDevice  string
+	DispatchedTime    *time.Time
+	DispatchedTimeRaw string
+	ElapsedSeconds    *int64
 }
 
 // ResultFields defines the schema for the capture result table.
@@ -202,6 +212,37 @@ func (t *TargetTable) updateLocalDispatchedDevice(taskID int64, serial string) {
 	for i := range t.Rows {
 		if t.Rows[i].TaskID == taskID {
 			t.Rows[i].DispatchedDevice = serial
+			break
+		}
+	}
+}
+
+func (t *TargetTable) updateLocalDispatchedTime(taskID int64, raw string, dispatchedAt *time.Time) {
+	if t == nil {
+		return
+	}
+	for i := range t.Rows {
+		if t.Rows[i].TaskID != taskID {
+			continue
+		}
+		t.Rows[i].DispatchedTimeRaw = raw
+		if dispatchedAt != nil {
+			ts := *dispatchedAt
+			t.Rows[i].DispatchedTime = &ts
+		} else {
+			t.Rows[i].DispatchedTime = nil
+		}
+		break
+	}
+}
+
+func (t *TargetTable) updateLocalElapsedSeconds(taskID int64, secs int64) {
+	if t == nil {
+		return
+	}
+	for i := range t.Rows {
+		if t.Rows[i].TaskID == taskID {
+			t.Rows[i].ElapsedSeconds = secs
 			break
 		}
 	}
@@ -415,6 +456,25 @@ func (c *Client) UpdateTargetFields(ctx context.Context, table *TargetTable, tas
 			table.updateLocalTargetDevice(taskID, toString(val))
 		}
 	}
+	if dispatchedTimeField := strings.TrimSpace(table.Fields.DispatchedTime); dispatchedTimeField != "" {
+		if val, ok := fields[dispatchedTimeField]; ok {
+			raw := toString(val)
+			var parsed *time.Time
+			if raw != "" {
+				if ts, err := parseBitableTime(raw); err == nil {
+					parsed = &ts
+				}
+			}
+			table.updateLocalDispatchedTime(taskID, raw, parsed)
+		}
+	}
+	if elapsedField := strings.TrimSpace(table.Fields.ElapsedSeconds); elapsedField != "" {
+		if val, ok := fields[elapsedField]; ok {
+			if secs, err := toInt64(val); err == nil {
+				table.updateLocalElapsedSeconds(taskID, secs)
+			}
+		}
+	}
 	return nil
 }
 
@@ -568,6 +628,9 @@ func (fields TargetFields) merge(override TargetFields) TargetFields {
 	if strings.TrimSpace(override.Datetime) != "" {
 		result.Datetime = override.Datetime
 	}
+	if strings.TrimSpace(override.DispatchedTime) != "" {
+		result.DispatchedTime = override.DispatchedTime
+	}
 	if strings.TrimSpace(override.Status) != "" {
 		result.Status = override.Status
 	}
@@ -579,6 +642,9 @@ func (fields TargetFields) merge(override TargetFields) TargetFields {
 	}
 	if strings.TrimSpace(override.DispatchedDevice) != "" {
 		result.DispatchedDevice = override.DispatchedDevice
+	}
+	if strings.TrimSpace(override.ElapsedSeconds) != "" {
+		result.ElapsedSeconds = override.ElapsedSeconds
 	}
 	return result
 }
@@ -646,12 +712,18 @@ func buildTargetRecordPayloads(records []TargetRecordInput, fields TargetFields)
 		if dt := formatRecordDatetimeString(rec.Datetime, rec.DatetimeRaw); dt != "" && strings.TrimSpace(fields.Datetime) != "" {
 			row[fields.Datetime] = dt
 		}
+		if dispatched := formatRecordDatetimeString(rec.DispatchedTime, rec.DispatchedTimeRaw); dispatched != "" && strings.TrimSpace(fields.DispatchedTime) != "" {
+			row[fields.DispatchedTime] = dispatched
+		}
 		if strings.TrimSpace(fields.Status) != "" && rec.Status != "" {
 			row[fields.Status] = rec.Status
 		}
 		addOptionalField(row, fields.User, rec.User)
 		addOptionalField(row, fields.DeviceSerial, rec.DeviceSerial)
 		addOptionalField(row, fields.DispatchedDevice, rec.DispatchedDevice)
+		if strings.TrimSpace(fields.ElapsedSeconds) != "" && rec.ElapsedSeconds != nil {
+			row[fields.ElapsedSeconds] = *rec.ElapsedSeconds
+		}
 		if len(row) == 0 {
 			return nil, fmt.Errorf("feishu: record %d has no fields to set", idx)
 		}
@@ -888,6 +960,21 @@ func decodeTargetRow(rec bitableRecord, fields TargetFields) (TargetRow, error) 
 		row.DatetimeRaw = dt
 		if parsed, err := parseBitableTime(dt); err == nil {
 			row.Datetime = &parsed
+		}
+	}
+
+	if dispatched := bitableOptionalString(rec.Fields, fields.DispatchedTime); dispatched != "" {
+		row.DispatchedTimeRaw = dispatched
+		if parsed, err := parseBitableTime(dispatched); err == nil {
+			row.DispatchedTime = &parsed
+		}
+	}
+
+	if field := strings.TrimSpace(fields.ElapsedSeconds); field != "" {
+		if val, ok := rec.Fields[field]; ok {
+			if secs, err := toInt64(val); err == nil {
+				row.ElapsedSeconds = secs
+			}
 		}
 	}
 
