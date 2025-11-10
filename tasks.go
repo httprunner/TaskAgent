@@ -293,6 +293,8 @@ func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient,
 				Str("app", app).
 				Str("status_filter", status).
 				Bool("include_datetime", includeDatetime).
+				Int("batch_limit", limit).
+				Int("fetch_limit", fetchLimit).
 				Int("selected", len(subset)).
 				Interface("tasks", summarizeFeishuTasks(subset)).
 				Msg("feishu tasks selected after filtering")
@@ -301,6 +303,10 @@ func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient,
 	}
 
 	if len(result) > limit {
+		log.Info().
+			Int("batch_limit", limit).
+			Int("aggregated", len(result)).
+			Msg("feishu tasks aggregated over limit; trimming to cap")
 		result = result[:limit]
 	}
 	return result, nil

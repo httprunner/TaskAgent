@@ -52,6 +52,7 @@ type JobRunner interface {
 type Config struct {
 	PollInterval    time.Duration
 	MaxTasksPerJob  int
+	MaxFetchPerPoll int
 	MaxJobRetries   int
 	JobRetryBackoff time.Duration
 	OSType          string
@@ -254,9 +255,14 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context) error {
 		return nil
 	}
 	maxTasks := len(idle) * a.cfg.MaxTasksPerJob
+	fetchCap := a.cfg.MaxFetchPerPoll
+	if fetchCap > 0 && maxTasks > fetchCap {
+		maxTasks = fetchCap
+	}
 	log.Info().
 		Int("idle_devices", len(idle)).
 		Int("max_tasks_per_job", a.cfg.MaxTasksPerJob).
+		Int("fetch_cap", fetchCap).
 		Int("max_fetch", maxTasks).
 		Msg("device pool dispatch requesting tasks")
 	tasks, err := a.taskManager.FetchAvailableTasks(ctx, maxTasks)
