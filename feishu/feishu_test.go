@@ -522,19 +522,19 @@ func TestBuildResultRecordPayloads(t *testing.T) {
 	when := time.Date(2024, 11, 8, 12, 0, 0, 0, time.UTC)
 	payloads, err := buildResultRecordPayloads([]ResultRecordInput{
 		{
-			Datetime:         &when,
-			DispatchedDevice: "dev-001",
-			App:              "netease",
-			Scene:            "batch",
-			Params:           `{"song":"foo"}`,
-			ItemID:           "video123",
-			ItemCaption:      "Test Video",
-			ItemURL:          "https://cdn.example.com/video123.mp4",
-			UserName:         "tester",
-			UserID:           "author-1",
-			Tags:             "tag1,tag2",
-			SubTaskID:        "sub-1",
-			PayloadJSON:      map[string]any{"foo": "bar"},
+			Datetime:     &when,
+			DeviceSerial: "dev-001",
+			App:          "netease",
+			Scene:        "batch",
+			Params:       `{"song":"foo"}`,
+			ItemID:       "video123",
+			ItemCaption:  "Test Video",
+			ItemURL:      "https://cdn.example.com/video123.mp4",
+			UserName:     "tester",
+			UserID:       "author-1",
+			Tags:         "tag1,tag2",
+			SubTaskID:    "sub-1",
+			PayloadJSON:  map[string]any{"foo": "bar"},
 		},
 	}, DefaultResultFields)
 	if err != nil {
@@ -560,7 +560,7 @@ func TestBuildResultRecordPayloads(t *testing.T) {
 		t.Fatalf("unexpected payload content %#v", decoded)
 	}
 	if _, err := buildResultRecordPayloads([]ResultRecordInput{
-		{DispatchedDevice: "dev", PayloadJSON: "{not json}"},
+		{DeviceSerial: "dev", PayloadJSON: "{not json}"},
 	}, DefaultResultFields); err == nil {
 		t.Fatalf("expected error for invalid payload json")
 	}
@@ -599,19 +599,19 @@ func TestCreateResultRecords(t *testing.T) {
 
 	records := []ResultRecordInput{
 		{
-			DispatchedDevice: "dev-1",
-			App:              "netease",
-			Scene:            "auto",
-			Params:           "{}",
-			ItemID:           "item-1",
-			PayloadJSON:      map[string]any{"id": 1},
+			DeviceSerial: "dev-1",
+			App:          "netease",
+			Scene:        "auto",
+			Params:       "{}",
+			ItemID:       "item-1",
+			PayloadJSON:  map[string]any{"id": 1},
 		},
 		{
-			DispatchedDevice: "dev-2",
-			App:              "douyin",
-			Scene:            "manual",
-			ItemID:           "item-2",
-			PayloadJSON:      json.RawMessage(`{"id":2}`),
+			DeviceSerial: "dev-2",
+			App:          "douyin",
+			Scene:        "manual",
+			ItemID:       "item-2",
+			PayloadJSON:  json.RawMessage(`{"id":2}`),
 		},
 	}
 	ids, err := client.CreateResultRecords(ctx, liveResultBitableURL, records, nil)
@@ -632,8 +632,8 @@ func TestCreateResultRecords(t *testing.T) {
 	if !ok {
 		t.Fatalf("fields payload type %T", payloadRecords[0]["fields"])
 	}
-	if first[DefaultResultFields.DispatchedDevice] != "dev-1" {
-		t.Fatalf("unexpected dispatched device %#v", first[DefaultResultFields.DispatchedDevice])
+	if first[DefaultResultFields.DeviceSerial] != "dev-1" {
+		t.Fatalf("unexpected dispatched device %#v", first[DefaultResultFields.DeviceSerial])
 	}
 	if _, ok := first[DefaultResultFields.PayloadJSON].(string); !ok {
 		t.Fatalf("payload json should be string, got %#v", first[DefaultResultFields.PayloadJSON])
@@ -672,9 +672,9 @@ func TestCreateResultRecordSingle(t *testing.T) {
 	}
 
 	id, err := client.CreateResultRecord(ctx, liveResultBitableURL, ResultRecordInput{
-		DispatchedDevice: "dev-only",
-		App:              "netease",
-		PayloadJSON:      map[string]any{"ok": true},
+		DeviceSerial: "dev-only",
+		App:          "netease",
+		PayloadJSON:  map[string]any{"ok": true},
 	}, nil)
 	if err != nil {
 		t.Fatalf("CreateResultRecord returned error: %v", err)
@@ -689,8 +689,8 @@ func TestCreateResultRecordSingle(t *testing.T) {
 	if !ok {
 		t.Fatalf("fields payload type %T", capturedPayload["fields"])
 	}
-	if fields[DefaultResultFields.DispatchedDevice] != "dev-only" {
-		t.Fatalf("unexpected dispatched device %#v", fields[DefaultResultFields.DispatchedDevice])
+	if fields[DefaultResultFields.DeviceSerial] != "dev-only" {
+		t.Fatalf("unexpected dispatched device %#v", fields[DefaultResultFields.DeviceSerial])
 	}
 	if _, ok := fields[DefaultResultFields.PayloadJSON].(string); !ok {
 		t.Fatalf("payload json should be string, got %#v", fields[DefaultResultFields.PayloadJSON])
@@ -956,18 +956,18 @@ func TestResultRecordCreateLive(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	record := ResultRecordInput{
-		Datetime:         &now,
-		DispatchedDevice: "cli-live",
-		App:              "anygrab-live",
-		Scene:            "result-log",
-		Params:           fmt.Sprintf("{\"ts\":%d}", now.Unix()),
-		ItemID:           fmt.Sprintf("live-result-%d", now.UnixNano()),
-		ItemCaption:      "integration test capture",
-		ItemURL:          "https://cdn.example.com/live-test.mp4",
-		UserName:         "test-suite",
-		UserID:           "suite",
-		Tags:             "integration,auto",
-		SubTaskID:        fmt.Sprintf("sub-%d", now.UnixNano()),
+		Datetime:     &now,
+		DeviceSerial: "cli-live",
+		App:          "anygrab-live",
+		Scene:        "result-log",
+		Params:       fmt.Sprintf("{\"ts\":%d}", now.Unix()),
+		ItemID:       fmt.Sprintf("live-result-%d", now.UnixNano()),
+		ItemCaption:  "integration test capture",
+		ItemURL:      "https://cdn.example.com/live-test.mp4",
+		UserName:     "test-suite",
+		UserID:       "suite",
+		Tags:         "integration,auto",
+		SubTaskID:    fmt.Sprintf("sub-%d", now.UnixNano()),
 		PayloadJSON: map[string]any{
 			"ts":     now.UnixMilli(),
 			"status": "ok",

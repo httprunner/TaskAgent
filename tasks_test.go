@@ -301,8 +301,14 @@ func TestUpdateFeishuTaskStatusesAssignsDispatchedDevice(t *testing.T) {
 	if got := update[serialField]; got != "device-xyz" {
 		t.Fatalf("expected device serial field=%s got=%v", serialField, got)
 	}
-	if got := update[dispatchedField]; strings.TrimSpace(fmt.Sprint(got)) == "" {
+	expectedMillis := dispatchedAt.UTC().UnixMilli()
+	gotAny, ok := update[dispatchedField]
+	if !ok {
 		t.Fatalf("expected dispatched time field=%s to be set", dispatchedField)
+	}
+	gotMillis, ok := gotAny.(int64)
+	if !ok || gotMillis != expectedMillis {
+		t.Fatalf("expected dispatched time field=%s to be %d, got %v", dispatchedField, expectedMillis, gotAny)
 	}
 	if task.DispatchedTime == nil || !task.DispatchedTime.Equal(dispatchedAt) {
 		t.Fatalf("task dispatched time not recorded: %#v", task.DispatchedTime)

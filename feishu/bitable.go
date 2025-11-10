@@ -3,7 +3,6 @@ package feishu
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -11,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 const (
@@ -96,38 +97,38 @@ type TargetRecordInput struct {
 
 // ResultFields defines the schema for the capture result table.
 type ResultFields struct {
-	Datetime         string
-	DispatchedDevice string
-	App              string
-	Scene            string
-	Params           string
-	ItemID           string
-	ItemCaption      string
-	ItemURL          string
-	ItemDuration     string
-	UserName         string
-	UserID           string
-	Tags             string
-	SubTaskID        string
-	PayloadJSON      string
+	Datetime     string
+	DeviceSerial string
+	App          string
+	Scene        string
+	Params       string
+	ItemID       string
+	ItemCaption  string
+	ItemURL      string
+	ItemDuration string
+	UserName     string
+	UserID       string
+	Tags         string
+	SubTaskID    string
+	PayloadJSON  string
 }
 
 // DefaultResultFields matches the schema required by the capture result table.
 var DefaultResultFields = ResultFields{
-	Datetime:         "Datetime",
-	DispatchedDevice: "DispatchedDevice",
-	App:              "App",
-	Scene:            "Scene",
-	Params:           "Params",
-	ItemID:           "ItemID",
-	ItemCaption:      "ItemCaption",
-	ItemURL:          "ItemURL",
-	ItemDuration:     "ItemDuration",
-	UserName:         "UserName",
-	UserID:           "UserID",
-	Tags:             "Tags",
-	SubTaskID:        "SubTaskID",
-	PayloadJSON:      "PayloadJSON",
+	Datetime:     "Datetime",
+	DeviceSerial: "DeviceSerial",
+	App:          "App",
+	Scene:        "Scene",
+	Params:       "Params",
+	ItemID:       "ItemID",
+	ItemCaption:  "ItemCaption",
+	ItemURL:      "ItemURL",
+	ItemDuration: "ItemDuration",
+	UserName:     "UserName",
+	UserID:       "UserID",
+	Tags:         "Tags",
+	SubTaskID:    "SubTaskID",
+	PayloadJSON:  "PayloadJSON",
 }
 
 // ResultRecordInput contains the capture metadata uploaded to the result table.
@@ -137,7 +138,7 @@ var DefaultResultFields = ResultFields{
 type ResultRecordInput struct {
 	Datetime            *time.Time
 	DatetimeRaw         string
-	DispatchedDevice    string
+	DeviceSerial        string
 	App                 string
 	Scene               string
 	Params              string
@@ -267,8 +268,14 @@ func IsBitableURL(raw string) bool {
 }
 
 // ParseBitableURL extracts app token, table id and view id from Feishu Bitable links.
-func ParseBitableURL(raw string) (BitableRef, error) {
-	ref := BitableRef{RawURL: strings.TrimSpace(raw)}
+func ParseBitableURL(raw string) (ref BitableRef, err error) {
+	defer func() {
+		if err != nil {
+			err = errors.Wrap(err, "parse bitable url failed")
+		}
+	}()
+
+	ref = BitableRef{RawURL: strings.TrimSpace(raw)}
 	if ref.RawURL == "" {
 		return ref, errors.New("empty url")
 	}
@@ -389,7 +396,13 @@ func (c *Client) FetchTargetTableWithOptions(ctx context.Context, rawURL string,
 	return table, nil
 }
 
-func (c *Client) ensureBitableAppToken(ctx context.Context, ref *BitableRef) error {
+func (c *Client) ensureBitableAppToken(ctx context.Context, ref *BitableRef) (err error) {
+	defer func() {
+		if err != nil {
+			err = errors.Wrap(err, "ensure bitable app token failed")
+		}
+	}()
+
 	if ref == nil {
 		return errors.New("feishu: bitable reference is nil")
 	}
@@ -654,8 +667,8 @@ func (fields ResultFields) merge(override ResultFields) ResultFields {
 	if strings.TrimSpace(override.Datetime) != "" {
 		result.Datetime = override.Datetime
 	}
-	if strings.TrimSpace(override.DispatchedDevice) != "" {
-		result.DispatchedDevice = override.DispatchedDevice
+	if strings.TrimSpace(override.DeviceSerial) != "" {
+		result.DeviceSerial = override.DeviceSerial
 	}
 	if strings.TrimSpace(override.App) != "" {
 		result.App = override.App
@@ -732,8 +745,14 @@ func buildTargetRecordPayloads(records []TargetRecordInput, fields TargetFields)
 	return result, nil
 }
 
-func buildResultRecordPayloads(records []ResultRecordInput, fields ResultFields) ([]map[string]any, error) {
-	result := make([]map[string]any, 0, len(records))
+func buildResultRecordPayloads(records []ResultRecordInput, fields ResultFields) (result []map[string]any, err error) {
+	defer func() {
+		if err != nil {
+			err = errors.Wrap(err, "build result record payloads failed")
+		}
+	}()
+
+	result = make([]map[string]any, 0, len(records))
 	for idx, rec := range records {
 		row := make(map[string]any)
 		if strings.TrimSpace(fields.Datetime) != "" {
@@ -743,7 +762,7 @@ func buildResultRecordPayloads(records []ResultRecordInput, fields ResultFields)
 				row[fields.Datetime] = ts
 			}
 		}
-		addOptionalField(row, fields.DispatchedDevice, rec.DispatchedDevice)
+		addOptionalField(row, fields.DeviceSerial, rec.DeviceSerial)
 		addOptionalField(row, fields.App, rec.App)
 		addOptionalField(row, fields.Scene, rec.Scene)
 		addOptionalField(row, fields.Params, rec.Params)
@@ -1134,7 +1153,13 @@ func (c *Client) updateBitableRecord(ctx context.Context, ref BitableRef, record
 	return nil
 }
 
-func (c *Client) createBitableRecord(ctx context.Context, ref BitableRef, fields map[string]any) (string, error) {
+func (c *Client) createBitableRecord(ctx context.Context, ref BitableRef, fields map[string]any) (recordID string, err error) {
+	defer func() {
+		if err != nil {
+			err = errors.Wrap(err, "create bitable record failed")
+		}
+	}()
+
 	if len(fields) == 0 {
 		return "", errors.New("feishu: no fields provided for creation")
 	}
@@ -1168,7 +1193,13 @@ func (c *Client) createBitableRecord(ctx context.Context, ref BitableRef, fields
 	return resp.Data.Record.RecordID, nil
 }
 
-func (c *Client) batchCreateBitableRecords(ctx context.Context, ref BitableRef, records []map[string]any) ([]string, error) {
+func (c *Client) batchCreateBitableRecords(ctx context.Context, ref BitableRef, records []map[string]any) (recordIDs []string, err error) {
+	defer func() {
+		if err != nil {
+			err = errors.Wrap(err, "batch create bitable records failed")
+		}
+	}()
+
 	if len(records) == 0 {
 		return nil, errors.New("feishu: no records provided for batch create")
 	}

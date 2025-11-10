@@ -46,7 +46,7 @@ recordID, err := client.CreateTargetRecord(ctx, taskTableURL, feishu.TargetRecor
 根据需求新增的结果表（表 ID `tblzoZuR6aminfye`）由以下字段组成：
 
 - Datetime（毫秒时间戳或可解析时间字符串）
-- DispatchedDevice / App / Scene / Params
+- DeviceSerial / App / Scene / Params
 - ItemID / ItemCaption / ItemURL / ItemDuration（秒）
 - UserName / UserID / Tags
 - SubTaskID
@@ -57,7 +57,7 @@ API 使用 `ResultFields` / `ResultRecordInput`：
 ```go
 durationSeconds := 180.0
 resID, err := client.CreateResultRecord(ctx, resultTableURL, feishu.ResultRecordInput{
-    DispatchedDevice: "dev-001",
+    DeviceSerial: "dev-001",
     App:          "douyin",
     Scene:        "ugc",
     Params:       `{"task":42}`,

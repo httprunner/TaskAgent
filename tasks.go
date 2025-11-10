@@ -2,13 +2,13 @@ package pool
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	feishusvc "github.com/httprunner/TaskAgent/feishu"
+	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 )
 
@@ -82,7 +82,15 @@ func (m *feishuTargetTaskManager) OnTasksDispatched(ctx context.Context, deviceS
 	if strings.TrimSpace(m.dispatchStatus) == "" {
 		return nil
 	}
-	return m.updateStatuses(ctx, tasks, m.dispatchStatus, deviceSerial)
+	if err := m.updateStatuses(ctx, tasks, m.dispatchStatus, deviceSerial); err != nil {
+		return err
+	}
+	log.Info().
+		Str("device_serial", strings.TrimSpace(deviceSerial)).
+		Int("task_count", len(tasks)).
+		Str("status", strings.TrimSpace(m.dispatchStatus)).
+		Msg("feishu tasks marked as dispatched")
+	return nil
 }
 
 func (m *feishuTargetTaskManager) OnTasksCompleted(ctx context.Context, deviceSerial string, tasks []*Task, jobErr error) error {
@@ -93,13 +101,23 @@ func (m *feishuTargetTaskManager) OnTasksCompleted(ctx context.Context, deviceSe
 	if strings.TrimSpace(status) == "" {
 		return nil
 	}
-	return m.updateStatuses(ctx, tasks, status, deviceSerial)
+	if err := m.updateStatuses(ctx, tasks, status, deviceSerial); err != nil {
+		return err
+	}
+	resultStatus := strings.TrimSpace(status)
+	log.Info().
+		Str("device_serial", strings.TrimSpace(deviceSerial)).
+		Int("task_count", len(tasks)).
+		Str("status", resultStatus).
+		Bool("job_error", jobErr != nil).
+		Msg("feishu tasks completion status updated")
+	return nil
 }
 
 func (m *feishuTargetTaskManager) updateStatuses(ctx context.Context, tasks []*Task, status, deviceSerial string) error {
 	feishuTasks, err := extractFeishuTasks(tasks)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "extract feishu tasks failed")
 	}
 	return updateFeishuTaskStatuses(ctx, feishuTasks, status, deviceSerial, m.statusUpdateMeta(status))
 }
@@ -295,7 +313,7 @@ func fetchFeishuTasksWithFilter(ctx context.Context, client targetTableClient, b
 	}
 	table, err := client.FetchTargetTableWithOptions(ctx, bitableURL, nil, opts)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "fetch target table with options failed")
 	}
 	if table == nil || len(table.Rows) == 0 {
 		return nil, nil
@@ -447,10 +465,14 @@ func updateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 
 	var errs []string
 	var dispatchedAtValue *time.Time
-	var dispatchedAtFormatted string
+	var dispatchedAtMillis int64
+	var dispatchedAtRaw string
+	var hasDispatchedAt bool
 	if meta != nil && meta.dispatchedAt != nil && !meta.dispatchedAt.IsZero() {
 		dispatchedAtValue = meta.dispatchedAt
-		dispatchedAtFormatted = meta.dispatchedAt.Format(time.RFC3339)
+		dispatchedAtMillis = meta.dispatchedAt.UTC().UnixMilli()
+		dispatchedAtRaw = strconv.FormatInt(dispatchedAtMillis, 10)
+		hasDispatchedAt = true
 	}
 	var completedAtValue *time.Time
 	if meta != nil && meta.completedAt != nil && !meta.completedAt.IsZero() {
@@ -478,10 +500,10 @@ func updateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 			if updateSerial {
 				fields[dispatchedField] = deviceSerial
 			}
-			if dispatchedTimeField != "" && dispatchedAtValue != nil {
-				fields[dispatchedTimeField] = dispatchedAtFormatted
+			if dispatchedTimeField != "" && hasDispatchedAt {
+				fields[dispatchedTimeField] = dispatchedAtMillis
 				task.DispatchedTime = dispatchedAtValue
-				task.DispatchedTimeRaw = dispatchedAtFormatted
+				task.DispatchedTimeRaw = dispatchedAtRaw
 			}
 			if elapsedField != "" && completedAtValue != nil {
 				if secs, ok := elapsedSecondsForTask(task, *completedAtValue); ok {

@@ -194,16 +194,19 @@ func (a *DevicePoolAgent) RunOnce(ctx context.Context) error {
 
 func (a *DevicePoolAgent) runCycle(ctx context.Context) error {
 	if err := a.refreshDevices(ctx); err != nil {
-		return err
+		return errors.Wrap(err, "refresh devices failed")
 	}
-	return a.dispatch(ctx)
+	if err := a.dispatch(ctx); err != nil {
+		return errors.Wrap(err, "dispatch failed")
+	}
+	return nil
 }
 
 func (a *DevicePoolAgent) refreshDevices(ctx context.Context) error {
 	log.Info().Msg("refresh devices for device pool agent")
 	serials, err := a.deviceProvider.ListDevices(ctx)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "list devices failed")
 	}
 	now := time.Now()
 	seen := make(map[string]struct{}, len(serials))
@@ -258,7 +261,7 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context) error {
 		Msg("device pool dispatch requesting tasks")
 	tasks, err := a.taskManager.FetchAvailableTasks(ctx, maxTasks)
 	if err != nil {
-		return err
+		return errors.Wrap(err, "fetch available tasks failed")
 	}
 	if len(tasks) == 0 {
 		log.Info().
