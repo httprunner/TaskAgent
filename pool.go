@@ -32,7 +32,7 @@ type DeviceProvider interface {
 
 // TaskManager owns task lifecycle hooks (fetch/dispatch/complete).
 type TaskManager interface {
-	FetchAvailableTasks(ctx context.Context, maxTasks int) ([]*Task, error)
+	FetchAvailableTasks(ctx context.Context, app string, limit int) ([]*Task, error)
 	OnTasksDispatched(ctx context.Context, deviceSerial string, tasks []*Task) error
 	OnTasksCompleted(ctx context.Context, deviceSerial string, tasks []*Task, jobErr error) error
 }
@@ -58,7 +58,7 @@ type Config struct {
 	OSType          string
 	Provider        DeviceProvider
 	TaskManager     TaskManager
-	FeishuConfig    *FeishuTaskConfig
+	BitableURL      string
 }
 
 // DevicePoolAgent coordinates plug-and-play devices with a task source.
@@ -123,7 +123,7 @@ func NewDevicePoolAgent(cfg Config, runner JobRunner) (*DevicePoolAgent, error) 
 	manager := cfg.TaskManager
 	if manager == nil {
 		var err error
-		manager, err = defaultTaskManager(cfg)
+		manager, err = NewFeishuTaskClient(cfg.BitableURL)
 		if err != nil {
 			return nil, err
 		}
@@ -155,20 +155,13 @@ func defaultDeviceProvider(cfg Config) (DeviceProvider, error) {
 	}
 }
 
-func defaultTaskManager(cfg Config) (TaskManager, error) {
-	if cfg.FeishuConfig != nil {
-		return newFeishuTaskManager(cfg.FeishuConfig)
-	}
-	return nil, nil
-}
-
 // Start begins the polling loop until the context is cancelled.
-func (a *DevicePoolAgent) Start(ctx context.Context) error {
+func (a *DevicePoolAgent) Start(ctx context.Context, app string) error {
 	log.Info().Msg("start device pool agent")
 	if ctx == nil {
 		return errors.New("context cannot be nil")
 	}
-	if err := a.runCycle(ctx); err != nil {
+	if err := a.runCycle(ctx, app); err != nil {
 		log.Error().Err(err).Msg("device pool initial cycle failed")
 	}
 
@@ -181,7 +174,7 @@ func (a *DevicePoolAgent) Start(ctx context.Context) error {
 			a.backgroundGroup.Wait()
 			return nil
 		case <-ticker.C:
-			if err := a.runCycle(ctx); err != nil {
+			if err := a.runCycle(ctx, app); err != nil {
 				log.Error().Err(err).Msg("device pool cycle failed")
 			}
 		}
@@ -189,15 +182,15 @@ func (a *DevicePoolAgent) Start(ctx context.Context) error {
 }
 
 // RunOnce exposes a single refresh/dispatch iteration (primarily for tests).
-func (a *DevicePoolAgent) RunOnce(ctx context.Context) error {
-	return a.runCycle(ctx)
+func (a *DevicePoolAgent) RunOnce(ctx context.Context, app string) error {
+	return a.runCycle(ctx, app)
 }
 
-func (a *DevicePoolAgent) runCycle(ctx context.Context) error {
+func (a *DevicePoolAgent) runCycle(ctx context.Context, app string) error {
 	if err := a.refreshDevices(ctx); err != nil {
 		return errors.Wrap(err, "refresh devices failed")
 	}
-	if err := a.dispatch(ctx); err != nil {
+	if err := a.dispatch(ctx, app); err != nil {
 		return errors.Wrap(err, "dispatch failed")
 	}
 	return nil
@@ -248,7 +241,7 @@ func (a *DevicePoolAgent) refreshDevices(ctx context.Context) error {
 	return nil
 }
 
-func (a *DevicePoolAgent) dispatch(ctx context.Context) error {
+func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 	idle := a.idleDevices()
 	if len(idle) == 0 {
 		log.Info().Msg("device pool dispatch skipped: no idle devices")
@@ -265,7 +258,7 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context) error {
 		Int("fetch_cap", fetchCap).
 		Int("max_fetch", maxTasks).
 		Msg("device pool dispatch requesting tasks")
-	tasks, err := a.taskManager.FetchAvailableTasks(ctx, maxTasks)
+	tasks, err := a.taskManager.FetchAvailableTasks(ctx, app, maxTasks)
 	if err != nil {
 		return errors.Wrap(err, "fetch available tasks failed")
 	}

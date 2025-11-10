@@ -8,60 +8,35 @@ import (
 	"strings"
 	"time"
 
-	feishusvc "github.com/httprunner/TaskAgent/feishu"
+	"github.com/httprunner/TaskAgent/feishu"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 )
 
-// FeishuTaskConfig describes how to pull/update tasks from Feishu bitable.
-type FeishuTaskConfig struct {
-	BitableURL     string
-	App            string
-	DispatchStatus string
-	SuccessStatus  string
-	FailureStatus  string
-}
-
-type feishuTargetTaskManager struct {
-	client         *feishusvc.Client
-	bitableURL     string
-	app            string
-	dispatchStatus string
-	successStatus  string
-	failureStatus  string
-	clock          func() time.Time
-}
-
-func newFeishuTaskManager(cfg *FeishuTaskConfig) (TaskManager, error) {
-	return newFeishuTargetTaskManager(cfg)
-}
-
-func newFeishuTargetTaskManager(cfg *FeishuTaskConfig) (*feishuTargetTaskManager, error) {
-	if cfg == nil {
-		return nil, errors.New("feishu task config is nil")
-	}
-	if strings.TrimSpace(cfg.BitableURL) == "" {
+// NewFeishuTaskClient constructs a reusable client for fetching and updating Feishu tasks.
+func NewFeishuTaskClient(bitableURL string) (*FeishuTaskClient, error) {
+	if strings.TrimSpace(bitableURL) == "" {
 		return nil, errors.New("feishu task config missing bitable url")
 	}
-	if strings.TrimSpace(cfg.App) == "" {
-		return nil, errors.New("feishu task config missing app")
-	}
-	client, err := feishusvc.NewClientFromEnv()
+
+	client, err := feishu.NewClientFromEnv()
 	if err != nil {
 		return nil, err
 	}
-	return &feishuTargetTaskManager{
-		client:         client,
-		bitableURL:     cfg.BitableURL,
-		app:            cfg.App,
-		dispatchStatus: cfg.DispatchStatus,
-		successStatus:  cfg.SuccessStatus,
-		failureStatus:  cfg.FailureStatus,
+	return &FeishuTaskClient{
+		client:     client,
+		bitableURL: bitableURL,
 	}, nil
 }
 
-func (m *feishuTargetTaskManager) FetchAvailableTasks(ctx context.Context, maxTasks int) ([]*Task, error) {
-	feishuTasks, err := m.fetchFeishuTasks(ctx, maxTasks)
+type FeishuTaskClient struct {
+	client     *feishu.Client
+	bitableURL string
+	clock      func() time.Time
+}
+
+func (c *FeishuTaskClient) FetchAvailableTasks(ctx context.Context, app string, limit int) ([]*Task, error) {
+	feishuTasks, err := fetchTodayPendingFeishuTasks(ctx, c.client, c.bitableURL, app, limit, c.now())
 	if err != nil {
 		return nil, err
 	}
@@ -72,37 +47,41 @@ func (m *feishuTargetTaskManager) FetchAvailableTasks(ctx context.Context, maxTa
 	return result, nil
 }
 
-func (m *feishuTargetTaskManager) fetchFeishuTasks(ctx context.Context, maxTasks int) ([]*FeishuTask, error) {
-	if m == nil {
-		return nil, errors.New("feishu: task manager is nil")
+func (c *FeishuTaskClient) FetchPendingTasks(ctx context.Context, app string, limit int) ([]*FeishuTask, error) {
+	if c == nil {
+		return nil, errors.New("feishu: task client is nil")
 	}
-	return fetchTodayPendingFeishuTasks(ctx, m.client, m.bitableURL, m.app, maxTasks, m.now())
+	return fetchTodayPendingFeishuTasks(ctx, c.client, c.bitableURL, app, limit, c.now())
 }
 
-func (m *feishuTargetTaskManager) OnTasksDispatched(ctx context.Context, deviceSerial string, tasks []*Task) error {
-	if strings.TrimSpace(m.dispatchStatus) == "" {
-		return nil
+func (c *FeishuTaskClient) UpdateTaskStatuses(ctx context.Context, tasks []*FeishuTask, status string) error {
+	if c == nil {
+		return errors.New("feishu: task client is nil")
 	}
-	if err := m.updateStatuses(ctx, tasks, m.dispatchStatus, deviceSerial); err != nil {
+	return updateFeishuTaskStatuses(ctx, tasks, status, "", c.statusUpdateMeta(status))
+}
+
+func (c *FeishuTaskClient) OnTasksDispatched(ctx context.Context, deviceSerial string, tasks []*Task) error {
+	if err := c.updateStatuses(ctx, tasks, feishu.StatusDispatched, deviceSerial); err != nil {
 		return err
 	}
 	log.Info().
 		Str("device_serial", strings.TrimSpace(deviceSerial)).
 		Int("task_count", len(tasks)).
-		Str("status", strings.TrimSpace(m.dispatchStatus)).
+		Str("status", feishu.StatusDispatched).
 		Msg("feishu tasks marked as dispatched")
 	return nil
 }
 
-func (m *feishuTargetTaskManager) OnTasksCompleted(ctx context.Context, deviceSerial string, tasks []*Task, jobErr error) error {
-	status := m.successStatus
+func (c *FeishuTaskClient) OnTasksCompleted(ctx context.Context, deviceSerial string, tasks []*Task, jobErr error) error {
+	status := feishu.StatusSuccess
 	if jobErr != nil {
-		status = m.failureStatus
+		status = feishu.StatusFailed
 	}
 	if strings.TrimSpace(status) == "" {
 		return nil
 	}
-	if err := m.updateStatuses(ctx, tasks, status, deviceSerial); err != nil {
+	if err := c.updateStatuses(ctx, tasks, status, deviceSerial); err != nil {
 		return err
 	}
 	resultStatus := strings.TrimSpace(status)
@@ -115,71 +94,38 @@ func (m *feishuTargetTaskManager) OnTasksCompleted(ctx context.Context, deviceSe
 	return nil
 }
 
-func (m *feishuTargetTaskManager) updateStatuses(ctx context.Context, tasks []*Task, status, deviceSerial string) error {
+func (c *FeishuTaskClient) updateStatuses(ctx context.Context, tasks []*Task, status, deviceSerial string) error {
 	feishuTasks, err := extractFeishuTasks(tasks)
 	if err != nil {
 		return errors.Wrap(err, "extract feishu tasks failed")
 	}
-	return updateFeishuTaskStatuses(ctx, feishuTasks, status, deviceSerial, m.statusUpdateMeta(status))
+	return updateFeishuTaskStatuses(ctx, feishuTasks, status, deviceSerial, c.statusUpdateMeta(status))
 }
 
-func (m *feishuTargetTaskManager) statusUpdateMeta(status string) *taskStatusMeta {
-	if m == nil {
+func (c *FeishuTaskClient) statusUpdateMeta(status string) *taskStatusMeta {
+	if c == nil {
 		return nil
 	}
 	trimmed := strings.TrimSpace(status)
 	if trimmed == "" {
 		return nil
 	}
-	if dispatch := strings.TrimSpace(m.dispatchStatus); dispatch != "" && trimmed == dispatch {
-		ts := m.now()
+	if trimmed == feishu.StatusDispatched {
+		ts := c.now()
 		return &taskStatusMeta{dispatchedAt: &ts}
 	}
-	success := strings.TrimSpace(m.successStatus)
-	failure := strings.TrimSpace(m.failureStatus)
-	if (success != "" && trimmed == success) || (failure != "" && trimmed == failure) {
-		ts := m.now()
+	if trimmed == feishu.StatusSuccess || trimmed == feishu.StatusFailed {
+		ts := c.now()
 		return &taskStatusMeta{completedAt: &ts}
 	}
 	return nil
 }
 
-func (m *feishuTargetTaskManager) now() time.Time {
-	if m.clock != nil {
-		return m.clock()
+func (c *FeishuTaskClient) now() time.Time {
+	if c.clock != nil {
+		return c.clock()
 	}
 	return time.Now()
-}
-
-// FeishuTaskService exposes reusable helpers for fetching and updating Feishu bitable tasks
-// outside of the device pool workflow.
-type FeishuTaskService struct {
-	manager *feishuTargetTaskManager
-}
-
-// NewFeishuTaskService builds a standalone Feishu task service using the provided config.
-func NewFeishuTaskService(cfg *FeishuTaskConfig) (*FeishuTaskService, error) {
-	manager, err := newFeishuTargetTaskManager(cfg)
-	if err != nil {
-		return nil, err
-	}
-	return &FeishuTaskService{manager: manager}, nil
-}
-
-// FetchPendingTasks returns pending Feishu tasks capped by maxTasks.
-func (s *FeishuTaskService) FetchPendingTasks(ctx context.Context, maxTasks int) ([]*FeishuTask, error) {
-	if s == nil || s.manager == nil {
-		return nil, errors.New("feishu: task service not initialized")
-	}
-	return s.manager.fetchFeishuTasks(ctx, maxTasks)
-}
-
-// UpdateTaskStatuses updates the Feishu rows backing the provided tasks.
-func (s *FeishuTaskService) UpdateTaskStatuses(ctx context.Context, tasks []*FeishuTask, status string) error {
-	if s == nil || s.manager == nil {
-		return errors.New("feishu: task service not initialized")
-	}
-	return updateFeishuTaskStatuses(ctx, tasks, status, "", s.manager.statusUpdateMeta(status))
 }
 
 // FeishuTask represents a pending capture job fetched from Feishu bitable.
@@ -203,13 +149,13 @@ type FeishuTask struct {
 
 type feishuTaskSource struct {
 	client targetTableClient
-	table  *feishusvc.TargetTable
+	table  *feishu.TargetTable
 }
 
 type targetTableClient interface {
-	FetchTargetTableWithOptions(ctx context.Context, rawURL string, override *feishusvc.TargetFields, opts *feishusvc.TargetQueryOptions) (*feishusvc.TargetTable, error)
-	UpdateTargetStatus(ctx context.Context, table *feishusvc.TargetTable, taskID int64, newStatus string) error
-	UpdateTargetFields(ctx context.Context, table *feishusvc.TargetTable, taskID int64, fields map[string]any) error
+	FetchTargetTableWithOptions(ctx context.Context, rawURL string, override *feishu.TargetFields, opts *feishu.TargetQueryOptions) (*feishu.TargetTable, error)
+	UpdateTargetStatus(ctx context.Context, table *feishu.TargetTable, taskID int64, newStatus string) error
+	UpdateTargetFields(ctx context.Context, table *feishu.TargetTable, taskID int64, fields map[string]any) error
 }
 
 const (
@@ -233,7 +179,7 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient,
 	loc := now.Location()
 	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	dayEnd := dayStart.Add(24 * time.Hour)
-	fields := feishusvc.DefaultTargetFields
+	fields := feishu.DefaultTargetFields
 
 	statusPriority := []string{"", "failed"}
 
@@ -260,7 +206,7 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient,
 	return result, nil
 }
 
-func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient, bitableURL string, fields feishusvc.TargetFields, app string, dayStart, dayEnd, now time.Time, statuses []string, limit int, includeDatetime bool) ([]*FeishuTask, error) {
+func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient, bitableURL string, fields feishu.TargetFields, app string, dayStart, dayEnd, now time.Time, statuses []string, limit int, includeDatetime bool) ([]*FeishuTask, error) {
 	if len(statuses) == 0 {
 		return nil, nil
 	}
@@ -319,7 +265,7 @@ func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient,
 }
 
 func fetchFeishuTasksWithFilter(ctx context.Context, client targetTableClient, bitableURL, filter string, limit int) ([]*FeishuTask, error) {
-	opts := &feishusvc.TargetQueryOptions{
+	opts := &feishu.TargetQueryOptions{
 		Filter: strings.TrimSpace(filter),
 		Limit:  limit,
 	}
@@ -410,7 +356,7 @@ func summarizeFeishuTasks(tasks []*FeishuTask) []map[string]any {
 	return result
 }
 
-func buildFeishuFilterExpression(fields feishusvc.TargetFields, app string, start, end time.Time, status string, includeDatetime bool) string {
+func buildFeishuFilterExpression(fields feishu.TargetFields, app string, start, end time.Time, status string, includeDatetime bool) string {
 	var clauses []string
 
 	if field := strings.TrimSpace(fields.App); field != "" && strings.TrimSpace(app) != "" {
@@ -440,7 +386,7 @@ func buildFeishuFilterExpression(fields feishusvc.TargetFields, app string, star
 	}
 }
 
-func buildFeishuStatusClause(fields feishusvc.TargetFields, status string) string {
+func buildFeishuStatusClause(fields feishu.TargetFields, status string) string {
 	field := strings.TrimSpace(fields.Status)
 	if field == "" {
 		return ""

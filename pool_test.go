@@ -33,7 +33,7 @@ type stubTaskManager struct {
 	lastErr     error
 }
 
-func (s *stubTaskManager) FetchAvailableTasks(ctx context.Context, max int) ([]*Task, error) {
+func (s *stubTaskManager) FetchAvailableTasks(ctx context.Context, app string, max int) ([]*Task, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.tasks) == 0 {
@@ -111,7 +111,7 @@ func TestDevicePoolAgentDispatchesAcrossIdleDevices(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDevicePoolAgent returned error: %v", err)
 	}
-	if err := agent.RunOnce(ctx); err != nil {
+	if err := agent.RunOnce(ctx, "com.smile.gifmaker"); err != nil {
 		t.Fatalf("RunOnce error: %v", err)
 	}
 
@@ -154,7 +154,7 @@ func TestDevicePoolAgentAssignsTasks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDevicePoolAgent returned error: %v", err)
 	}
-	if err := agent.RunOnce(ctx); err != nil {
+	if err := agent.RunOnce(ctx, "com.smile.gifmaker"); err != nil {
 		t.Fatalf("RunOnce error: %v", err)
 	}
 
@@ -209,7 +209,7 @@ func TestDevicePoolAgentRespectsTargetDeviceSerial(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDevicePoolAgent returned error: %v", err)
 	}
-	if err := agent.RunOnce(ctx); err != nil {
+	if err := agent.RunOnce(ctx, "com.smile.gifmaker"); err != nil {
 		t.Fatalf("RunOnce error: %v", err)
 	}
 
@@ -259,7 +259,7 @@ func TestDevicePoolAgentPropagatesJobError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDevicePoolAgent returned error: %v", err)
 	}
-	if err := agent.RunOnce(ctx); err != nil {
+	if err := agent.RunOnce(ctx, "com.smile.gifmaker"); err != nil {
 		t.Fatalf("RunOnce error: %v", err)
 	}
 	<-jobCh
@@ -296,7 +296,7 @@ func TestDevicePoolAgentRetriesFailedJobs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDevicePoolAgent returned error: %v", err)
 	}
-	if err := agent.RunOnce(ctx); err != nil {
+	if err := agent.RunOnce(ctx, "com.smile.gifmaker"); err != nil {
 		t.Fatalf("RunOnce error: %v", err)
 	}
 
