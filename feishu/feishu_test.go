@@ -156,14 +156,15 @@ func TestDecodeTargetRow(t *testing.T) {
 	rec := bitableRecord{
 		RecordID: "rec123",
 		Fields: map[string]any{
-			DefaultTargetFields.TaskID:       float64(42),
-			DefaultTargetFields.Params:       []any{"{\"song\":\"foo\"}"},
-			DefaultTargetFields.App:          "netease",
-			DefaultTargetFields.Scene:        "auto",
-			DefaultTargetFields.Datetime:     "2025-11-08 10:30:00",
-			DefaultTargetFields.Status:       "pending",
-			DefaultTargetFields.User:         "tester",
-			DefaultTargetFields.DeviceSerial: "dev-123",
+			DefaultTargetFields.TaskID:           float64(42),
+			DefaultTargetFields.Params:           []any{"{\"song\":\"foo\"}"},
+			DefaultTargetFields.App:              "netease",
+			DefaultTargetFields.Scene:            "auto",
+			DefaultTargetFields.Datetime:         "2025-11-08 10:30:00",
+			DefaultTargetFields.Status:           "pending",
+			DefaultTargetFields.User:             "tester",
+			DefaultTargetFields.DeviceSerial:     "dev-target",
+			DefaultTargetFields.DispatchedDevice: "dev-actual",
 		},
 	}
 	row, err := decodeTargetRow(rec, DefaultTargetFields)
@@ -179,8 +180,14 @@ func TestDecodeTargetRow(t *testing.T) {
 	if row.Status != "pending" {
 		t.Fatalf("unexpected status %q", row.Status)
 	}
-	if row.User != "tester" || row.DeviceSerial != "dev-123" {
-		t.Fatalf("unexpected user/device: %+v", row)
+	if row.User != "tester" {
+		t.Fatalf("unexpected user %+v", row)
+	}
+	if row.DeviceSerial != "dev-target" {
+		t.Fatalf("unexpected target device %#v", row.DeviceSerial)
+	}
+	if row.DispatchedDevice != "dev-actual" {
+		t.Fatalf("unexpected dispatched device %#v", row.DispatchedDevice)
 	}
 	if row.Datetime == nil {
 		t.Fatalf("expected datetime to be parsed")
@@ -194,14 +201,15 @@ func TestDecodeTargetRowAllowsEmptyStatus(t *testing.T) {
 	rec := bitableRecord{
 		RecordID: "recEmpty",
 		Fields: map[string]any{
-			DefaultTargetFields.TaskID:       float64(43),
-			DefaultTargetFields.Params:       "{}",
-			DefaultTargetFields.App:          "netease",
-			DefaultTargetFields.Scene:        "auto",
-			DefaultTargetFields.Datetime:     "2025-11-08",
-			DefaultTargetFields.Status:       "",
-			DefaultTargetFields.User:         "",
-			DefaultTargetFields.DeviceSerial: "",
+			DefaultTargetFields.TaskID:           float64(43),
+			DefaultTargetFields.Params:           "{}",
+			DefaultTargetFields.App:              "netease",
+			DefaultTargetFields.Scene:            "auto",
+			DefaultTargetFields.Datetime:         "2025-11-08",
+			DefaultTargetFields.Status:           "",
+			DefaultTargetFields.User:             "",
+			DefaultTargetFields.DeviceSerial:     "",
+			DefaultTargetFields.DispatchedDevice: "",
 		},
 	}
 	row, err := decodeTargetRow(rec, DefaultTargetFields)
@@ -211,8 +219,29 @@ func TestDecodeTargetRowAllowsEmptyStatus(t *testing.T) {
 	if row.Status != "" {
 		t.Fatalf("expected empty status, got %q", row.Status)
 	}
-	if row.User != "" || row.DeviceSerial != "" {
+	if row.User != "" || row.DeviceSerial != "" || row.DispatchedDevice != "" {
 		t.Fatalf("expected empty user/device, got %+v", row)
+	}
+}
+
+func TestDecodeTargetRowWithOnlyTargetDeviceSerial(t *testing.T) {
+	rec := bitableRecord{
+		RecordID: "recTargetOnly",
+		Fields: map[string]any{
+			DefaultTargetFields.TaskID:       float64(55),
+			DefaultTargetFields.Params:       "{}",
+			DefaultTargetFields.App:          "netease",
+			DefaultTargetFields.Scene:        "auto",
+			DefaultTargetFields.Status:       "pending",
+			DefaultTargetFields.DeviceSerial: "dev-only",
+		},
+	}
+	row, err := decodeTargetRow(rec, DefaultTargetFields)
+	if err != nil {
+		t.Fatalf("decodeTargetRow returned error: %v", err)
+	}
+	if row.DeviceSerial != "dev-only" || row.DispatchedDevice != "" {
+		t.Fatalf("unexpected device fields: %+v", row)
 	}
 }
 
@@ -493,19 +522,19 @@ func TestBuildResultRecordPayloads(t *testing.T) {
 	when := time.Date(2024, 11, 8, 12, 0, 0, 0, time.UTC)
 	payloads, err := buildResultRecordPayloads([]ResultRecordInput{
 		{
-			Datetime:     &when,
-			DeviceSerial: "dev-001",
-			App:          "netease",
-			Scene:        "batch",
-			Params:       `{"song":"foo"}`,
-			ItemID:       "video123",
-			ItemCaption:  "Test Video",
-			ItemURL:      "https://cdn.example.com/video123.mp4",
-			UserName:     "tester",
-			UserID:       "author-1",
-			Tags:         "tag1,tag2",
-			SubTaskID:    "sub-1",
-			PayloadJSON:  map[string]any{"foo": "bar"},
+			Datetime:         &when,
+			DispatchedDevice: "dev-001",
+			App:              "netease",
+			Scene:            "batch",
+			Params:           `{"song":"foo"}`,
+			ItemID:           "video123",
+			ItemCaption:      "Test Video",
+			ItemURL:          "https://cdn.example.com/video123.mp4",
+			UserName:         "tester",
+			UserID:           "author-1",
+			Tags:             "tag1,tag2",
+			SubTaskID:        "sub-1",
+			PayloadJSON:      map[string]any{"foo": "bar"},
 		},
 	}, DefaultResultFields)
 	if err != nil {
@@ -531,7 +560,7 @@ func TestBuildResultRecordPayloads(t *testing.T) {
 		t.Fatalf("unexpected payload content %#v", decoded)
 	}
 	if _, err := buildResultRecordPayloads([]ResultRecordInput{
-		{DeviceSerial: "dev", PayloadJSON: "{not json}"},
+		{DispatchedDevice: "dev", PayloadJSON: "{not json}"},
 	}, DefaultResultFields); err == nil {
 		t.Fatalf("expected error for invalid payload json")
 	}
@@ -570,19 +599,19 @@ func TestCreateResultRecords(t *testing.T) {
 
 	records := []ResultRecordInput{
 		{
-			DeviceSerial: "dev-1",
-			App:          "netease",
-			Scene:        "auto",
-			Params:       "{}",
-			ItemID:       "item-1",
-			PayloadJSON:  map[string]any{"id": 1},
+			DispatchedDevice: "dev-1",
+			App:              "netease",
+			Scene:            "auto",
+			Params:           "{}",
+			ItemID:           "item-1",
+			PayloadJSON:      map[string]any{"id": 1},
 		},
 		{
-			DeviceSerial: "dev-2",
-			App:          "douyin",
-			Scene:        "manual",
-			ItemID:       "item-2",
-			PayloadJSON:  json.RawMessage(`{"id":2}`),
+			DispatchedDevice: "dev-2",
+			App:              "douyin",
+			Scene:            "manual",
+			ItemID:           "item-2",
+			PayloadJSON:      json.RawMessage(`{"id":2}`),
 		},
 	}
 	ids, err := client.CreateResultRecords(ctx, liveResultBitableURL, records, nil)
@@ -603,8 +632,8 @@ func TestCreateResultRecords(t *testing.T) {
 	if !ok {
 		t.Fatalf("fields payload type %T", payloadRecords[0]["fields"])
 	}
-	if first[DefaultResultFields.DeviceSerial] != "dev-1" {
-		t.Fatalf("unexpected device serial %#v", first[DefaultResultFields.DeviceSerial])
+	if first[DefaultResultFields.DispatchedDevice] != "dev-1" {
+		t.Fatalf("unexpected dispatched device %#v", first[DefaultResultFields.DispatchedDevice])
 	}
 	if _, ok := first[DefaultResultFields.PayloadJSON].(string); !ok {
 		t.Fatalf("payload json should be string, got %#v", first[DefaultResultFields.PayloadJSON])
@@ -643,9 +672,9 @@ func TestCreateResultRecordSingle(t *testing.T) {
 	}
 
 	id, err := client.CreateResultRecord(ctx, liveResultBitableURL, ResultRecordInput{
-		DeviceSerial: "dev-only",
-		App:          "netease",
-		PayloadJSON:  map[string]any{"ok": true},
+		DispatchedDevice: "dev-only",
+		App:              "netease",
+		PayloadJSON:      map[string]any{"ok": true},
 	}, nil)
 	if err != nil {
 		t.Fatalf("CreateResultRecord returned error: %v", err)
@@ -660,8 +689,8 @@ func TestCreateResultRecordSingle(t *testing.T) {
 	if !ok {
 		t.Fatalf("fields payload type %T", capturedPayload["fields"])
 	}
-	if fields[DefaultResultFields.DeviceSerial] != "dev-only" {
-		t.Fatalf("unexpected device serial %#v", fields[DefaultResultFields.DeviceSerial])
+	if fields[DefaultResultFields.DispatchedDevice] != "dev-only" {
+		t.Fatalf("unexpected dispatched device %#v", fields[DefaultResultFields.DispatchedDevice])
 	}
 	if _, ok := fields[DefaultResultFields.PayloadJSON].(string); !ok {
 		t.Fatalf("payload json should be string, got %#v", fields[DefaultResultFields.PayloadJSON])
@@ -927,18 +956,18 @@ func TestResultRecordCreateLive(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	record := ResultRecordInput{
-		Datetime:     &now,
-		DeviceSerial: "cli-live",
-		App:          "anygrab-live",
-		Scene:        "result-log",
-		Params:       fmt.Sprintf("{\"ts\":%d}", now.Unix()),
-		ItemID:       fmt.Sprintf("live-result-%d", now.UnixNano()),
-		ItemCaption:  "integration test capture",
-		ItemURL:      "https://cdn.example.com/live-test.mp4",
-		UserName:     "test-suite",
-		UserID:       "suite",
-		Tags:         "integration,auto",
-		SubTaskID:    fmt.Sprintf("sub-%d", now.UnixNano()),
+		Datetime:         &now,
+		DispatchedDevice: "cli-live",
+		App:              "anygrab-live",
+		Scene:            "result-log",
+		Params:           fmt.Sprintf("{\"ts\":%d}", now.Unix()),
+		ItemID:           fmt.Sprintf("live-result-%d", now.UnixNano()),
+		ItemCaption:      "integration test capture",
+		ItemURL:          "https://cdn.example.com/live-test.mp4",
+		UserName:         "test-suite",
+		UserID:           "suite",
+		Tags:             "integration,auto",
+		SubTaskID:        fmt.Sprintf("sub-%d", now.UnixNano()),
 		PayloadJSON: map[string]any{
 			"ts":     now.UnixMilli(),
 			"status": "ok",
@@ -946,6 +975,9 @@ func TestResultRecordCreateLive(t *testing.T) {
 	}
 	id, err := client.CreateResultRecord(ctx, liveResultBitableURL, record, nil)
 	if err != nil {
+		if strings.Contains(err.Error(), "FieldNameNotFound") {
+			t.Skip("result table missing DispatchedDevice column; update schema before running live test")
+		}
 		t.Fatalf("CreateResultRecord live error: %v", err)
 	}
 	ref, err := ParseBitableURL(liveResultBitableURL)

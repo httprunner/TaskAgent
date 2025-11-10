@@ -270,7 +270,7 @@ func (r *recordingTargetClient) UpdateTargetFields(ctx context.Context, table *f
 	return nil
 }
 
-func TestUpdateFeishuTaskStatusesAssignsDeviceSerial(t *testing.T) {
+func TestUpdateFeishuTaskStatusesAssignsDispatchedDevice(t *testing.T) {
 	client := &recordingTargetClient{}
 	table := &feishusvc.TargetTable{
 		Ref:    feishusvc.BitableRef{AppToken: "app", TableID: "tbl"},
@@ -291,7 +291,7 @@ func TestUpdateFeishuTaskStatusesAssignsDeviceSerial(t *testing.T) {
 		t.Fatalf("expected 1 update, got %d", len(client.updates))
 	}
 	statusField := feishusvc.DefaultTargetFields.Status
-	serialField := feishusvc.DefaultTargetFields.DeviceSerial
+	serialField := feishusvc.DefaultTargetFields.DispatchedDevice
 	update := client.updates[0]
 	if got := update[statusField]; got != "dispatched" {
 		t.Fatalf("expected status field=%s got=%v", statusField, got)

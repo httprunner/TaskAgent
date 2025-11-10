@@ -29,91 +29,95 @@ type BitableRef struct {
 
 // TargetFields lists the expected column names inside the target table.
 type TargetFields struct {
-	TaskID       string
-	Params       string
-	App          string
-	Scene        string
-	Datetime     string
-	Status       string
-	User         string
-	DeviceSerial string
+	TaskID           string
+	Params           string
+	App              string
+	Scene            string
+	Datetime         string
+	Status           string
+	User             string
+	DeviceSerial     string
+	DispatchedDevice string
 }
 
 // DefaultTargetFields matches the schema provided in the requirements.
 var DefaultTargetFields = TargetFields{
-	TaskID:       "TaskID",
-	Params:       "Params",
-	App:          "App",
-	Scene:        "Scene",
-	Datetime:     "Datetime",
-	Status:       "Status",
-	User:         "User",
-	DeviceSerial: "DeviceSerial",
+	TaskID:           "TaskID",
+	Params:           "Params",
+	App:              "App",
+	Scene:            "Scene",
+	Datetime:         "Datetime",
+	Status:           "Status",
+	User:             "User",
+	DeviceSerial:     "DeviceSerial",
+	DispatchedDevice: "DispatchedDevice",
 }
 
 // TargetRow represents a single task row stored inside the target table.
 type TargetRow struct {
-	RecordID     string
-	TaskID       int64
-	Params       string
-	App          string
-	Scene        string
-	User         string
-	Datetime     *time.Time
-	DatetimeRaw  string
-	Status       string
-	DeviceSerial string
+	RecordID         string
+	TaskID           int64
+	Params           string
+	App              string
+	Scene            string
+	User             string
+	Datetime         *time.Time
+	DatetimeRaw      string
+	Status           string
+	DeviceSerial     string
+	DispatchedDevice string
 }
 
 // TargetRecordInput describes the payload needed to create a new record.
 // If TaskID is zero, the field is omitted so Feishu can auto-increment it.
 // DatetimeRaw takes precedence if both it and Datetime are set.
 type TargetRecordInput struct {
-	TaskID       int64
-	Params       string
-	App          string
-	Scene        string
-	Datetime     *time.Time
-	DatetimeRaw  string
-	Status       string
-	User         string
-	DeviceSerial string
+	TaskID           int64
+	Params           string
+	App              string
+	Scene            string
+	Datetime         *time.Time
+	DatetimeRaw      string
+	Status           string
+	User             string
+	DeviceSerial     string
+	DispatchedDevice string
 }
 
 // ResultFields defines the schema for the capture result table.
 type ResultFields struct {
-	Datetime     string
-	DeviceSerial string
-	App          string
-	Scene        string
-	Params       string
-	ItemID       string
-	ItemCaption  string
-	ItemURL      string
-	ItemDuration string
-	UserName     string
-	UserID       string
-	Tags         string
-	SubTaskID    string
-	PayloadJSON  string
+	Datetime         string
+	DispatchedDevice string
+	App              string
+	Scene            string
+	Params           string
+	ItemID           string
+	ItemCaption      string
+	ItemURL          string
+	ItemDuration     string
+	UserName         string
+	UserID           string
+	Tags             string
+	SubTaskID        string
+	PayloadJSON      string
 }
 
 // DefaultResultFields matches the schema required by the capture result table.
 var DefaultResultFields = ResultFields{
-	Datetime:     "Datetime",
-	DeviceSerial: "DeviceSerial",
-	App:          "App",
-	Scene:        "Scene",
-	Params:       "Params",
-	ItemID:       "ItemID",
-	ItemCaption:  "ItemCaption",
-	ItemURL:      "ItemURL",
-	ItemDuration: "ItemDuration",
-	UserName:     "UserName",
-	UserID:       "UserID",
-	Tags:         "Tags",
-	SubTaskID:    "SubTaskID",
-	PayloadJSON:  "PayloadJSON",
+	Datetime:         "Datetime",
+	DispatchedDevice: "DispatchedDevice",
+	App:              "App",
+	Scene:            "Scene",
+	Params:           "Params",
+	ItemID:           "ItemID",
+	ItemCaption:      "ItemCaption",
+	ItemURL:          "ItemURL",
+	ItemDuration:     "ItemDuration",
+	UserName:         "UserName",
+	UserID:           "UserID",
+	Tags:             "Tags",
+	SubTaskID:        "SubTaskID",
+	PayloadJSON:      "PayloadJSON",
 }
 
 // ResultRecordInput contains the capture metadata uploaded to the result table.
@@ -123,7 +127,7 @@ var DefaultResultFields = ResultFields{
 type ResultRecordInput struct {
 	Datetime            *time.Time
 	DatetimeRaw         string
-	DeviceSerial        string
+	DispatchedDevice    string
 	App                 string
 	Scene               string
 	Params              string
@@ -191,7 +195,19 @@ func (t *TargetTable) updateLocalStatus(taskID int64, status string) {
 	}
 }
 
-func (t *TargetTable) updateLocalDeviceSerial(taskID int64, serial string) {
+func (t *TargetTable) updateLocalDispatchedDevice(taskID int64, serial string) {
+	if t == nil {
+		return
+	}
+	for i := range t.Rows {
+		if t.Rows[i].TaskID == taskID {
+			t.Rows[i].DispatchedDevice = serial
+			break
+		}
+	}
+}
+
+func (t *TargetTable) updateLocalTargetDevice(taskID int64, serial string) {
 	if t == nil {
 		return
 	}
@@ -389,9 +405,14 @@ func (c *Client) UpdateTargetFields(ctx context.Context, table *TargetTable, tas
 			table.updateLocalStatus(taskID, toString(val))
 		}
 	}
-	if deviceField := strings.TrimSpace(table.Fields.DeviceSerial); deviceField != "" {
-		if val, ok := fields[deviceField]; ok {
-			table.updateLocalDeviceSerial(taskID, toString(val))
+	if dispatchedField := strings.TrimSpace(table.Fields.DispatchedDevice); dispatchedField != "" {
+		if val, ok := fields[dispatchedField]; ok {
+			table.updateLocalDispatchedDevice(taskID, toString(val))
+		}
+	}
+	if targetField := strings.TrimSpace(table.Fields.DeviceSerial); targetField != "" {
+		if val, ok := fields[targetField]; ok {
+			table.updateLocalTargetDevice(taskID, toString(val))
 		}
 	}
 	return nil
@@ -556,6 +577,9 @@ func (fields TargetFields) merge(override TargetFields) TargetFields {
 	if strings.TrimSpace(override.DeviceSerial) != "" {
 		result.DeviceSerial = override.DeviceSerial
 	}
+	if strings.TrimSpace(override.DispatchedDevice) != "" {
+		result.DispatchedDevice = override.DispatchedDevice
+	}
 	return result
 }
 
@@ -564,8 +588,8 @@ func (fields ResultFields) merge(override ResultFields) ResultFields {
 	if strings.TrimSpace(override.Datetime) != "" {
 		result.Datetime = override.Datetime
 	}
-	if strings.TrimSpace(override.DeviceSerial) != "" {
-		result.DeviceSerial = override.DeviceSerial
+	if strings.TrimSpace(override.DispatchedDevice) != "" {
+		result.DispatchedDevice = override.DispatchedDevice
 	}
 	if strings.TrimSpace(override.App) != "" {
 		result.App = override.App
@@ -627,6 +651,7 @@ func buildTargetRecordPayloads(records []TargetRecordInput, fields TargetFields)
 		}
 		addOptionalField(row, fields.User, rec.User)
 		addOptionalField(row, fields.DeviceSerial, rec.DeviceSerial)
+		addOptionalField(row, fields.DispatchedDevice, rec.DispatchedDevice)
 		if len(row) == 0 {
 			return nil, fmt.Errorf("feishu: record %d has no fields to set", idx)
 		}
@@ -646,7 +671,7 @@ func buildResultRecordPayloads(records []ResultRecordInput, fields ResultFields)
 				row[fields.Datetime] = ts
 			}
 		}
-		addOptionalField(row, fields.DeviceSerial, rec.DeviceSerial)
+		addOptionalField(row, fields.DispatchedDevice, rec.DispatchedDevice)
 		addOptionalField(row, fields.App, rec.App)
 		addOptionalField(row, fields.Scene, rec.Scene)
 		addOptionalField(row, fields.Params, rec.Params)
@@ -845,15 +870,18 @@ func decodeTargetRow(rec bitableRecord, fields TargetFields) (TargetRow, error) 
 		return TargetRow{}, fmt.Errorf("record %s: %w", rec.RecordID, err)
 	}
 
+	targetDevice := strings.TrimSpace(bitableOptionalString(rec.Fields, fields.DeviceSerial))
+	dispatchedDevice := strings.TrimSpace(bitableOptionalString(rec.Fields, fields.DispatchedDevice))
 	row := TargetRow{
-		RecordID:     rec.RecordID,
-		TaskID:       taskID,
-		Params:       bitableOptionalString(rec.Fields, fields.Params),
-		App:          bitableOptionalString(rec.Fields, fields.App),
-		Scene:        bitableOptionalString(rec.Fields, fields.Scene),
-		Status:       status,
-		User:         bitableOptionalString(rec.Fields, fields.User),
-		DeviceSerial: bitableOptionalString(rec.Fields, fields.DeviceSerial),
+		RecordID:         rec.RecordID,
+		TaskID:           taskID,
+		Params:           bitableOptionalString(rec.Fields, fields.Params),
+		App:              bitableOptionalString(rec.Fields, fields.App),
+		Scene:            bitableOptionalString(rec.Fields, fields.Scene),
+		Status:           status,
+		User:             bitableOptionalString(rec.Fields, fields.User),
+		DeviceSerial:     targetDevice,
+		DispatchedDevice: dispatchedDevice,
 	}
 
 	if dt := bitableOptionalString(rec.Fields, fields.Datetime); dt != "" {

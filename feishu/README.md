@@ -23,6 +23,9 @@
 
 `TargetFields`/`TargetRecordInput` 对应任务调度表（包含 TaskID、App、Scene、Status 等）。常见流程：
 
+- `DeviceSerial`：指定任务的目标设备，仅该序列号可以在设备池中获取该任务；若留空则由任意空闲设备领取。
+- `DispatchedDevice`：记录实际领取并执行任务的设备序列号，`pool.DevicePoolAgent` 在派发/回调时会自动填写。
+
 ```go
 client, _ := feishu.NewClientFromEnv()
 ctx := context.Background()
@@ -43,7 +46,7 @@ recordID, err := client.CreateTargetRecord(ctx, taskTableURL, feishu.TargetRecor
 根据需求新增的结果表（表 ID `tblzoZuR6aminfye`）由以下字段组成：
 
 - Datetime（毫秒时间戳或可解析时间字符串）
-- DeviceSerial / App / Scene / Params
+- DispatchedDevice / App / Scene / Params
 - ItemID / ItemCaption / ItemURL / ItemDuration（秒）
 - UserName / UserID / Tags
 - SubTaskID
@@ -54,7 +57,7 @@ API 使用 `ResultFields` / `ResultRecordInput`：
 ```go
 durationSeconds := 180.0
 resID, err := client.CreateResultRecord(ctx, resultTableURL, feishu.ResultRecordInput{
-    DeviceSerial: "dev-001",
+    DispatchedDevice: "dev-001",
     App:          "douyin",
     Scene:        "ugc",
     Params:       `{"task":42}`,

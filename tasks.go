@@ -66,7 +66,7 @@ func (m *feishuTargetTaskManager) FetchAvailableTasks(ctx context.Context, maxTa
 	}
 	result := make([]*Task, 0, len(feishuTasks))
 	for _, t := range feishuTasks {
-		result = append(result, &Task{ID: strconv.FormatInt(t.TaskID, 10), Payload: t})
+		result = append(result, &Task{ID: strconv.FormatInt(t.TaskID, 10), Payload: t, DeviceSerial: strings.TrimSpace(t.DeviceSerial)})
 	}
 	return result, nil
 }
@@ -144,15 +144,16 @@ func (s *FeishuTaskService) UpdateTaskStatuses(ctx context.Context, tasks []*Fei
 
 // FeishuTask represents a pending capture job fetched from Feishu bitable.
 type FeishuTask struct {
-	TaskID       int64
-	Params       string
-	App          string
-	Scene        string
-	Status       string
-	User         string
-	DeviceSerial string
-	Datetime     *time.Time
-	DatetimeRaw  string
+	TaskID           int64
+	Params           string
+	App              string
+	Scene            string
+	Status           string
+	User             string
+	DeviceSerial     string
+	DispatchedDevice string
+	Datetime         *time.Time
+	DatetimeRaw      string
 
 	source *feishuTaskSource
 }
@@ -284,16 +285,17 @@ func fetchFeishuTasksWithFilter(ctx context.Context, client targetTableClient, b
 			continue
 		}
 		tasks = append(tasks, &FeishuTask{
-			TaskID:       row.TaskID,
-			Params:       params,
-			App:          row.App,
-			Scene:        row.Scene,
-			Status:       row.Status,
-			User:         row.User,
-			DeviceSerial: row.DeviceSerial,
-			Datetime:     row.Datetime,
-			DatetimeRaw:  row.DatetimeRaw,
-			source:       source,
+			TaskID:           row.TaskID,
+			Params:           params,
+			App:              row.App,
+			Scene:            row.Scene,
+			Status:           row.Status,
+			User:             row.User,
+			DeviceSerial:     row.DeviceSerial,
+			DispatchedDevice: row.DispatchedDevice,
+			Datetime:         row.Datetime,
+			DatetimeRaw:      row.DatetimeRaw,
+			source:           source,
 		})
 		if limit > 0 && len(tasks) >= limit {
 			break
@@ -417,10 +419,10 @@ func updateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 		if statusField == "" {
 			return errors.New("feishu: status field is not configured in target table")
 		}
-		deviceField := strings.TrimSpace(source.table.Fields.DeviceSerial)
-		updateSerial := deviceSerial != "" && deviceField != ""
-		if deviceSerial != "" && deviceField == "" {
-			log.Warn().Msg("feishu target table missing DeviceSerial column; skip binding device serial")
+		dispatchedField := strings.TrimSpace(source.table.Fields.DispatchedDevice)
+		updateSerial := deviceSerial != "" && dispatchedField != ""
+		if deviceSerial != "" && dispatchedField == "" {
+			log.Warn().Msg("feishu target table missing DispatchedDevice column; skip binding device serial")
 		}
 
 		for _, task := range subset {
@@ -428,7 +430,7 @@ func updateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 				statusField: status,
 			}
 			if updateSerial {
-				fields[deviceField] = deviceSerial
+				fields[dispatchedField] = deviceSerial
 			}
 			if err := source.client.UpdateTargetFields(ctx, source.table, task.TaskID, fields); err != nil {
 				errs = append(errs, fmt.Sprintf("task %d: %v", task.TaskID, err))

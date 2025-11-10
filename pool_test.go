@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -182,6 +183,58 @@ func TestDevicePoolAgentAssignsTasks(t *testing.T) {
 	}
 	if manager.lastErr != nil {
 		t.Fatalf("expected nil job error, got %v", manager.lastErr)
+	}
+}
+
+func TestDevicePoolAgentRespectsTargetDeviceSerial(t *testing.T) {
+	ctx := context.Background()
+	provider := &stubDeviceProvider{devices: []string{"device-1", "device-2"}}
+	manager := &stubTaskManager{
+		tasks: []*Task{
+			{ID: "only-device-1", DeviceSerial: "device-1"},
+			{ID: "only-device-2", DeviceSerial: "device-2"},
+			{ID: "offline-only", DeviceSerial: "device-3"},
+			{ID: "general"},
+		},
+	}
+	jobCh := make(chan JobRequest, len(provider.devices))
+	runner := &channelJobRunner{ch: jobCh}
+
+	agent, err := NewDevicePoolAgent(Config{
+		PollInterval:   time.Millisecond,
+		MaxTasksPerJob: 2,
+		Provider:       provider,
+		TaskManager:    manager,
+	}, runner)
+	if err != nil {
+		t.Fatalf("NewDevicePoolAgent returned error: %v", err)
+	}
+	if err := agent.RunOnce(ctx); err != nil {
+		t.Fatalf("RunOnce error: %v", err)
+	}
+
+	collected := make(map[string]JobRequest, len(provider.devices))
+	for range provider.devices {
+		select {
+		case req := <-jobCh:
+			collected[req.DeviceSerial] = req
+		case <-time.After(time.Second):
+			t.Fatalf("expected job for device")
+		}
+	}
+
+	for serial, req := range collected {
+		for _, task := range req.Tasks {
+			if task == nil {
+				continue
+			}
+			if target := strings.TrimSpace(task.DeviceSerial); target != "" && target != serial {
+				t.Fatalf("task %s targeted device %s but dispatched to %s", task.ID, target, serial)
+			}
+			if task.ID == "offline-only" {
+				t.Fatalf("offline-only task should not be dispatched, got %s", serial)
+			}
+		}
 	}
 }
 

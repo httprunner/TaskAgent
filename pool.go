@@ -20,8 +20,9 @@ func init() {
 
 // Task represents a single unit of work to be executed on a device.
 type Task struct {
-	ID      string
-	Payload any
+	ID           string
+	Payload      any
+	DeviceSerial string
 }
 
 // DeviceProvider returns the set of currently connected device serials.
@@ -267,18 +268,40 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context) error {
 		return nil
 	}
 
-	offset := 0
+	targeted := make(map[string][]*Task)
+	general := make([]*Task, 0, len(tasks))
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		target := strings.TrimSpace(task.DeviceSerial)
+		if target == "" {
+			general = append(general, task)
+			continue
+		}
+		targeted[target] = append(targeted[target], task)
+	}
+	generalIdx := 0
 	for _, dev := range idle {
-		if offset >= len(tasks) {
-			break
-		}
 		assign := a.cfg.MaxTasksPerJob
-		if remaining := len(tasks) - offset; remaining < assign {
-			assign = remaining
+		if assign <= 0 {
+			assign = 1
 		}
-		selected := make([]*Task, assign)
-		copy(selected, tasks[offset:offset+assign])
-		offset += assign
+		selected := make([]*Task, 0, assign)
+		if list := targeted[dev.serial]; len(list) > 0 {
+			take := assign
+			if take > len(list) {
+				take = len(list)
+			}
+			selected = append(selected, list[:take]...)
+			targeted[dev.serial] = list[take:]
+			assign -= take
+		}
+		for assign > 0 && generalIdx < len(general) {
+			selected = append(selected, general[generalIdx])
+			generalIdx++
+			assign--
+		}
 		if len(selected) == 0 {
 			continue
 		}
