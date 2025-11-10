@@ -3,6 +3,7 @@ package pool
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -302,6 +303,11 @@ func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient,
 		result = append(result, subset...)
 	}
 
+	if len(result) > 1 {
+		sort.Slice(result, func(i, j int) bool {
+			return result[i].TaskID < result[j].TaskID
+		})
+	}
 	if len(result) > limit {
 		log.Info().
 			Int("batch_limit", limit).
