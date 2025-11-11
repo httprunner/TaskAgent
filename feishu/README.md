@@ -19,6 +19,16 @@
 
 建议在仓库根目录创建 `.env` 并通过 `godotenv` 自动加载。
 
+## 字段命名与自定义
+
+所有字段名称都支持通过环境变量进行自定义，使用表特定前缀：
+
+- **结果表字段**：使用 `RESULT_*` 前缀（例如：`RESULT_PARAMS_FIELD`、`RESULT_USERID_FIELD`、`RESULT_DURATION_FIELD`）
+- **目标表字段**：使用 `TARGET_*` 前缀（例如：`TARGET_PARAMS_FIELD`、`TARGET_DURATION_FIELD`）
+- **剧单表字段**：使用 `DRAMA_*` 前缀（例如：`DRAMA_PARAMS_FIELD`、`DRAMA_DURATION_FIELD`）
+
+如果未设置环境变量，将使用上述示例中的默认字段名称。
+
 ## 多维表格任务表
 
 `TargetFields`/`TargetRecordInput` 对应任务调度表（包含 TaskID、App、Scene、Status 等）。常见流程：
@@ -31,7 +41,7 @@ client, _ := feishu.NewClientFromEnv()
 ctx := context.Background()
 recordID, err := client.CreateTargetRecord(ctx, taskTableURL, feishu.TargetRecordInput{
     TaskID:  123,
-    Params:  `{"keyword":"jay"}`,
+    Params:  `{"keyword":"jay"}`,        // 字段名可通过 TARGET_PARAMS_FIELD 环境变量自定义
     App:     "netease",
     Scene:   "batch",
     Status:  "pending",
@@ -60,15 +70,15 @@ resID, err := client.CreateResultRecord(ctx, resultTableURL, feishu.ResultRecord
     DeviceSerial: "dev-001",
     App:          "douyin",
     Scene:        "ugc",
-    Params:       `{"task":42}`,
+    Params:       `{"task":42}`,              // 字段名可通过 RESULT_PARAMS_FIELD 环境变量自定义
     ItemID:       "vid123",
     ItemCaption:  "示例标题",
     ItemCDNURL:      "https://cdn.example.com/vid123.mp4",
     ItemURL:      "https://www.kuaishou.com/short-video/vid123",
-    // 可选：新增 ItemDuration，单位为秒
+    // 可选：新增 ItemDuration，单位为秒，字段名可通过 RESULT_DURATION_FIELD 环境变量自定义
     ItemDurationSeconds: &durationSeconds,
     UserName:     "作者",
-    UserID:       "user123",
+    UserID:       "user123",                  // 字段名可通过 RESULT_USERID_FIELD 环境变量自定义
     Tags:         "热门,音乐",
     TaskID:       123456,
     PayloadJSON: map[string]any{

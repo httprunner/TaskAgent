@@ -19,16 +19,12 @@ func (c *Config) ApplyDefaults() {
 	if strings.TrimSpace(c.ParamsField) == "" {
 		if paramField := os.Getenv("RESULT_PARAMS_FIELD"); paramField != "" {
 			c.ParamsField = paramField
-		} else if paramField := os.Getenv("PARAMS_FIELD"); paramField != "" {
-			c.ParamsField = paramField
 		} else {
 			c.ParamsField = feishu.DefaultResultFields.Params
 		}
 	}
 	if strings.TrimSpace(c.UserIDField) == "" {
 		if userField := os.Getenv("RESULT_USERID_FIELD"); userField != "" {
-			c.UserIDField = userField
-		} else if userField := os.Getenv("USERID_FIELD"); userField != "" {
 			c.UserIDField = userField
 		} else {
 			c.UserIDField = feishu.DefaultResultFields.UserID
@@ -37,16 +33,12 @@ func (c *Config) ApplyDefaults() {
 	if strings.TrimSpace(c.DurationField) == "" {
 		if durationField := os.Getenv("RESULT_DURATION_FIELD"); durationField != "" {
 			c.DurationField = durationField
-		} else if durationField := os.Getenv("DURATION_FIELD"); durationField != "" {
-			c.DurationField = durationField
 		} else {
 			c.DurationField = feishu.DefaultResultFields.ItemDuration
 		}
 	}
 	if strings.TrimSpace(c.TargetParamsField) == "" {
 		if targetParamsField := os.Getenv("TARGET_PARAMS_FIELD"); targetParamsField != "" {
-			c.TargetParamsField = targetParamsField
-		} else if targetParamsField := os.Getenv("PARAMS_FIELD"); targetParamsField != "" {
 			c.TargetParamsField = targetParamsField
 		} else {
 			c.TargetParamsField = "Params"

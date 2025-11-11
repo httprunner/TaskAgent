@@ -72,8 +72,6 @@ Command-line flags:
 
 All other configuration (table URLs, field names, threshold) must be set via environment variables.
 
-**Note on Field Names:** The configuration supports both new table-specific field names (e.g., `RESULT_PARAMS_FIELD`, `TARGET_PARAMS_FIELD`) and legacy field names (e.g., `PARAMS_FIELD`, `USERID_FIELD`, `DURATION_FIELD`) for backward compatibility. The new table-specific names take precedence if both are specified.
-
 ## Development
 
 - Build: `go build ./cmd/piracy_detect`

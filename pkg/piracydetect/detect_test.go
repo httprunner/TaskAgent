@@ -268,65 +268,6 @@ func TestConfigApplyDefaultsWithEnv(t *testing.T) {
 	}
 }
 
-func TestConfigApplyDefaultsBackwardCompatibility(t *testing.T) {
-	// Test backward compatibility with old env var names
-	// First clear new field names to ensure old ones are used
-	origResultParamsField := os.Getenv("RESULT_PARAMS_FIELD")
-	origResultUserIDField := os.Getenv("RESULT_USERID_FIELD")
-	origResultDurationField := os.Getenv("RESULT_DURATION_FIELD")
-	origParamsField := os.Getenv("PARAMS_FIELD")
-	origUserIDField := os.Getenv("USERID_FIELD")
-	origDurationField := os.Getenv("DURATION_FIELD")
-
-	defer func() {
-		// Restore original values
-		if origResultParamsField == "" {
-			os.Unsetenv("RESULT_PARAMS_FIELD")
-		} else {
-			os.Setenv("RESULT_PARAMS_FIELD", origResultParamsField)
-		}
-		if origResultUserIDField == "" {
-			os.Unsetenv("RESULT_USERID_FIELD")
-		} else {
-			os.Setenv("RESULT_USERID_FIELD", origResultUserIDField)
-		}
-		if origResultDurationField == "" {
-			os.Unsetenv("RESULT_DURATION_FIELD")
-		} else {
-			os.Setenv("RESULT_DURATION_FIELD", origResultDurationField)
-		}
-		os.Setenv("PARAMS_FIELD", origParamsField)
-		os.Setenv("USERID_FIELD", origUserIDField)
-		os.Setenv("DURATION_FIELD", origDurationField)
-	}()
-
-	// Clear new field names to force use of old field names
-	os.Unsetenv("RESULT_PARAMS_FIELD")
-	os.Unsetenv("RESULT_USERID_FIELD")
-	os.Unsetenv("RESULT_DURATION_FIELD")
-
-	// Test with old env var names
-	os.Setenv("PARAMS_FIELD", "OldParams")
-	os.Setenv("USERID_FIELD", "OldUserID")
-	os.Setenv("DURATION_FIELD", "OldDuration")
-
-	c := Config{
-		ParamsField:   "", // Explicitly empty to test env var reading
-		UserIDField:   "",
-		DurationField: "",
-	}
-	c.ApplyDefaults()
-
-	if c.ParamsField != "OldParams" {
-		t.Errorf("expected ParamsField to be 'OldParams', got %s", c.ParamsField)
-	}
-	if c.UserIDField != "OldUserID" {
-		t.Errorf("expected UserIDField to be 'OldUserID', got %s", c.UserIDField)
-	}
-	if c.DurationField != "OldDuration" {
-		t.Errorf("expected DurationField to be 'OldDuration', got %s", c.DurationField)
-	}
-}
 
 func TestConfigApplyDefaults(t *testing.T) {
 	tests := []struct {
