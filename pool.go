@@ -181,9 +181,14 @@ func (a *DevicePoolAgent) Start(ctx context.Context, app string) error {
 	}
 }
 
-// RunOnce exposes a single refresh/dispatch iteration (primarily for tests).
+// RunOnce exposes a single refresh/dispatch iteration and waits for any
+// dispatched jobs started during the cycle to finish.
 func (a *DevicePoolAgent) RunOnce(ctx context.Context, app string) error {
-	return a.runCycle(ctx, app)
+	if err := a.runCycle(ctx, app); err != nil {
+		return err
+	}
+	a.backgroundGroup.Wait()
+	return nil
 }
 
 func (a *DevicePoolAgent) runCycle(ctx context.Context, app string) error {
