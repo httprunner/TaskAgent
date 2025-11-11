@@ -999,10 +999,10 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 		if !resp.Data.HasMore || strings.TrimSpace(resp.Data.PageToken) == "" {
 			break
 		}
-		log.Info().Int("count", len(resp.Data.Items)).Msg("fetched bitable records")
 		pageToken = resp.Data.PageToken
 	}
 
+	log.Info().Int("count", len(all)).Msg("fetched bitable records")
 	if limit > 0 && len(all) > limit {
 		return all[:limit], nil
 	}

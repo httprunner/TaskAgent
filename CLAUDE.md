@@ -36,12 +36,7 @@ go test ./cmd/piracy_detect
 # Build and run piracy detection
 go run ./cmd/piracy_detect \
   --result-filter 'AND(CurrentValue.[Params]="keyword")' \
-  --target-filter "<filter>" \
-  --params-field "Params" \
-  --user-field "UserID" \
-  --duration-field "ItemDuration" \
-  --target-duration-field "全剧时长（秒）" \
-  --threshold 50 \
+  --drama-filter "<filter>" \
   --output-csv result.csv
 ```
 
@@ -72,6 +67,7 @@ Required environment variables (create `.env` file):
 - `FEISHU_TENANT_KEY`: Optional tenant key
 - `FEISHU_BASE_URL`: Optional custom base URL
 - `FEISHU_LIVE_TEST=1`: Enable live integration tests
+- `DRAMA_BITABLE_URL`: URL for original drama information table
 
 ## Testing Guidelines
 

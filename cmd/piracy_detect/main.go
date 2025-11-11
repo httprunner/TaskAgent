@@ -22,15 +22,15 @@ func init() {
 
 var rootCmd = &cobra.Command{
 	Use:   "piracy",
-	Short: "Run piracy detection against result/target bitables",
+	Short: "Run piracy detection against result and drama bitables",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		resultURL := pickOrEnv("", feishu.EnvResultBitableURL)
-		targetURL := pickOrEnv("", feishu.EnvTargetBitableURL)
+		dramaURL := pickOrEnv("", "DRAMA_BITABLE_URL")
 		if resultURL == "" {
 			return fmt.Errorf("result table url is required ($%s)", feishu.EnvResultBitableURL)
 		}
-		if targetURL == "" {
-			return fmt.Errorf("target table url is required ($%s)", feishu.EnvTargetBitableURL)
+		if dramaURL == "" {
+			return fmt.Errorf("original drama table url is required ($DRAMA_BITABLE_URL)")
 		}
 
 		opts := piracydetect.Options{
@@ -38,16 +38,16 @@ var rootCmd = &cobra.Command{
 				URL:    resultURL,
 				Filter: flagResultFilter,
 			},
-			TargetTable: piracydetect.TableConfig{
-				URL:    targetURL,
-				Filter: flagTargetFilter,
+			DramaTable: piracydetect.TableConfig{
+				URL:    dramaURL,
+				Filter: flagDramaFilter,
 			},
 			// Config fields will be read from environment variables
 		}
 
 		log.Info().
 			Str("result_table", resultURL).
-			Str("target_table", targetURL).
+			Str("drama_table", dramaURL).
 			Msg("starting piracy detection")
 
 		report, err := piracydetect.Detect(cmd.Context(), opts)
@@ -66,12 +66,14 @@ var rootCmd = &cobra.Command{
 var (
 	flagResultFilter string
 	flagTargetFilter string
+	flagDramaFilter  string
 	flagOutputCSV    string
 )
 
 func init() {
 	rootCmd.Flags().StringVar(&flagResultFilter, "result-filter", "", "Feishu filter for result rows")
 	rootCmd.Flags().StringVar(&flagTargetFilter, "target-filter", "", "Feishu filter for target rows")
+	rootCmd.Flags().StringVar(&flagDramaFilter, "drama-filter", "", "Feishu filter for original drama rows")
 	rootCmd.Flags().StringVar(&flagOutputCSV, "output-csv", "", "optional csv to persist suspicious combos")
 }
 

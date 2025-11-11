@@ -12,6 +12,11 @@ type Config struct {
 	// Field in target table (source B)
 	TargetDurationField string // total duration seconds
 
+	// Fields in original drama table (source C)
+	DramaIDField       string // 短剧 ID
+	DramaParamsField   string // Params field in drama table
+	DramaDurationField string // 全剧时长（秒）
+
 	// Threshold ratio (0..1), e.g., 0.5 means 50%
 	Threshold float64
 }
@@ -28,6 +33,7 @@ type TableConfig struct {
 type Options struct {
 	ResultTable TableConfig
 	TargetTable TableConfig
+	DramaTable  TableConfig // New table for original drama information
 	Config      Config
 }
 

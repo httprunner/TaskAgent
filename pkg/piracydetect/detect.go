@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/httprunner/TaskAgent/feishu"
+	"github.com/rs/zerolog/log"
 )
 
 const keySeparator = "\u241F" // Unit Separator symbol to avoid conflicts
@@ -36,11 +37,25 @@ func (c *Config) ApplyDefaults() {
 			c.DurationField = feishu.DefaultResultFields.ItemDuration
 		}
 	}
-	if strings.TrimSpace(c.TargetDurationField) == "" {
-		if targetDurationField := os.Getenv("TARGET_DURATION_FIELD"); targetDurationField != "" {
-			c.TargetDurationField = targetDurationField
+	if strings.TrimSpace(c.DramaIDField) == "" {
+		if dramaIDField := os.Getenv("DRAMA_ID_FIELD"); dramaIDField != "" {
+			c.DramaIDField = dramaIDField
 		} else {
-			c.TargetDurationField = "TotalDuration"
+			c.DramaIDField = "DramaID"
+		}
+	}
+	if strings.TrimSpace(c.DramaParamsField) == "" {
+		if dramaParamsField := os.Getenv("DRAMA_PARAMS_FIELD"); dramaParamsField != "" {
+			c.DramaParamsField = dramaParamsField
+		} else {
+			c.DramaParamsField = "Params"
+		}
+	}
+	if strings.TrimSpace(c.DramaDurationField) == "" {
+		if dramaDurationField := os.Getenv("DRAMA_DURATION_FIELD"); dramaDurationField != "" {
+			c.DramaDurationField = dramaDurationField
+		} else {
+			c.DramaDurationField = "TotalDuration"
 		}
 	}
 	if c.Threshold <= 0 {
@@ -73,13 +88,13 @@ func Detect(ctx context.Context, opts Options) (*Report, error) {
 		return nil, err
 	}
 
-	// Fetch target rows (source B)
-	targetRows, err := fetchRows(ctx, client, opts.TargetTable)
+	// Fetch original drama rows (source B) - for duration information
+	dramaRows, err := fetchRows(ctx, client, opts.DramaTable)
 	if err != nil {
 		return nil, err
 	}
 
-	return analyzeRows(resultRows, targetRows, opts.Config), nil
+	return analyzeRows(resultRows, dramaRows, opts.Config), nil
 }
 
 // fetchRows retrieves rows from a Feishu table.
@@ -98,26 +113,28 @@ func fetchRows(ctx context.Context, client *feishu.Client, cfg TableConfig) ([]R
 }
 
 // analyzeRows performs the piracy detection analysis on the fetched rows.
-func analyzeRows(resultRows, targetRows []Row, cfg Config) *Report {
-	// Index target durations by Params
-	targetIndex := make(map[string]float64)
-	missingTargets := make(map[string]struct{})
+func analyzeRows(resultRows, dramaRows []Row, cfg Config) *Report {
+	log.Info().Msg("analyzing result rows with drama rows")
+	// Index drama durations by Params
+	dramaIndex := make(map[string]float64)
+	missingDramas := make(map[string]struct{})
 
-	for _, row := range targetRows {
-		params := strings.TrimSpace(getString(row.Fields, cfg.ParamsField))
+	for _, row := range dramaRows {
+		params := strings.TrimSpace(getString(row.Fields, cfg.DramaParamsField))
 		if params == "" {
 			continue
 		}
-		duration, ok := getFloat(row.Fields, cfg.TargetDurationField)
+		duration, ok := getFloat(row.Fields, cfg.DramaDurationField)
 		if !ok || duration <= 0 {
-			missingTargets[params] = struct{}{}
+			missingDramas[params] = struct{}{}
 			continue
 		}
 		// Store the maximum duration if there are duplicates
-		if current, exists := targetIndex[params]; !exists || duration > current {
-			targetIndex[params] = duration
+		if current, exists := dramaIndex[params]; !exists || duration > current {
+			dramaIndex[params] = duration
 		}
 	}
+	log.Debug().Interface("dramaIndex", dramaIndex).Msg("built drama duration index")
 
 	// Aggregate result rows by Params+UserID key
 	type aggEntry struct {
@@ -152,6 +169,7 @@ func analyzeRows(resultRows, targetRows []Row, cfg Config) *Report {
 		}
 		resultAgg[key] = entry
 	}
+	log.Debug().Interface("resultAgg", resultAgg).Msg("aggregated result rows")
 
 	// Build matches where ratio exceeds threshold
 	matches := make([]Match, 0)
@@ -162,13 +180,13 @@ func analyzeRows(resultRows, targetRows []Row, cfg Config) *Report {
 		parts := strings.SplitN(key, keySeparator, 2)
 		params := parts[0]
 
-		targetDuration, exists := targetIndex[params]
-		if !exists || targetDuration <= 0 {
+		dramaDuration, exists := dramaIndex[params]
+		if !exists || dramaDuration <= 0 {
 			missingParamsSet[params] = struct{}{}
 			continue
 		}
 
-		ratio := entry.sum / targetDuration
+		ratio := entry.sum / dramaDuration
 		if ratio > cfg.Threshold {
 			userID := ""
 			if len(parts) > 1 {
@@ -179,7 +197,7 @@ func analyzeRows(resultRows, targetRows []Row, cfg Config) *Report {
 				UserID:        userID,
 				UserName:      entry.userName,
 				SumDuration:   entry.sum,
-				TotalDuration: targetDuration,
+				TotalDuration: dramaDuration,
 				Ratio:         ratio,
 				RecordCount:   entry.count,
 			})
@@ -201,8 +219,8 @@ func analyzeRows(resultRows, targetRows []Row, cfg Config) *Report {
 	return &Report{
 		Matches:       matches,
 		ResultRows:    len(resultRows),
-		TargetRows:    len(targetRows),
-		MissingParams: append(missingParams, extractKeys(missingTargets)...),
+		TargetRows:    len(dramaRows), // Now using drama rows count instead of target rows
+		MissingParams: append(missingParams, extractKeys(missingDramas)...),
 		Threshold:     cfg.Threshold,
 	}
 }

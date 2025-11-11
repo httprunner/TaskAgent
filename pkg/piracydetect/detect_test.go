@@ -27,22 +27,23 @@ func TestAnalyzeRows(t *testing.T) {
 		{Fields: map[string]any{"Params": params, "UserID": user, "ItemDuration": 5.0}},
 	}
 
-	// Create target row with total duration of 60 seconds
-	targetRows := []Row{
+	// Create drama row with total duration of 60 seconds
+	dramaRows := []Row{
 		{Fields: map[string]any{"Params": params, "TotalDuration": 60.0}},
 	}
 
 	// Create config with threshold of 0.5 (50%)
 	cfg := Config{
-		ParamsField:         "Params",
-		UserIDField:         "UserID",
-		DurationField:       "ItemDuration",
-		TargetDurationField: "TotalDuration",
-		Threshold:           0.5,
+		ParamsField:        "Params",
+		UserIDField:        "UserID",
+		DurationField:      "ItemDuration",
+		DramaParamsField:   "Params",
+		DramaDurationField: "TotalDuration",
+		Threshold:          0.5,
 	}
 
 	// Run analysis
-	report := analyzeRows(resultRows, targetRows, cfg)
+	report := analyzeRows(resultRows, dramaRows, cfg)
 
 	// Verify results
 	if len(report.Matches) != 1 {
@@ -89,20 +90,21 @@ func TestAnalyzeRowsBelowThreshold(t *testing.T) {
 		{Fields: map[string]any{"Params": params, "UserID": user, "ItemDuration": 10.0}},
 	}
 
-	// Create target row with total duration of 60 seconds
-	targetRows := []Row{
+	// Create drama row with total duration of 60 seconds
+	dramaRows := []Row{
 		{Fields: map[string]any{"Params": params, "TotalDuration": 60.0}},
 	}
 
 	cfg := Config{
-		ParamsField:         "Params",
-		UserIDField:         "UserID",
-		DurationField:       "ItemDuration",
-		TargetDurationField: "TotalDuration",
-		Threshold:           0.5,
+		ParamsField:        "Params",
+		UserIDField:        "UserID",
+		DurationField:      "ItemDuration",
+		DramaParamsField:   "Params",
+		DramaDurationField: "TotalDuration",
+		Threshold:          0.5,
 	}
 
-	report := analyzeRows(resultRows, targetRows, cfg)
+	report := analyzeRows(resultRows, dramaRows, cfg)
 
 	// Should have no matches since ratio (0.333) is below threshold (0.5)
 	if len(report.Matches) != 0 {
@@ -120,20 +122,21 @@ func TestAnalyzeRowsMissingTarget(t *testing.T) {
 		{Fields: map[string]any{"Params": params, "UserID": user, "ItemDuration": 10.0}},
 	}
 
-	// Create target rows without the expected params
-	targetRows := []Row{
+	// Create drama rows without the expected params
+	dramaRows := []Row{
 		{Fields: map[string]any{"Params": "drama2", "TotalDuration": 60.0}},
 	}
 
 	cfg := Config{
-		ParamsField:         "Params",
-		UserIDField:         "UserID",
-		DurationField:       "ItemDuration",
-		TargetDurationField: "TotalDuration",
-		Threshold:           0.5,
+		ParamsField:        "Params",
+		UserIDField:        "UserID",
+		DurationField:      "ItemDuration",
+		DramaParamsField:   "Params",
+		DramaDurationField: "TotalDuration",
+		Threshold:          0.5,
 	}
 
-	report := analyzeRows(resultRows, targetRows, cfg)
+	report := analyzeRows(resultRows, dramaRows, cfg)
 
 	// Should have no matches since target is missing
 	if len(report.Matches) != 0 {
@@ -165,19 +168,20 @@ func TestAnalyzeRowsMultipleMatches(t *testing.T) {
 		{Fields: map[string]any{"Params": "drama1", "UserID": "user2", "ItemDuration": 20.0}},
 	}
 
-	targetRows := []Row{
+	dramaRows := []Row{
 		{Fields: map[string]any{"Params": "drama1", "TotalDuration": 60.0}},
 	}
 
 	cfg := Config{
-		ParamsField:         "Params",
-		UserIDField:         "UserID",
-		DurationField:       "ItemDuration",
-		TargetDurationField: "TotalDuration",
-		Threshold:           0.5,
+		ParamsField:        "Params",
+		UserIDField:        "UserID",
+		DurationField:      "ItemDuration",
+		DramaParamsField:   "Params",
+		DramaDurationField: "TotalDuration",
+		Threshold:          0.5,
 	}
 
-	report := analyzeRows(resultRows, targetRows, cfg)
+	report := analyzeRows(resultRows, dramaRows, cfg)
 
 	// Should have 2 matches (one for each user)
 	if len(report.Matches) != 2 {
@@ -293,8 +297,13 @@ func TestConfigApplyDefaults(t *testing.T) {
 				if c.DurationField != "ItemDuration" {
 					t.Errorf("expected DurationField to be 'ItemDuration', got %s", c.DurationField)
 				}
-				if c.TargetDurationField != "TotalDuration" {
-					t.Errorf("expected TargetDurationField to be 'TotalDuration', got %s", c.TargetDurationField)
+				// Check DramaDurationField - may be overridden by environment variable
+				expectedDramaDurationField := "TotalDuration"
+				if os.Getenv("DRAMA_DURATION_FIELD") != "" {
+					expectedDramaDurationField = os.Getenv("DRAMA_DURATION_FIELD")
+				}
+				if c.DramaDurationField != expectedDramaDurationField {
+					t.Errorf("expected DramaDurationField to be '%s', got %s", expectedDramaDurationField, c.DramaDurationField)
 				}
 				if c.Threshold != 0.5 {
 					t.Errorf("expected Threshold to be 0.5, got %v", c.Threshold)
