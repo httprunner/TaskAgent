@@ -9,7 +9,8 @@ type Config struct {
 	UserIDField   string
 	DurationField string // item duration seconds
 
-	// Field in target table (source B)
+	// Fields in target table (source B)
+	TargetParamsField   string // Params field in target table
 	TargetDurationField string // total duration seconds
 
 	// Fields in original drama table (source C)

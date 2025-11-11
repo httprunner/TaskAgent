@@ -20,13 +20,17 @@ RESULT_BITABLE_URL="https://example.larkoffice.com/wiki/..."
 DRAMA_BITABLE_URL="https://example.larkoffice.com/wiki/..."
 
 # Optional: Field names (use defaults if not specified)
-PARAMS_FIELD="Params"             # Column in result table containing drama identifier
-USERID_FIELD="UserID"             # Column in result table containing user ID
-DURATION_FIELD="ItemDuration"     # Column in result table containing item duration (seconds)
+RESULT_PARAMS_FIELD="Params"             # Column in result table containing drama identifier
+RESULT_USERID_FIELD="UserID"             # Column in result table containing user ID
+RESULT_DURATION_FIELD="ItemDuration"     # Column in result table containing item duration (seconds)
+
+# Optional: Target table field names
+TARGET_PARAMS_FIELD="Params"             # Column in target table containing drama identifier
+TARGET_DURATION_FIELD="TotalDuration"    # Column in target table containing total duration (seconds)
 
 # Optional: Original drama table field names
-DRAMA_PARAMS_FIELD="Params"       # Column in drama table containing drama identifier
-DRAMA_DURATION_FIELD="TotalDuration"  # Column in drama table containing total duration (seconds)
+DRAMA_PARAMS_FIELD="短剧名称"              # Column in drama table containing drama identifier
+DRAMA_DURATION_FIELD="全剧时长（秒）"      # Column in drama table containing total duration (seconds)
 
 # Optional: Detection threshold ratio (0-1), default is 0.5 (50%)
 THRESHOLD="0.5"
@@ -67,6 +71,8 @@ Command-line flags:
 - `--output-csv`: Path to save CSV output (optional)
 
 All other configuration (table URLs, field names, threshold) must be set via environment variables.
+
+**Note on Field Names:** The configuration supports both new table-specific field names (e.g., `RESULT_PARAMS_FIELD`, `TARGET_PARAMS_FIELD`) and legacy field names (e.g., `PARAMS_FIELD`, `USERID_FIELD`, `DURATION_FIELD`) for backward compatibility. The new table-specific names take precedence if both are specified.
 
 ## Development
 

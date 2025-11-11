@@ -17,24 +17,46 @@ const keySeparator = "\u241F" // Unit Separator symbol to avoid conflicts
 func (c *Config) ApplyDefaults() {
 	// Read from environment or use Feishu defaults
 	if strings.TrimSpace(c.ParamsField) == "" {
-		if paramField := os.Getenv("PARAMS_FIELD"); paramField != "" {
+		if paramField := os.Getenv("RESULT_PARAMS_FIELD"); paramField != "" {
+			c.ParamsField = paramField
+		} else if paramField := os.Getenv("PARAMS_FIELD"); paramField != "" {
 			c.ParamsField = paramField
 		} else {
 			c.ParamsField = feishu.DefaultResultFields.Params
 		}
 	}
 	if strings.TrimSpace(c.UserIDField) == "" {
-		if userField := os.Getenv("USERID_FIELD"); userField != "" {
+		if userField := os.Getenv("RESULT_USERID_FIELD"); userField != "" {
+			c.UserIDField = userField
+		} else if userField := os.Getenv("USERID_FIELD"); userField != "" {
 			c.UserIDField = userField
 		} else {
 			c.UserIDField = feishu.DefaultResultFields.UserID
 		}
 	}
 	if strings.TrimSpace(c.DurationField) == "" {
-		if durationField := os.Getenv("DURATION_FIELD"); durationField != "" {
+		if durationField := os.Getenv("RESULT_DURATION_FIELD"); durationField != "" {
+			c.DurationField = durationField
+		} else if durationField := os.Getenv("DURATION_FIELD"); durationField != "" {
 			c.DurationField = durationField
 		} else {
 			c.DurationField = feishu.DefaultResultFields.ItemDuration
+		}
+	}
+	if strings.TrimSpace(c.TargetParamsField) == "" {
+		if targetParamsField := os.Getenv("TARGET_PARAMS_FIELD"); targetParamsField != "" {
+			c.TargetParamsField = targetParamsField
+		} else if targetParamsField := os.Getenv("PARAMS_FIELD"); targetParamsField != "" {
+			c.TargetParamsField = targetParamsField
+		} else {
+			c.TargetParamsField = "Params"
+		}
+	}
+	if strings.TrimSpace(c.TargetDurationField) == "" {
+		if targetDurationField := os.Getenv("TARGET_DURATION_FIELD"); targetDurationField != "" {
+			c.TargetDurationField = targetDurationField
+		} else {
+			c.TargetDurationField = "TotalDuration"
 		}
 	}
 	if strings.TrimSpace(c.DramaIDField) == "" {
@@ -134,7 +156,6 @@ func analyzeRows(resultRows, dramaRows []Row, cfg Config) *Report {
 			dramaIndex[params] = duration
 		}
 	}
-	log.Debug().Interface("dramaIndex", dramaIndex).Msg("built drama duration index")
 
 	// Aggregate result rows by Params+UserID key
 	type aggEntry struct {
@@ -169,7 +190,6 @@ func analyzeRows(resultRows, dramaRows []Row, cfg Config) *Report {
 		}
 		resultAgg[key] = entry
 	}
-	log.Debug().Interface("resultAgg", resultAgg).Msg("aggregated result rows")
 
 	// Build matches where ratio exceeds threshold
 	matches := make([]Match, 0)
