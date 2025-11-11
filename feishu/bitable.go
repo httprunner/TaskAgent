@@ -432,7 +432,7 @@ func (c *Client) ensureBitableAppToken(ctx context.Context, ref *BitableRef) (er
 
 // FetchBitableRows downloads raw records from a Feishu bitable so callers can read any column.
 func (c *Client) FetchBitableRows(ctx context.Context, rawURL string, opts *TargetQueryOptions) ([]BitableRow, error) {
-	log.Info().Str("url", rawURL).Msg("fetching bitable rows")
+	log.Info().Str("url", rawURL).Interface("options", opts).Msg("fetching bitable rows")
 	if c == nil {
 		return nil, errors.New("feishu: client is nil")
 	}
@@ -659,36 +659,47 @@ func (c *Client) UpdateTargetStatuses(ctx context.Context, rawURL string, update
 func (fields TargetFields) merge(override TargetFields) TargetFields {
 	result := fields
 	if strings.TrimSpace(override.TaskID) != "" {
+		log.Warn().Str("new", override.TaskID).Msg("overriding field TaskID")
 		result.TaskID = override.TaskID
 	}
 	if strings.TrimSpace(override.Params) != "" {
+		log.Warn().Str("new", override.Params).Msg("overriding field Params")
 		result.Params = override.Params
 	}
 	if strings.TrimSpace(override.App) != "" {
+		log.Warn().Str("new", override.App).Msg("overriding field App")
 		result.App = override.App
 	}
 	if strings.TrimSpace(override.Scene) != "" {
+		log.Warn().Str("new", override.Scene).Msg("overriding field Scene")
 		result.Scene = override.Scene
 	}
 	if strings.TrimSpace(override.Datetime) != "" {
+		log.Warn().Str("new", override.Datetime).Msg("overriding field Datetime")
 		result.Datetime = override.Datetime
 	}
 	if strings.TrimSpace(override.DispatchedTime) != "" {
+		log.Warn().Str("new", override.DispatchedTime).Msg("overriding field DispatchedTime")
 		result.DispatchedTime = override.DispatchedTime
 	}
 	if strings.TrimSpace(override.Status) != "" {
+		log.Warn().Str("new", override.Status).Msg("overriding field Status")
 		result.Status = override.Status
 	}
 	if strings.TrimSpace(override.User) != "" {
+		log.Warn().Str("new", override.User).Msg("overriding field User")
 		result.User = override.User
 	}
 	if strings.TrimSpace(override.DeviceSerial) != "" {
+		log.Warn().Str("new", override.DeviceSerial).Msg("overriding field DeviceSerial")
 		result.DeviceSerial = override.DeviceSerial
 	}
 	if strings.TrimSpace(override.DispatchedDevice) != "" {
+		log.Warn().Str("new", override.DispatchedDevice).Msg("overriding field DispatchedDevice")
 		result.DispatchedDevice = override.DispatchedDevice
 	}
 	if strings.TrimSpace(override.ElapsedSeconds) != "" {
+		log.Warn().Str("new", override.ElapsedSeconds).Msg("overriding field ElapsedSeconds")
 		result.ElapsedSeconds = override.ElapsedSeconds
 	}
 	return result
@@ -956,6 +967,11 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 			path = path + "?" + enc
 		}
 
+		log.Debug().
+			Int("page_size", pageSize).
+			Int("limit", limit).
+			Str("table_id", ref.TableID).
+			Msg("listing bitable records")
 		_, raw, err := c.doJSONRequest(ctx, http.MethodGet, path, nil)
 		if err != nil {
 			return nil, err
@@ -983,7 +999,7 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 		if !resp.Data.HasMore || strings.TrimSpace(resp.Data.PageToken) == "" {
 			break
 		}
-		log.Debug().Int("count", len(resp.Data.Items)).Msg("fetched bitable records")
+		log.Info().Int("count", len(resp.Data.Items)).Msg("fetched bitable records")
 		pageToken = resp.Data.PageToken
 	}
 

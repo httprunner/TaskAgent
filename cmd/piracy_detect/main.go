@@ -2,46 +2,59 @@ package main
 
 import (
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/httprunner/TaskAgent/feishu"
+	"github.com/httprunner/TaskAgent/pkg/piracydetect"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
 
+func init() {
+	// Configure zerolog to use console writer with colors (non-JSON format)
+	output := zerolog.ConsoleWriter{Out: os.Stderr}
+	log.Logger = zerolog.New(output).With().Timestamp().Logger()
+}
+
 var rootCmd = &cobra.Command{
-	Use:   "feishu-piracy",
-	Short: "Run Feishu piracy detection against result/target bitables",
+	Use:   "piracy",
+	Short: "Run piracy detection against result/target bitables",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		resultURL := pickOrEnv(flagResultTable, feishu.EnvResultBitableURL)
-		targetURL := pickOrEnv(flagTargetTable, feishu.EnvTargetBitableURL)
+		resultURL := pickOrEnv("", feishu.EnvResultBitableURL)
+		targetURL := pickOrEnv("", feishu.EnvTargetBitableURL)
 		if resultURL == "" {
-			return fmt.Errorf("result table url is required (flag or $%s)", feishu.EnvResultBitableURL)
+			return fmt.Errorf("result table url is required ($%s)", feishu.EnvResultBitableURL)
 		}
 		if targetURL == "" {
-			return fmt.Errorf("target table url is required (flag or $%s)", feishu.EnvTargetBitableURL)
+			return fmt.Errorf("target table url is required ($%s)", feishu.EnvTargetBitableURL)
 		}
-		threshold := normalizeThreshold(flagThreshold)
-		opts := PiracyOptions{
-			ResultTableURL:      resultURL,
-			TargetTableURL:      targetURL,
-			ResultViewID:        flagResultView,
-			TargetViewID:        flagTargetView,
-			ResultFilter:        flagResultFilter,
-			TargetFilter:        flagTargetFilter,
-			ResultLimit:         flagResultLimit,
-			TargetLimit:         flagTargetLimit,
-			ParamsField:         strings.TrimSpace(flagParamsField),
-			UserIDField:         strings.TrimSpace(flagUserField),
-			DurationField:       strings.TrimSpace(flagDurationField),
-			TargetDurationField: strings.TrimSpace(flagTargetDurationField),
-			ThresholdRatio:      threshold,
+
+		opts := piracydetect.Options{
+			ResultTable: piracydetect.TableConfig{
+				URL:    resultURL,
+				Filter: flagResultFilter,
+			},
+			TargetTable: piracydetect.TableConfig{
+				URL:    targetURL,
+				Filter: flagTargetFilter,
+			},
+			// Config fields will be read from environment variables
 		}
-		report, err := RunPiracyDetection(cmd.Context(), opts)
+
+		log.Info().
+			Str("result_table", resultURL).
+			Str("target_table", targetURL).
+			Msg("starting piracy detection")
+
+		report, err := piracydetect.Detect(cmd.Context(), opts)
 		if err != nil {
 			return err
 		}
+
 		printReport(report)
 		if flagOutputCSV != "" {
 			return dumpCSV(flagOutputCSV, report)
@@ -51,43 +64,20 @@ var rootCmd = &cobra.Command{
 }
 
 var (
-	flagResultTable         string
-	flagTargetTable         string
-	flagResultView          string
-	flagTargetView          string
-	flagResultFilter        string
-	flagTargetFilter        string
-	flagResultLimit         int
-	flagTargetLimit         int
-	flagParamsField         string
-	flagUserField           string
-	flagDurationField       string
-	flagTargetDurationField string
-	flagThreshold           float64
-	flagOutputCSV           string
+	flagResultFilter string
+	flagTargetFilter string
+	flagOutputCSV    string
 )
 
 func init() {
-	rootCmd.Flags().StringVar(&flagResultTable, "result-table", "", "result table URL or set $RESULT_BITABLE_URL")
-	rootCmd.Flags().StringVar(&flagTargetTable, "target-table", "", "target table URL or set $TARGET_BITABLE_URL")
-	rootCmd.Flags().StringVar(&flagResultView, "result-view", "", "optional view id for result table")
-	rootCmd.Flags().StringVar(&flagTargetView, "target-view", "", "optional view id for target table")
 	rootCmd.Flags().StringVar(&flagResultFilter, "result-filter", "", "Feishu filter for result rows")
 	rootCmd.Flags().StringVar(&flagTargetFilter, "target-filter", "", "Feishu filter for target rows")
-	rootCmd.Flags().IntVar(&flagResultLimit, "result-limit", 0, "maximum number of result rows to fetch (0=all)")
-	rootCmd.Flags().IntVar(&flagTargetLimit, "target-limit", 0, "maximum number of target rows to fetch (0=all)")
-	rootCmd.Flags().StringVar(&flagParamsField, "params-field", "", "column name that holds the drama identifier")
-	rootCmd.Flags().StringVar(&flagUserField, "user-field", "", "column name that holds the author ID")
-	rootCmd.Flags().StringVar(&flagDurationField, "duration-field", "", "column name that holds ItemDuration")
-	rootCmd.Flags().StringVar(&flagTargetDurationField, "target-duration-field", "", "column name that holds the drama total duration")
-	rootCmd.Flags().Float64Var(&flagThreshold, "threshold", 50, "minimum ratio to mark piracy (50 means 50%%)")
 	rootCmd.Flags().StringVar(&flagOutputCSV, "output-csv", "", "optional csv to persist suspicious combos")
 }
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		log.Fatal().Err(err).Msg("piracy detect failed")
 	}
 }
 
@@ -98,34 +88,56 @@ func pickOrEnv(flagVal, envKey string) string {
 	return strings.TrimSpace(os.Getenv(envKey))
 }
 
-func normalizeThreshold(value float64) float64 {
-	if value <= 0 {
-		return 0.5
-	}
-	if value > 1 {
-		return value / 100
-	}
-	return value
-}
+func printReport(report *piracydetect.Report) {
+	// Use structured logging for statistics
+	log.Info().
+		Int("target_rows", report.TargetRows).
+		Int("result_rows", report.ResultRows).
+		Float64("threshold_percent", report.Threshold*100).
+		Int("suspicious_combos", len(report.Matches)).
+		Int("params_missing_duration", len(report.MissingParams)).
+		Msg("piracy detection completed")
 
-func printReport(report PiracyReport) {
-	fmt.Printf("Fetched %d target rows and %d result rows (threshold %.1f%%)\n",
-		report.TargetRows, report.ResultRows, report.ThresholdRatio*100)
+	// Only print detailed results if there are matches
 	if len(report.Matches) == 0 {
-		fmt.Println("No suspicious combos found")
+		log.Info().Msg("No suspicious combos found")
+		// Also log missing params info if there were missing durations
+		if len(report.MissingParams) > 0 {
+			log.Info().
+				Int("count", len(report.MissingParams)).
+				Msg("params without duration were skipped")
+		}
 		return
 	}
-	fmt.Printf("Found %d suspicious combos (params missing duration: %d)\n", len(report.Matches), len(report.MissingTargetParams))
-	for _, match := range report.Matches {
-		fmt.Printf("- Params=%s | UserID=%s | ItemDuration=%.1f | Target=%.1f | Ratio=%.1f%% | Records=%d\n",
-			match.Params, match.UserID, match.ItemDuration, match.TargetDuration, match.Ratio*100, match.RecordCount)
+
+	// Log missing params (simplified, just count)
+	if len(report.MissingParams) > 0 {
+		// Only log valid keys, skip malformed ones with JSON
+		validCount := 0
+		for _, key := range report.MissingParams {
+			if !strings.HasPrefix(key, "{") && key != "" {
+				validCount++
+			}
+		}
+		if validCount > 0 {
+			log.Info().
+				Int("count", validCount).
+				Msg("params without duration were skipped")
+		}
 	}
-	if len(report.MissingTargetParams) > 0 {
-		fmt.Printf("Skipped %d params without duration: %s\n", len(report.MissingTargetParams), strings.Join(report.MissingTargetParams, ","))
+
+	// Print suspicious combos as JSON list
+	if len(report.Matches) > 0 {
+		jsonData, err := json.MarshalIndent(report.Matches, "", "  ")
+		if err != nil {
+			log.Error().Err(err).Msg("failed to marshal results to JSON")
+		} else {
+			fmt.Println(string(jsonData))
+		}
 	}
 }
 
-func dumpCSV(path string, report PiracyReport) error {
+func dumpCSV(path string, report *piracydetect.Report) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("create csv failed: %w", err)
@@ -133,15 +145,16 @@ func dumpCSV(path string, report PiracyReport) error {
 	defer f.Close()
 	w := csv.NewWriter(f)
 	defer w.Flush()
-	if err := w.Write([]string{"Params", "UserID", "ItemDurationSec", "TargetDurationSec", "RatioPct", "RecordCount"}); err != nil {
+	if err := w.Write([]string{"Params", "UserID", "UserName", "SumDurationSec", "TotalDurationSec", "RatioPct", "RecordCount"}); err != nil {
 		return err
 	}
 	for _, match := range report.Matches {
 		row := []string{
 			match.Params,
 			match.UserID,
-			fmt.Sprintf("%.1f", match.ItemDuration),
-			fmt.Sprintf("%.1f", match.TargetDuration),
+			match.UserName,
+			fmt.Sprintf("%.1f", match.SumDuration),
+			fmt.Sprintf("%.1f", match.TotalDuration),
 			fmt.Sprintf("%.1f", match.Ratio*100),
 			fmt.Sprintf("%d", match.RecordCount),
 		}
@@ -149,6 +162,9 @@ func dumpCSV(path string, report PiracyReport) error {
 			return err
 		}
 	}
-	fmt.Printf("Saved %d rows to %s\n", len(report.Matches), path)
+	log.Info().
+		Int("row_count", len(report.Matches)).
+		Str("path", path).
+		Msg("saved results to csv")
 	return w.Error()
 }

@@ -1,2 +1,5 @@
 # Local environment configuration
 .env
+
+*.csv
+piracy_detect
