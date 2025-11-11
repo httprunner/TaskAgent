@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/rs/zerolog/log"
 )
 
 const (
@@ -427,6 +428,34 @@ func (c *Client) ensureBitableAppToken(ctx context.Context, ref *BitableRef) (er
 	}
 	ref.AppToken = node.ObjToken
 	return nil
+}
+
+// FetchBitableRows downloads raw records from a Feishu bitable so callers can read any column.
+func (c *Client) FetchBitableRows(ctx context.Context, rawURL string, opts *TargetQueryOptions) ([]BitableRow, error) {
+	log.Info().Str("url", rawURL).Msg("fetching bitable rows")
+	if c == nil {
+		return nil, errors.New("feishu: client is nil")
+	}
+	ref, err := ParseBitableURL(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.ensureBitableAppToken(ctx, &ref); err != nil {
+		return nil, err
+	}
+	pageSize := defaultBitablePageSize
+	if opts != nil && opts.Limit > 0 && opts.Limit < pageSize {
+		pageSize = opts.Limit
+	}
+	records, err := c.listBitableRecords(ctx, ref, pageSize, opts)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]BitableRow, 0, len(records))
+	for _, rec := range records {
+		rows = append(rows, BitableRow(rec))
+	}
+	return rows, nil
 }
 
 // UpdateTargetStatus updates the status field for a given TaskID using a previously fetched table.
@@ -879,6 +908,12 @@ type bitableRecord struct {
 	Fields   map[string]any `json:"fields"`
 }
 
+// BitableRow wraps a raw bitable record so external packages can read arbitrary columns.
+type BitableRow struct {
+	RecordID string
+	Fields   map[string]any
+}
+
 func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSize int, opts *TargetQueryOptions) ([]bitableRecord, error) {
 	if strings.TrimSpace(ref.AppToken) == "" {
 		return nil, errors.New("feishu: bitable app token is empty")
@@ -948,6 +983,7 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 		if !resp.Data.HasMore || strings.TrimSpace(resp.Data.PageToken) == "" {
 			break
 		}
+		log.Debug().Int("count", len(resp.Data.Items)).Msg("fetched bitable records")
 		pageToken = resp.Data.PageToken
 	}
 

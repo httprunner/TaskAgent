@@ -102,6 +102,7 @@ FEISHU_LIVE_TEST=1 go test ./feishu -run Live
 
 ## 常见链接
 
+- 飞书接口文档：https://www.postman.com/feishu-op/feishu-s-public-workspace/overview
 - 任务表（读写）示例：`https://bytedance.larkoffice.com/wiki/DKKwwF9XRincITkd0g1c6udUnHe?table=tblLUmsGgp5SECWF`
 - 采集结果表：`https://bytedance.larkoffice.com/wiki/DKKwwF9XRincITkd0g1c6udUnHe?table=tblzoZuR6aminfye&view=vewTF27mJQ`
 
