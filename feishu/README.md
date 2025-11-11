@@ -85,6 +85,10 @@ resID, err := client.CreateResultRecord(ctx, resultTableURL, feishu.ResultRecord
 
 `PayloadJSON` 支持字符串、`[]byte`、`json.RawMessage` 或任意 Go 结构体；内部会校验/序列化成字符串。
 
+### Result storage helper
+
+`feishu.NewResultStorageFromEnv` 读取 `RESULT_BITABLE_URL`、Feishu 凭证等环境变量，若值有效则返回可直接调用 `Write(ctx, feishu.ResultRecord)` 的存储辅助实例。`feishu.ResultRecord` 只需要传入采集时间戳、`DeviceSerial`、`App`、`Query`、`TaskID` 与 `feishu.VideoData`（包括 `CacheKey`/`VideoID`/`URL`/`ShareLink`/`UserName` 等）即可，内部会自动填充 `Scene`、`ItemID`、`ItemURL` 等字段并推送到多维表格。
+
 ## 测试
 
 - 默认单元测试：`go test ./feishu`
