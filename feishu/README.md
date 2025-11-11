@@ -47,7 +47,7 @@ recordID, err := client.CreateTargetRecord(ctx, taskTableURL, feishu.TargetRecor
 
 - Datetime（毫秒时间戳或可解析时间字符串）
 - DeviceSerial / App / Scene / Params
-- ItemID / ItemCaption / ItemURL / ItemDuration（秒）
+- ItemID / ItemCaption / ItemCDNURL / ItemURL / ItemDuration（秒）
 - UserName / UserID / Tags
 - TaskID
 - PayloadJSON（完整资源信息 JSON）
@@ -63,7 +63,8 @@ resID, err := client.CreateResultRecord(ctx, resultTableURL, feishu.ResultRecord
     Params:       `{"task":42}`,
     ItemID:       "vid123",
     ItemCaption:  "示例标题",
-    ItemURL:      "https://cdn.example.com/vid123.mp4",
+    ItemCDNURL:      "https://cdn.example.com/vid123.mp4",
+    ItemURL:      "https://www.kuaishou.com/short-video/vid123",
     // 可选：新增 ItemDuration，单位为秒
     ItemDurationSeconds: &durationSeconds,
     UserName:     "作者",

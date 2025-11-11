@@ -529,7 +529,8 @@ func TestBuildResultRecordPayloads(t *testing.T) {
 			Params:       `{"song":"foo"}`,
 			ItemID:       "video123",
 			ItemCaption:  "Test Video",
-			ItemURL:      "https://cdn.example.com/video123.mp4",
+			ItemCDNURL:   "https://cdn.example.com/video123.mp4",
+			ItemURL:      "https://www.kuaishou.com/short-video/video123",
 			UserName:     "tester",
 			UserID:       "author-1",
 			Tags:         "tag1,tag2",
@@ -558,6 +559,9 @@ func TestBuildResultRecordPayloads(t *testing.T) {
 	}
 	if decoded["foo"] != "bar" {
 		t.Fatalf("unexpected payload content %#v", decoded)
+	}
+	if row[DefaultResultFields.ItemURL] != "https://www.kuaishou.com/short-video/video123" {
+		t.Fatalf("item url mismatch, got %#v", row[DefaultResultFields.ItemURL])
 	}
 	if _, err := buildResultRecordPayloads([]ResultRecordInput{
 		{DeviceSerial: "dev", PayloadJSON: "{not json}"},
@@ -963,7 +967,7 @@ func TestResultRecordCreateLive(t *testing.T) {
 		Params:       fmt.Sprintf("{\"ts\":%d}", now.Unix()),
 		ItemID:       fmt.Sprintf("live-result-%d", now.UnixNano()),
 		ItemCaption:  "integration test capture",
-		ItemURL:      "https://cdn.example.com/live-test.mp4",
+		ItemCDNURL:   "https://cdn.example.com/live-test.mp4",
 		UserName:     "test-suite",
 		UserID:       "suite",
 		Tags:         "integration,auto",

@@ -104,6 +104,7 @@ type ResultFields struct {
 	Params       string
 	ItemID       string
 	ItemCaption  string
+	ItemCDNURL   string
 	ItemURL      string
 	ItemDuration string
 	UserName     string
@@ -122,6 +123,7 @@ var DefaultResultFields = ResultFields{
 	Params:       "Params",
 	ItemID:       "ItemID",
 	ItemCaption:  "ItemCaption",
+	ItemCDNURL:   "ItemCDNURL",
 	ItemURL:      "ItemURL",
 	ItemDuration: "ItemDuration",
 	UserName:     "UserName",
@@ -144,6 +146,7 @@ type ResultRecordInput struct {
 	Params              string
 	ItemID              string
 	ItemCaption         string
+	ItemCDNURL          string
 	ItemURL             string
 	ItemDurationSeconds *float64
 	UserName            string
@@ -685,6 +688,9 @@ func (fields ResultFields) merge(override ResultFields) ResultFields {
 	if strings.TrimSpace(override.ItemCaption) != "" {
 		result.ItemCaption = override.ItemCaption
 	}
+	if strings.TrimSpace(override.ItemCDNURL) != "" {
+		result.ItemCDNURL = override.ItemCDNURL
+	}
 	if strings.TrimSpace(override.ItemURL) != "" {
 		result.ItemURL = override.ItemURL
 	}
@@ -768,6 +774,7 @@ func buildResultRecordPayloads(records []ResultRecordInput, fields ResultFields)
 		addOptionalField(row, fields.Params, rec.Params)
 		addOptionalField(row, fields.ItemID, rec.ItemID)
 		addOptionalField(row, fields.ItemCaption, rec.ItemCaption)
+		addOptionalField(row, fields.ItemCDNURL, rec.ItemCDNURL)
 		addOptionalField(row, fields.ItemURL, rec.ItemURL)
 		addOptionalNumber(row, fields.ItemDuration, rec.ItemDurationSeconds)
 		addOptionalField(row, fields.UserName, rec.UserName)
