@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/httprunner/TaskAgent/feishu"
+	"github.com/httprunner/TaskAgent/pkg/feishu"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 )

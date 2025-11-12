@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	feishusvc "github.com/httprunner/TaskAgent/feishu"
+	feishusvc "github.com/httprunner/TaskAgent/pkg/feishu"
 )
 
 func TestFilterFeishuTasksByDate(t *testing.T) {
