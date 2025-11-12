@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/httprunner/TaskAgent/feishu"
+	"github.com/httprunner/TaskAgent/pkg/feishu"
 	"github.com/rs/zerolog/log"
 )
 

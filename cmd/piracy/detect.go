@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/httprunner/TaskAgent/feishu"
+	"github.com/httprunner/TaskAgent/pkg/feishu"
 	"github.com/httprunner/TaskAgent/pkg/piracy"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
@@ -19,12 +19,51 @@ func newDetectCmd() *cobra.Command {
 		flagTargetFilter string
 		flagDramaFilter  string
 		flagOutputCSV    string
+		flagDataFile     string
+		flagDramaFile    string
+		flagFilterRate   float64
+		flagUseFiles     bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "detect",
-		Short: "Detect possible piracy by comparing result and drama tables",
+		Short: "Detect possible piracy from Feishu tables or local files",
+		Long: `Detect possible piracy by comparing video data with drama information.
+
+Mode 1: Feishu Tables (default)
+  Uses Feishu bitable as data source. Requires RESULT_BITABLE_URL and DRAMA_BITABLE_URL.
+
+Mode 2: Local Files (--use-files)
+  Uses local JSONL and CSV files as data source. Requires --data-file and --drama-file.
+
+Examples:
+  # Feishu mode (default)
+  piracy detect
+
+  # Local file mode
+  piracy detect --use-files --data-file records.jsonl --drama-file dramas.csv`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Check if using local file mode
+			if flagUseFiles {
+				// Validate required file parameters
+				if flagDataFile == "" {
+					return fmt.Errorf("--data-file is required for file mode")
+				}
+				if flagDramaFile == "" {
+					return fmt.Errorf("--drama-file is required for file mode")
+				}
+
+				log.Info().
+					Str("data_file", flagDataFile).
+					Str("drama_file", flagDramaFile).
+					Float64("filter_rate", flagFilterRate).
+					Msg("starting piracy detection from files")
+
+				// Run piracy detection from files
+				return piracy.DetectFromFiles(flagDataFile, flagDramaFile, flagFilterRate, flagOutputCSV)
+			}
+
+			// Default: Feishu mode
 			resultURL := pickOrEnv("", feishu.EnvResultBitableURL)
 			dramaURL := pickOrEnv("", "DRAMA_BITABLE_URL")
 			if resultURL == "" {
@@ -49,7 +88,7 @@ func newDetectCmd() *cobra.Command {
 			log.Info().
 				Str("result_table", resultURL).
 				Str("drama_table", dramaURL).
-				Msg("starting piracy detection")
+				Msg("starting piracy detection from Feishu tables")
 
 			report, err := piracy.Detect(cmd.Context(), opts)
 			if err != nil {
@@ -64,10 +103,19 @@ func newDetectCmd() *cobra.Command {
 		},
 	}
 
+	// Feishu mode flags
 	cmd.Flags().StringVar(&flagResultFilter, "result-filter", "", "Feishu filter for result rows")
 	cmd.Flags().StringVar(&flagTargetFilter, "target-filter", "", "Feishu filter for target rows")
 	cmd.Flags().StringVar(&flagDramaFilter, "drama-filter", "", "Feishu filter for original drama rows")
-	cmd.Flags().StringVar(&flagOutputCSV, "output-csv", "", "optional csv to persist suspicious combos")
+
+	// File mode flags
+	cmd.Flags().BoolVar(&flagUseFiles, "use-files", false, "Use local files instead of Feishu tables")
+	cmd.Flags().StringVar(&flagDataFile, "data-file", "", "Input JSONL data file path (for file mode)")
+	cmd.Flags().StringVar(&flagDramaFile, "drama-file", "", "Input CSV drama file path (for file mode)")
+	cmd.Flags().Float64Var(&flagFilterRate, "filter-rate", 50.0, "Filter rate threshold for display in percentage (default 50, for file mode)")
+
+	// Common flags
+	cmd.Flags().StringVar(&flagOutputCSV, "output-csv", "", "Optional output CSV file path")
 
 	return cmd
 }

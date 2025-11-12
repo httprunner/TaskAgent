@@ -8,11 +8,25 @@ import (
 	"strings"
 	"time"
 
-	"github.com/httprunner/TaskAgent/feishu"
+	"github.com/httprunner/TaskAgent/pkg/feishu"
 	"github.com/rs/zerolog/log"
 )
 
 const keySeparator = "\u241F" // Unit Separator symbol to avoid conflicts
+
+// ContentRecord represents a record for piracy detection (通用输入结构)
+type ContentRecord struct {
+	Params      string  // 短剧名称/Params
+	UserID      string  // 用户ID
+	UserName    string  // 用户名称
+	DurationSec float64 // 时长（秒）
+}
+
+// DramaRecord represents a drama record (通用剧单结构)
+type DramaRecord struct {
+	Params   string  // 短剧名称/Params
+	Duration float64 // 总时长（秒）
+}
 
 // ApplyDefaults populates missing config fields from environment variables or sensible defaults.
 func (c *Config) ApplyDefaults() {
@@ -169,34 +183,9 @@ func isFeishuDataNotReady(err error) bool {
 // analyzeRows performs the piracy detection analysis on the fetched rows.
 func analyzeRows(resultRows, dramaRows []Row, cfg Config) *Report {
 	log.Info().Msg("analyzing result rows with drama rows")
-	// Index drama durations by Params
-	dramaIndex := make(map[string]float64)
-	missingDramas := make(map[string]struct{})
 
-	for _, row := range dramaRows {
-		params := strings.TrimSpace(getString(row.Fields, cfg.DramaParamsField))
-		if params == "" {
-			continue
-		}
-		duration, ok := getFloat(row.Fields, cfg.DramaDurationField)
-		if !ok || duration <= 0 {
-			missingDramas[params] = struct{}{}
-			continue
-		}
-		// Store the maximum duration if there are duplicates
-		if current, exists := dramaIndex[params]; !exists || duration > current {
-			dramaIndex[params] = duration
-		}
-	}
-
-	// Aggregate result rows by Params+UserID key
-	type aggEntry struct {
-		sum      float64
-		count    int
-		userName string
-	}
-	resultAgg := make(map[string]aggEntry)
-
+	// Convert Feishu rows to common formats
+	var contentRecords []ContentRecord
 	for _, row := range resultRows {
 		params := strings.TrimSpace(getString(row.Fields, cfg.ParamsField))
 		userID := strings.TrimSpace(getString(row.Fields, cfg.UserIDField))
@@ -209,26 +198,97 @@ func analyzeRows(resultRows, dramaRows []Row, cfg Config) *Report {
 			continue
 		}
 
-		// Get UserName from the row
 		userName := strings.TrimSpace(getString(row.Fields, "UserName"))
+
+		contentRecords = append(contentRecords, ContentRecord{
+			Params:      params,
+			UserID:      userID,
+			UserName:    userName,
+			DurationSec: duration,
+		})
+	}
+
+	var dramaRecords []DramaRecord
+	for _, row := range dramaRows {
+		params := strings.TrimSpace(getString(row.Fields, cfg.DramaParamsField))
+		if params == "" {
+			continue
+		}
+		duration, ok := getFloat(row.Fields, cfg.DramaDurationField)
+		if !ok || duration <= 0 {
+			continue
+		}
+		// Store the maximum duration if there are duplicates
+		found := false
+		for i, dr := range dramaRecords {
+			if dr.Params == params && duration > dr.Duration {
+				dramaRecords[i].Duration = duration
+				found = true
+				break
+			}
+		}
+		if !found {
+			dramaRecords = append(dramaRecords, DramaRecord{
+				Params:   params,
+				Duration: duration,
+			})
+		}
+	}
+
+	return DetectCommon(contentRecords, dramaRecords, cfg.Threshold)
+}
+
+// DetectCommon performs the core piracy detection logic using common data structures.
+// This function is used by both Feishu and local file modes.
+func DetectCommon(contentRecords []ContentRecord, dramaRecords []DramaRecord, threshold float64) *Report {
+	// Build drama index: params -> duration
+	dramaIndex := make(map[string]float64)
+	missingDramas := make(map[string]struct{})
+
+	for _, drama := range dramaRecords {
+		params := strings.TrimSpace(drama.Params)
+		if params == "" {
+			continue
+		}
+		if drama.Duration <= 0 {
+			missingDramas[params] = struct{}{}
+			continue
+		}
+		dramaIndex[params] = drama.Duration
+	}
+
+	// Aggregate content records by Params + UserID
+	type aggEntry struct {
+		sum      float64
+		count    int
+		userName string
+	}
+	resultAgg := make(map[string]aggEntry) // key: params + separator + userID
+
+	for _, record := range contentRecords {
+		params := strings.TrimSpace(record.Params)
+		userID := strings.TrimSpace(record.UserID)
+		if params == "" || userID == "" {
+			continue
+		}
 
 		key := params + keySeparator + userID
 		entry := resultAgg[key]
-		entry.sum += duration
+		entry.sum += record.DurationSec
 		entry.count++
-		// Store the UserName (use the first non-empty one if there are duplicates)
-		if entry.userName == "" && userName != "" {
-			entry.userName = userName
+		// Get user name (first non-empty one if duplicates)
+		if entry.userName == "" && record.UserName != "" {
+			entry.userName = record.UserName
 		}
 		resultAgg[key] = entry
 	}
 
 	// Build matches where ratio exceeds threshold
-	matches := make([]Match, 0)
+	var matches []Match
 	missingParamsSet := make(map[string]struct{})
 
 	for key, entry := range resultAgg {
-		// Extract params from key (remove userID part)
+		// Extract params from key
 		parts := strings.SplitN(key, keySeparator, 2)
 		params := parts[0]
 
@@ -239,7 +299,7 @@ func analyzeRows(resultRows, dramaRows []Row, cfg Config) *Report {
 		}
 
 		ratio := entry.sum / dramaDuration
-		if ratio > cfg.Threshold {
+		if ratio > threshold {
 			userID := ""
 			if len(parts) > 1 {
 				userID = parts[1]
@@ -261,19 +321,33 @@ func analyzeRows(resultRows, dramaRows []Row, cfg Config) *Report {
 		return matches[i].Ratio > matches[j].Ratio
 	})
 
-	// Collect missing params list
+	// Collect missing params
 	missingParams := make([]string, 0, len(missingParamsSet))
 	for p := range missingParamsSet {
 		missingParams = append(missingParams, p)
 	}
 	sort.Strings(missingParams)
 
+	// Also add missing dramas
+	for p := range missingDramas {
+		found := false
+		for _, mp := range missingParams {
+			if mp == p {
+				found = true
+				break
+			}
+		}
+		if !found {
+			missingParams = append(missingParams, p)
+		}
+	}
+
 	return &Report{
 		Matches:       matches,
-		ResultRows:    len(resultRows),
-		TargetRows:    len(dramaRows), // Now using drama rows count instead of target rows
-		MissingParams: append(missingParams, extractKeys(missingDramas)...),
-		Threshold:     cfg.Threshold,
+		ResultRows:    len(contentRecords),
+		TargetRows:    len(dramaRecords),
+		MissingParams: missingParams,
+		Threshold:     threshold,
 	}
 }
 

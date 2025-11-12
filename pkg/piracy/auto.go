@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/httprunner/TaskAgent/feishu"
+	"github.com/httprunner/TaskAgent/pkg/feishu"
 	"github.com/rs/zerolog/log"
 )
 

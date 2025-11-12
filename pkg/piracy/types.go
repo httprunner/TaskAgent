@@ -1,6 +1,6 @@
 package piracy
 
-import "github.com/httprunner/TaskAgent/feishu"
+import "github.com/httprunner/TaskAgent/pkg/feishu"
 
 // Config defines the configuration for piracy detection.
 type Config struct {
@@ -66,3 +66,10 @@ type Report struct {
 
 // Row represents a raw Feishu bitable record.
 type Row = feishu.BitableRow
+
+// UserDramaInfo holds user information and their drama list from piracy detection results
+type UserDramaInfo struct {
+	UserID   string   // 用户ID
+	UserName string   // 用户名称
+	Dramas   []string // 短剧名称列表
+}
