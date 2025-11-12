@@ -125,6 +125,13 @@ type ResultFields struct {
 	LikeCount      string
 	VisitCount     string
 	AnchorPoint    string
+	CommentCount   string
+	CollectCount   string
+	ForwardCount   string
+	ShareCount     string
+	PayMode        string
+	Collection     string
+	Episode        string
 }
 
 // DefaultResultFields matches the schema required by the capture result table.
@@ -148,6 +155,13 @@ var DefaultResultFields = ResultFields{
 	LikeCount:      "LikeCount",
 	VisitCount:     "VisitCount",
 	AnchorPoint:    "AnchorPoint",
+	CommentCount:   "CommentCount",
+	CollectCount:   "CollectCount",
+	ForwardCount:   "ForwardCount",
+	ShareCount:     "ShareCount",
+	PayMode:        "PayMode",
+	Collection:     "Collection",
+	Episode:        "Episode",
 }
 
 // ResultRecordInput contains the capture metadata uploaded to the result table.
@@ -173,8 +187,15 @@ type ResultRecordInput struct {
 	TaskID              int64
 	PayloadJSON         any
 	LikeCount           int64
-	VisitCount          int
+	ViewCount           int
 	AnchorPoint         string
+	CommentCount        int64
+	CollectCount        int64
+	ForwardCount        int64
+	ShareCount          int64
+	PayMode             string
+	Collection          string
+	Episode             string
 }
 
 // TargetStatusUpdate links a TaskID to the status value it should adopt.
@@ -780,6 +801,27 @@ func (fields ResultFields) merge(override ResultFields) ResultFields {
 	if strings.TrimSpace(override.PayloadJSON) != "" {
 		result.PayloadJSON = override.PayloadJSON
 	}
+	if strings.TrimSpace(override.CommentCount) != "" {
+		result.CommentCount = override.CommentCount
+	}
+	if strings.TrimSpace(override.CollectCount) != "" {
+		result.CollectCount = override.CollectCount
+	}
+	if strings.TrimSpace(override.ForwardCount) != "" {
+		result.ForwardCount = override.ForwardCount
+	}
+	if strings.TrimSpace(override.ShareCount) != "" {
+		result.ShareCount = override.ShareCount
+	}
+	if strings.TrimSpace(override.PayMode) != "" {
+		result.PayMode = override.PayMode
+	}
+	if strings.TrimSpace(override.Collection) != "" {
+		result.Collection = override.Collection
+	}
+	if strings.TrimSpace(override.Episode) != "" {
+		result.Episode = override.Episode
+	}
 	return result
 }
 
@@ -858,6 +900,13 @@ func buildResultRecordPayloads(records []ResultRecordInput, fields ResultFields)
 		} else if payload != "" && strings.TrimSpace(fields.PayloadJSON) != "" {
 			row[fields.PayloadJSON] = payload
 		}
+		addOptionalInt64(row, fields.CommentCount, rec.CommentCount)
+		addOptionalInt64(row, fields.CollectCount, rec.CollectCount)
+		addOptionalInt64(row, fields.ForwardCount, rec.ForwardCount)
+		addOptionalInt64(row, fields.ShareCount, rec.ShareCount)
+		addOptionalField(row, fields.PayMode, rec.PayMode)
+		addOptionalField(row, fields.Collection, rec.Collection)
+		addOptionalField(row, fields.Episode, rec.Episode)
 		if len(row) == 0 {
 			return nil, fmt.Errorf("feishu: result record %d has no fields to set", idx)
 		}
@@ -878,6 +927,13 @@ func addOptionalNumber(dst map[string]any, column string, value *float64) {
 		return
 	}
 	dst[column] = *value
+}
+
+func addOptionalInt64(dst map[string]any, column string, value int64) {
+	if strings.TrimSpace(column) == "" || value == 0 {
+		return
+	}
+	dst[column] = value
 }
 
 func formatRecordDatetimeString(dt *time.Time, raw string) string {

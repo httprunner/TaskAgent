@@ -128,7 +128,7 @@ func collectFilledResultFields(record ResultRecordInput, names ResultFields) []s
 	if record.LikeCount != 0 {
 		columns = append(columns, names.LikeCount)
 	}
-	if record.VisitCount != 0 {
+	if record.ViewCount != 0 {
 		columns = append(columns, names.VisitCount)
 	}
 	if strings.TrimSpace(record.AnchorPoint) != "" {
