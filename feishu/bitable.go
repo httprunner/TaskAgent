@@ -106,40 +106,48 @@ type TargetRecordInput struct {
 
 // ResultFields defines the schema for the capture result table.
 type ResultFields struct {
-	Datetime     string
-	DeviceSerial string
-	App          string
-	Scene        string
-	Params       string
-	ItemID       string
-	ItemCaption  string
-	ItemCDNURL   string
-	ItemURL      string
-	ItemDuration string
-	UserName     string
-	UserID       string
-	Tags         string
-	TaskID       string
-	PayloadJSON  string
+	Datetime       string
+	DeviceSerial   string
+	App            string
+	Scene          string
+	Params         string
+	ItemID         string
+	ItemCaption    string
+	ItemCDNURL     string
+	ItemURL        string
+	ItemDuration   string
+	UserName       string
+	UserID         string
+	UserAuthEntity string
+	Tags           string
+	TaskID         string
+	PayloadJSON    string
+	LikeCount      string
+	VisitCount     string
+	AnchorPoint    string
 }
 
 // DefaultResultFields matches the schema required by the capture result table.
 var DefaultResultFields = ResultFields{
-	Datetime:     "Datetime",
-	DeviceSerial: "DeviceSerial",
-	App:          "App",
-	Scene:        "Scene",
-	Params:       "Params",
-	ItemID:       "ItemID",
-	ItemCaption:  "ItemCaption",
-	ItemCDNURL:   "ItemCDNURL",
-	ItemURL:      "ItemURL",
-	ItemDuration: "ItemDuration",
-	UserName:     "UserName",
-	UserID:       "UserID",
-	Tags:         "Tags",
-	TaskID:       "TaskID",
-	PayloadJSON:  "PayloadJSON",
+	Datetime:       "Datetime",
+	DeviceSerial:   "DeviceSerial",
+	App:            "App",
+	Scene:          "Scene",
+	Params:         "Params",
+	ItemID:         "ItemID",
+	ItemCaption:    "ItemCaption",
+	ItemCDNURL:     "ItemCDNURL",
+	ItemURL:        "ItemURL",
+	ItemDuration:   "ItemDuration",
+	UserName:       "UserName",
+	UserID:         "UserID",
+	UserAuthEntity: "UserAuthEntity",
+	Tags:           "Tags",
+	TaskID:         "TaskID",
+	PayloadJSON:    "PayloadJSON",
+	LikeCount:      "LikeCount",
+	VisitCount:     "VisitCount",
+	AnchorPoint:    "AnchorPoint",
 }
 
 // ResultRecordInput contains the capture metadata uploaded to the result table.
@@ -160,9 +168,13 @@ type ResultRecordInput struct {
 	ItemDurationSeconds *float64
 	UserName            string
 	UserID              string
+	UserAuthEntity      string
 	Tags                string
 	TaskID              int64
 	PayloadJSON         any
+	LikeCount           int64
+	VisitCount          int
+	AnchorPoint         string
 }
 
 // TargetStatusUpdate links a TaskID to the status value it should adopt.

@@ -580,55 +580,6 @@ func TestBuildResultRecordPayloads(t *testing.T) {
 	}
 }
 
-func TestBuildResultRecordInput(t *testing.T) {
-	record := ResultRecord{
-		Timestamp:    1690000000000,
-		DeviceSerial: "dev-1",
-		App:          "com.smile.gifmaker",
-		Query:        "kw",
-		Video: VideoData{
-			CacheKey:  "cache",
-			VideoID:   "vid123",
-			Caption:   "title",
-			Title:     "title",
-			URL:       "https://cdn.example.com/video123.mp4",
-			M3U8Url:   "https://m3u8.example.com/video123.m3u8",
-			ShareLink: "https://share.example.com/video123",
-			DataType:  "search",
-			VideoType: "USER_PAGE_VIDEO",
-			UserName:  "tester",
-			UserID:    "author-1",
-			Tags:      "tag1,tag2",
-		},
-		ItemDurationSeconds: floatPtr(42.5),
-		TaskID:              101,
-		PayloadJSON:         map[string]any{"foo": "bar"},
-	}
-	input := buildResultRecordInput(record)
-	if input.Scene != "search" {
-		t.Fatalf("scene mismatch, got %s", input.Scene)
-	}
-	if input.Params != "kw" {
-		t.Fatalf("params mismatch, got %s", input.Params)
-	}
-	if input.ItemURL != "https://www.kuaishou.com/short-video/cache" {
-		t.Fatalf("item url mismatch, got %s", input.ItemURL)
-	}
-	if input.ItemCDNURL != "https://cdn.example.com/video123.mp4" {
-		t.Fatalf("item cdn url mismatch, got %s", input.ItemCDNURL)
-	}
-	if input.UserName != "tester" {
-		t.Fatalf("user name mismatch, got %s", input.UserName)
-	}
-	if input.ItemDurationSeconds == nil || *input.ItemDurationSeconds != 42.5 {
-		t.Fatalf("duration mismatch, got %v", input.ItemDurationSeconds)
-	}
-}
-
-func floatPtr(v float64) *float64 {
-	return &v
-}
-
 func TestCreateResultRecords(t *testing.T) {
 	const wikiResponse = `{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnResult","obj_type":"bitable"}}}`
 	const batchCreateResponse = `{"code":0,"msg":"success","data":{"records":[{"record_id":"recRes1"},{"record_id":"recRes2"}]}}`

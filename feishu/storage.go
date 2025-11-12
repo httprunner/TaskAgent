@@ -4,41 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 )
-
-// VideoData carries the essential fields from apps.Video needed for Feishu reporting.
-type VideoData struct {
-	CacheKey  string
-	VideoID   string
-	Caption   string
-	Title     string
-	URL       string
-	M3U8Url   string
-	ShareLink string
-	DataType  string
-	VideoType string
-	UserName  string
-	UserID    string
-	Tags      string
-}
-
-// ResultRecord summarizes a single video entry that will be uploaded to the result table.
-type ResultRecord struct {
-	Timestamp           int64
-	DeviceSerial        string
-	App                 string
-	Query               string
-	Video               VideoData
-	ItemDurationSeconds *float64
-	TaskID              int64
-	PayloadJSON         any
-}
 
 // ResultStorage writes Feishu records into the configured result table.
 type ResultStorage struct {
@@ -69,17 +39,16 @@ func NewResultStorageFromEnv() (*ResultStorage, error) {
 }
 
 // Write uploads a single record to the Feishu result table.
-func (s *ResultStorage) Write(ctx context.Context, record ResultRecord) error {
+func (s *ResultStorage) Write(ctx context.Context, record ResultRecordInput) error {
 	if s == nil || s.client == nil {
 		return errors.New("feishu storage: storage is nil")
 	}
-	input := buildResultRecordInput(record)
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	_, err := s.client.CreateResultRecord(ctx, s.tableURL, input, nil)
+	_, err := s.client.CreateResultRecord(ctx, s.tableURL, record, nil)
 	if err != nil {
-		err = annotateFeishuFieldError(err, input)
+		err = annotateFeishuFieldError(err, record)
 		return errors.Wrap(err, "feishu storage: create result record failed")
 	}
 	return nil
@@ -93,82 +62,7 @@ func (s *ResultStorage) TableURL() string {
 	return s.tableURL
 }
 
-func buildResultRecordInput(record ResultRecord) ResultRecordInput {
-	itemID := pickFirstNonEmpty(record.Video.CacheKey, record.Video.VideoID)
-	itemCaption := pickFirstNonEmpty(record.Video.Caption, record.Video.Title)
-	return ResultRecordInput{
-		DatetimeRaw:         formatRecordTimestamp(record.Timestamp),
-		DeviceSerial:        strings.TrimSpace(record.DeviceSerial),
-		App:                 strings.TrimSpace(record.App),
-		Scene:               deriveScene(record.Video),
-		Params:              strings.TrimSpace(record.Query),
-		ItemID:              itemID,
-		ItemCaption:         itemCaption,
-		ItemCDNURL:          deriveItemCDNURL(record.Video),
-		ItemURL:             deriveItemURL(record.App, itemID, record.Video),
-		ItemDurationSeconds: record.ItemDurationSeconds,
-		UserName:            strings.TrimSpace(record.Video.UserName),
-		UserID:              strings.TrimSpace(record.Video.UserID),
-		Tags:                strings.TrimSpace(record.Video.Tags),
-		TaskID:              record.TaskID,
-		PayloadJSON:         record.PayloadJSON,
-	}
-}
-
-func formatRecordTimestamp(ts int64) string {
-	if ts > 0 {
-		return strconv.FormatInt(ts, 10)
-	}
-	return strconv.FormatInt(time.Now().UnixMilli(), 10)
-}
-
-func deriveScene(video VideoData) string {
-	if scene := strings.TrimSpace(video.DataType); scene != "" {
-		return scene
-	}
-	return strings.TrimSpace(video.VideoType)
-}
-
-func deriveItemCDNURL(video VideoData) string {
-	candidates := []string{video.URL, video.M3U8Url, video.ShareLink}
-	for _, candidate := range candidates {
-		if trimmed := strings.TrimSpace(candidate); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
-}
-
-func deriveItemURL(app, itemID string, video VideoData) string {
-	if isKuaishouPackage(app) && strings.TrimSpace(itemID) != "" {
-		return fmt.Sprintf("https://www.kuaishou.com/short-video/%s", strings.TrimSpace(itemID))
-	}
-	if trimmed := strings.TrimSpace(video.ShareLink); trimmed != "" {
-		return trimmed
-	}
-	if trimmed := strings.TrimSpace(video.URL); trimmed != "" {
-		return trimmed
-	}
-	return ""
-}
-
-func pickFirstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if trimmed := strings.TrimSpace(v); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
-}
-
-func isKuaishouPackage(pkg string) bool {
-	switch strings.TrimSpace(pkg) {
-	case "com.smile.gifmaker", "com.jiangjia.gif":
-		return true
-	default:
-		return false
-	}
-}
+// Helper functions for building ResultRecordInput values
 
 func annotateFeishuFieldError(err error, record ResultRecordInput) error {
 	if err == nil {
@@ -222,11 +116,23 @@ func collectFilledResultFields(record ResultRecordInput, names ResultFields) []s
 	if strings.TrimSpace(record.UserID) != "" {
 		columns = append(columns, names.UserID)
 	}
+	if strings.TrimSpace(record.UserAuthEntity) != "" {
+		columns = append(columns, names.UserAuthEntity)
+	}
 	if strings.TrimSpace(record.Tags) != "" {
 		columns = append(columns, names.Tags)
 	}
 	if record.TaskID != 0 {
 		columns = append(columns, names.TaskID)
+	}
+	if record.LikeCount != 0 {
+		columns = append(columns, names.LikeCount)
+	}
+	if record.VisitCount != 0 {
+		columns = append(columns, names.VisitCount)
+	}
+	if strings.TrimSpace(record.AnchorPoint) != "" {
+		columns = append(columns, names.AnchorPoint)
 	}
 	if record.PayloadJSON != nil {
 		columns = append(columns, names.PayloadJSON)
