@@ -36,13 +36,13 @@ FEISHU_LIVE_TEST=1 go test ./feishu -run Live
 # Run tests for a specific package
 go test ./feishu
 go test ./providers/adb
-go test ./cmd/piracy_detect
+go test ./cmd/piracy
 ```
 
 ### Piracy Detection Tool
 ```bash
 # Build and run piracy detection
-go run ./cmd/piracy_detect \
+go run ./cmd/piracy detect \
   --result-filter 'AND(CurrentValue.[Params]="keyword")' \
   --drama-filter "<filter>" \
   --output-csv result.csv
@@ -80,7 +80,7 @@ agent.RunOnce(ctx, "app-name")
 - `pool.go` / `tasks.go`: Core orchestration logic
 - `feishu/`: Feishu API client and Bitable operations
 - `providers/adb/`: Android device discovery via ADB
-- `cmd/piracy_detect/`: Piracy detection CLI with plugin architecture
+- `cmd/piracy/`: Unified piracy CLI (`detect` + `report` subcommands)
 - `pkg/piracydetect/`: Reusable piracy detection library
 - `internal/`: Environment loading utilities
 
