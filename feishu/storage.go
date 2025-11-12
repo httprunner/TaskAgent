@@ -129,13 +129,16 @@ func collectFilledResultFields(record ResultRecordInput, names ResultFields) []s
 		columns = append(columns, names.LikeCount)
 	}
 	if record.ViewCount != 0 {
-		columns = append(columns, names.VisitCount)
+		columns = append(columns, names.ViewCount)
 	}
 	if strings.TrimSpace(record.AnchorPoint) != "" {
 		columns = append(columns, names.AnchorPoint)
 	}
 	if record.PayloadJSON != nil {
 		columns = append(columns, names.PayloadJSON)
+	}
+	if strings.TrimSpace(record.PublishTime) != "" {
+		columns = append(columns, names.PublishTime)
 	}
 	return columns
 }

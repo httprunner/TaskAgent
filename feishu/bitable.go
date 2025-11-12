@@ -123,7 +123,7 @@ type ResultFields struct {
 	TaskID         string
 	PayloadJSON    string
 	LikeCount      string
-	VisitCount     string
+	ViewCount      string
 	AnchorPoint    string
 	CommentCount   string
 	CollectCount   string
@@ -132,6 +132,7 @@ type ResultFields struct {
 	PayMode        string
 	Collection     string
 	Episode        string
+	PublishTime    string
 }
 
 // DefaultResultFields matches the schema required by the capture result table.
@@ -153,7 +154,7 @@ var DefaultResultFields = ResultFields{
 	TaskID:         "TaskID",
 	PayloadJSON:    "PayloadJSON",
 	LikeCount:      "LikeCount",
-	VisitCount:     "VisitCount",
+	ViewCount:      "ViewCount",
 	AnchorPoint:    "AnchorPoint",
 	CommentCount:   "CommentCount",
 	CollectCount:   "CollectCount",
@@ -162,6 +163,7 @@ var DefaultResultFields = ResultFields{
 	PayMode:        "PayMode",
 	Collection:     "Collection",
 	Episode:        "Episode",
+	PublishTime:    "PublishTime",
 }
 
 // ResultRecordInput contains the capture metadata uploaded to the result table.
@@ -196,6 +198,7 @@ type ResultRecordInput struct {
 	PayMode             string
 	Collection          string
 	Episode             string
+	PublishTime         string
 }
 
 // TargetStatusUpdate links a TaskID to the status value it should adopt.
@@ -822,6 +825,9 @@ func (fields ResultFields) merge(override ResultFields) ResultFields {
 	if strings.TrimSpace(override.Episode) != "" {
 		result.Episode = override.Episode
 	}
+	if strings.TrimSpace(override.PublishTime) != "" {
+		result.PublishTime = override.PublishTime
+	}
 	return result
 }
 
@@ -900,6 +906,8 @@ func buildResultRecordPayloads(records []ResultRecordInput, fields ResultFields)
 		} else if payload != "" && strings.TrimSpace(fields.PayloadJSON) != "" {
 			row[fields.PayloadJSON] = payload
 		}
+		addOptionalInt64(row, fields.LikeCount, rec.LikeCount)
+		addOptionalInt64(row, fields.ViewCount, int64(rec.ViewCount))
 		addOptionalInt64(row, fields.CommentCount, rec.CommentCount)
 		addOptionalInt64(row, fields.CollectCount, rec.CollectCount)
 		addOptionalInt64(row, fields.ForwardCount, rec.ForwardCount)
@@ -907,6 +915,7 @@ func buildResultRecordPayloads(records []ResultRecordInput, fields ResultFields)
 		addOptionalField(row, fields.PayMode, rec.PayMode)
 		addOptionalField(row, fields.Collection, rec.Collection)
 		addOptionalField(row, fields.Episode, rec.Episode)
+		addOptionalField(row, fields.PublishTime, rec.PublishTime)
 		if len(row) == 0 {
 			return nil, fmt.Errorf("feishu: result record %d has no fields to set", idx)
 		}
