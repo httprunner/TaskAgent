@@ -127,6 +127,9 @@ piracy detect --result-filter 'AND(CurrentValue.[Params]="短剧名称")'
 
 # Detection and reporting
 piracy report --app com.smile.gifmaker --params "短剧A,短剧B"
+
+# Full automation
+piracy auto --app com.smile.gifmaker --output results/piracy_auto.csv
 ```
 
 ## Configuration

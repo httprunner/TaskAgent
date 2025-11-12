@@ -49,6 +49,12 @@ type Match struct {
 	RecordCount   int
 }
 
+// Drama captures a single drama entry from the drama table.
+type Drama struct {
+	Name     string
+	Duration float64
+}
+
 // Report captures the aggregated detection results.
 type Report struct {
 	Matches       []Match

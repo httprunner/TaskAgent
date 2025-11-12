@@ -16,6 +16,7 @@ type Reporter struct {
 	dramaTableURL  string // Original drama table containing drama durations
 	targetTableURL string // Target table where piracy reports are written
 	threshold      float64
+	config         Config
 }
 
 // NewReporter creates a new piracy reporter
@@ -24,6 +25,13 @@ func NewReporter() *Reporter {
 	resultTableURL := os.Getenv("RESULT_BITABLE_URL") // Video data
 	dramaTableURL := os.Getenv("DRAMA_BITABLE_URL")   // Drama durations
 	targetTableURL := os.Getenv("TARGET_BITABLE_URL") // Where to write reports
+
+	cfg := Config{}
+	cfg.ApplyDefaults()
+	threshold := cfg.Threshold
+	if threshold <= 0 {
+		threshold = 0.5
+	}
 
 	if resultTableURL == "" {
 		log.Warn().Msg("Result table URL not configured, piracy detection will be skipped")
@@ -39,7 +47,8 @@ func NewReporter() *Reporter {
 		resultTableURL: resultTableURL,
 		dramaTableURL:  dramaTableURL,
 		targetTableURL: targetTableURL,
-		threshold:      0.5, // Default 50% threshold
+		threshold:      threshold,
+		config:         cfg,
 	}
 }
 
@@ -47,6 +56,24 @@ func NewReporter() *Reporter {
 func (pr *Reporter) IsConfigured() bool {
 	return pr.resultTableURL != "" && pr.dramaTableURL != "" && pr.targetTableURL != ""
 }
+
+// Config returns a copy of the reporter configuration with defaults applied.
+func (pr *Reporter) Config() Config {
+	cfg := pr.config
+	if cfg.Threshold <= 0 {
+		cfg.Threshold = pr.threshold
+	}
+	return cfg
+}
+
+// ResultTableURL exposes the configured result table URL.
+func (pr *Reporter) ResultTableURL() string { return pr.resultTableURL }
+
+// DramaTableURL exposes the configured drama table URL.
+func (pr *Reporter) DramaTableURL() string { return pr.dramaTableURL }
+
+// Threshold returns the configured detection threshold.
+func (pr *Reporter) Threshold() float64 { return pr.threshold }
 
 // ReportPiracyForParams detects piracy for specific params and reports to drama table
 func (pr *Reporter) ReportPiracyForParams(ctx context.Context, app string, paramsList []string) error {
@@ -60,36 +87,7 @@ func (pr *Reporter) ReportPiracyForParams(ctx context.Context, app string, param
 		return nil
 	}
 
-	// Build filter for specific params
-	paramsFilter := buildParamsFilter(paramsList)
-
-	log.Info().
-		Str("app", app).
-		Int("params_count", len(paramsList)).
-		Str("filter", paramsFilter).
-		Msg("Starting piracy detection for params")
-
-	// Configure piracy detection options
-	// - ResultTable: contains video data (source)
-	// - DramaTable: contains original drama durations (source)
-	opts := Options{
-		ResultTable: TableConfig{
-			URL:    pr.resultTableURL,
-			Filter: paramsFilter,
-		},
-		DramaTable: TableConfig{
-			URL: pr.dramaTableURL,
-		},
-		Config: Config{
-			Threshold: pr.threshold,
-		},
-	}
-
-	// Apply defaults
-	opts.Config.ApplyDefaults()
-
-	// Run piracy detection
-	report, err := Detect(ctx, opts)
+	report, err := pr.DetectWithFilters(ctx, paramsList, "", "")
 	if err != nil {
 		return fmt.Errorf("piracy detection failed: %w", err)
 	}
@@ -102,79 +100,81 @@ func (pr *Reporter) ReportPiracyForParams(ctx context.Context, app string, param
 		Float64("threshold", report.Threshold).
 		Msg("Piracy detection completed")
 
-	// If no suspicious combos found, return early
-	if len(report.Matches) == 0 {
+	return pr.ReportMatches(ctx, app, report.Matches)
+}
+
+// DetectMatchesForParams returns detection report for the provided params without writing to tables.
+func (pr *Reporter) DetectMatchesForParams(ctx context.Context, paramsList []string) (*Report, error) {
+	return pr.DetectWithFilters(ctx, paramsList, "", "")
+}
+
+// DetectWithFilters returns detection report for the provided params with additional table filters.
+func (pr *Reporter) DetectWithFilters(ctx context.Context, paramsList []string, resultExtraFilter, dramaExtraFilter string) (*Report, error) {
+	if len(paramsList) == 0 {
+		return &Report{Threshold: pr.threshold}, nil
+	}
+
+	paramsFilter := buildParamsFilter(paramsList, pr.config.ParamsField)
+	dramaFilter := buildParamsFilter(paramsList, pr.config.DramaParamsField)
+
+	finalResultFilter := combineFilters(resultExtraFilter, paramsFilter)
+	finalDramaFilter := combineFilters(dramaExtraFilter, dramaFilter)
+
+	log.Info().
+		Int("params_count", len(paramsList)).
+		Str("result_filter", finalResultFilter).
+		Str("drama_filter", finalDramaFilter).
+		Msg("Running piracy detection for params")
+
+	ops := Options{
+		ResultTable: TableConfig{
+			URL:    pr.resultTableURL,
+			Filter: finalResultFilter,
+		},
+		DramaTable: TableConfig{
+			URL:    pr.dramaTableURL,
+			Filter: finalDramaFilter,
+		},
+		Config: pr.Config(),
+	}
+
+	ops.Config.ApplyDefaults()
+
+	report, err := Detect(ctx, ops)
+	if err != nil {
+		return nil, err
+	}
+	return report, nil
+}
+
+// ReportMatches writes suspicious combos to the target table if any exceed the threshold.
+func (pr *Reporter) ReportMatches(ctx context.Context, app string, matches []Match) error {
+	if len(matches) == 0 {
 		log.Info().Msg("No suspicious combos found, nothing to report")
 		return nil
 	}
 
-	// Write suspicious combos to target table
-	return pr.writeMatchesToTargetTable(ctx, app, report.Matches)
-}
-
-// buildParamsFilter builds a Feishu filter for specific params
-func buildParamsFilter(paramsList []string) string {
-	if len(paramsList) == 0 {
-		return ""
-	}
-
-	// Escape params for Feishu filter
-	escapedParams := make([]string, 0, len(paramsList))
-	for _, p := range paramsList {
-		if p == "" {
-			continue
-		}
-		// Double quotes for Feishu filter
-		escaped := strings.ReplaceAll(p, "\"", "\\\"")
-		escapedParams = append(escapedParams, fmt.Sprintf("\"%s\"", escaped))
-	}
-
-	if len(escapedParams) == 1 {
-		return fmt.Sprintf("CurrentValue.[Params]=%s", escapedParams[0])
-	}
-
-	// Use OR for multiple params
-	return fmt.Sprintf("OR(%s)", strings.Join(
-		buildParamConditions(escapedParams), ", "))
-}
-
-// buildParamConditions builds individual param conditions
-func buildParamConditions(escapedParams []string) []string {
-	conditions := make([]string, 0, len(escapedParams))
-	for _, param := range escapedParams {
-		conditions = append(conditions, fmt.Sprintf("CurrentValue.[Params]=%s", param))
-	}
-	return conditions
-}
-
-// writeMatchesToTargetTable writes piracy matches to target table
-func (pr *Reporter) writeMatchesToTargetTable(ctx context.Context, app string, matches []Match) error {
 	log.Info().
 		Int("match_count", len(matches)).
 		Msg("Writing piracy matches to target table")
 
-	// Create Feishu client
 	client, err := feishu.NewClientFromEnv()
 	if err != nil {
 		return fmt.Errorf("failed to create feishu client: %w", err)
 	}
 
-	// Prepare records to write using TargetRecordInput (matches target table schema)
 	records := make([]feishu.TargetRecordInput, 0, len(matches))
 	for _, match := range matches {
-		// Only report matches that meet the threshold
 		if match.Ratio < pr.threshold {
 			continue
 		}
-
-		record := feishu.TargetRecordInput{
+		records = append(records, feishu.TargetRecordInput{
 			App:    strings.TrimSpace(app),
 			Scene:  "个人页搜索",
 			Params: strings.TrimSpace(match.Params),
 			User:   strings.TrimSpace(match.UserID),
-			Status: "PiracyDetected", // Mark as piracy detected
-		}
-		records = append(records, record)
+			Status: "PiracyDetected",
+		})
 	}
 
 	if len(records) == 0 {
@@ -182,7 +182,6 @@ func (pr *Reporter) writeMatchesToTargetTable(ctx context.Context, app string, m
 		return nil
 	}
 
-	// Write records to target table
 	log.Info().
 		Int("record_count", len(records)).
 		Str("table_url", pr.targetTableURL).
@@ -197,4 +196,59 @@ func (pr *Reporter) writeMatchesToTargetTable(ctx context.Context, app string, m
 		Int("record_count", len(recordIDs)).
 		Msg("Successfully wrote piracy report records to target table")
 	return nil
+}
+
+func buildParamsFilter(paramsList []string, fieldName string) string {
+	formattedValues := make([]string, 0, len(paramsList))
+	for _, raw := range paramsList {
+		s := strings.TrimSpace(raw)
+		if s == "" {
+			continue
+		}
+		escaped := strings.ReplaceAll(s, "\"", "\\\"")
+		formattedValues = append(formattedValues, fmt.Sprintf("\"%s\"", escaped))
+	}
+	if len(formattedValues) == 0 {
+		return ""
+	}
+
+	fieldExpr := formatFieldExpression(fieldName)
+	if len(formattedValues) == 1 {
+		return fmt.Sprintf("%s=%s", fieldExpr, formattedValues[0])
+	}
+
+	conditions := make([]string, 0, len(formattedValues))
+	for _, val := range formattedValues {
+		conditions = append(conditions, fmt.Sprintf("%s=%s", fieldExpr, val))
+	}
+	return fmt.Sprintf("OR(%s)", strings.Join(conditions, ", "))
+}
+
+func formatFieldExpression(fieldName string) string {
+	f := strings.TrimSpace(fieldName)
+	if f == "" {
+		f = "Params"
+	}
+	if strings.HasPrefix(f, "CurrentValue.") {
+		return f
+	}
+	if strings.HasPrefix(f, "[") && strings.HasSuffix(f, "]") {
+		return fmt.Sprintf("CurrentValue.%s", f)
+	}
+	return fmt.Sprintf("CurrentValue.[%s]", f)
+}
+
+func combineFilters(base, addition string) string {
+	base = strings.TrimSpace(base)
+	addition = strings.TrimSpace(addition)
+	switch {
+	case base == "" && addition == "":
+		return ""
+	case base == "":
+		return addition
+	case addition == "":
+		return base
+	default:
+		return fmt.Sprintf("AND(%s, %s)", base, addition)
+	}
 }

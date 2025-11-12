@@ -41,6 +41,25 @@ Available flags:
 - `--params`: Comma-separated list of drama params
 - `--params-file`: File with one param per line (ignores empty lines and `#` comments)
 
+### auto
+- Fetches the entire drama list and durations from the drama table
+- Iterates each drama, fetching matching capture results and running detection immediately
+- Reports suspicious matches per drama before moving to the next and writes a consolidated CSV at the end
+- Supports configurable concurrency (default 10) to process multiple dramas in parallel
+
+```bash
+go run ./cmd/piracy auto \
+  --app com.smile.gifmaker \
+  --output results/piracy_auto.csv
+```
+
+Available flags:
+- `--app` (required): App package name used for reporting
+- `--output`: Optional CSV output path (`./piracy_auto_<timestamp>.csv` by default)
+- `--result-filter`: Extra filter for the result table query
+- `--drama-filter`: Extra filter for the drama table query
+- `--concurrency`: Number of dramas processed in parallel (default 10)
+
 ## Environment configuration
 
 All table URLs, field names, and thresholds are configured through environment variables (typically stored in `.env`). The CLI expects:
