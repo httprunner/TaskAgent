@@ -1,4 +1,4 @@
-package piracydetect
+package piracy
 
 import (
 	"encoding/json"

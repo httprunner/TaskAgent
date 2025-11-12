@@ -1,4 +1,4 @@
-package piracyreport
+package piracy
 
 import (
 	"context"
@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/httprunner/TaskAgent/feishu"
-	"github.com/httprunner/TaskAgent/pkg/piracydetect"
 	"github.com/rs/zerolog/log"
 )
 
@@ -73,15 +72,15 @@ func (pr *Reporter) ReportPiracyForParams(ctx context.Context, app string, param
 	// Configure piracy detection options
 	// - ResultTable: contains video data (source)
 	// - DramaTable: contains original drama durations (source)
-	opts := piracydetect.Options{
-		ResultTable: piracydetect.TableConfig{
+	opts := Options{
+		ResultTable: TableConfig{
 			URL:    pr.resultTableURL,
 			Filter: paramsFilter,
 		},
-		DramaTable: piracydetect.TableConfig{
+		DramaTable: TableConfig{
 			URL: pr.dramaTableURL,
 		},
-		Config: piracydetect.Config{
+		Config: Config{
 			Threshold: pr.threshold,
 		},
 	}
@@ -90,7 +89,7 @@ func (pr *Reporter) ReportPiracyForParams(ctx context.Context, app string, param
 	opts.Config.ApplyDefaults()
 
 	// Run piracy detection
-	report, err := piracydetect.Detect(ctx, opts)
+	report, err := Detect(ctx, opts)
 	if err != nil {
 		return fmt.Errorf("piracy detection failed: %w", err)
 	}
@@ -149,7 +148,7 @@ func buildParamConditions(escapedParams []string) []string {
 }
 
 // writeMatchesToTargetTable writes piracy matches to target table
-func (pr *Reporter) writeMatchesToTargetTable(ctx context.Context, app string, matches []piracydetect.Match) error {
+func (pr *Reporter) writeMatchesToTargetTable(ctx context.Context, app string, matches []Match) error {
 	log.Info().
 		Int("match_count", len(matches)).
 		Msg("Writing piracy matches to target table")

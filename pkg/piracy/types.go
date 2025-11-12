@@ -1,4 +1,4 @@
-package piracydetect
+package piracy
 
 import "github.com/httprunner/TaskAgent/feishu"
 

@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/httprunner/TaskAgent/pkg/piracyreport"
+	"github.com/httprunner/TaskAgent/pkg/piracy"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
@@ -41,7 +41,7 @@ The command reuses the same drama and result tables that the detection workflow 
 				Int("params_count", len(paramsList)).
 				Msg("starting piracy report")
 
-			reporter := piracyreport.NewReporter()
+			reporter := piracy.NewReporter()
 			if !reporter.IsConfigured() {
 				return fmt.Errorf("reporter not configured. Please check environment variables: FEISHU_APP_ID, FEISHU_APP_SECRET, RESULT_BITABLE_URL, DRAMA_BITABLE_URL")
 			}

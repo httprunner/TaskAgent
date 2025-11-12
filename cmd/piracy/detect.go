@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/httprunner/TaskAgent/feishu"
-	"github.com/httprunner/TaskAgent/pkg/piracydetect"
+	"github.com/httprunner/TaskAgent/pkg/piracy"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
@@ -34,12 +34,12 @@ func newDetectCmd() *cobra.Command {
 				return fmt.Errorf("original drama table url is required ($DRAMA_BITABLE_URL)")
 			}
 
-			opts := piracydetect.Options{
-				ResultTable: piracydetect.TableConfig{
+			opts := piracy.Options{
+				ResultTable: piracy.TableConfig{
 					URL:    resultURL,
 					Filter: flagResultFilter,
 				},
-				DramaTable: piracydetect.TableConfig{
+				DramaTable: piracy.TableConfig{
 					URL:    dramaURL,
 					Filter: flagDramaFilter,
 				},
@@ -51,7 +51,7 @@ func newDetectCmd() *cobra.Command {
 				Str("drama_table", dramaURL).
 				Msg("starting piracy detection")
 
-			report, err := piracydetect.Detect(cmd.Context(), opts)
+			report, err := piracy.Detect(cmd.Context(), opts)
 			if err != nil {
 				return err
 			}
@@ -79,7 +79,7 @@ func pickOrEnv(flagVal, envKey string) string {
 	return strings.TrimSpace(os.Getenv(envKey))
 }
 
-func printReport(report *piracydetect.Report) {
+func printReport(report *piracy.Report) {
 	log.Info().
 		Int("target_rows", report.TargetRows).
 		Int("result_rows", report.ResultRows).
@@ -122,7 +122,7 @@ func printReport(report *piracydetect.Report) {
 	}
 }
 
-func dumpCSV(path string, report *piracydetect.Report) error {
+func dumpCSV(path string, report *piracy.Report) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("create csv failed: %w", err)
