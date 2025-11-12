@@ -37,7 +37,9 @@ type TargetFields struct {
 	Scene            string
 	Datetime         string
 	Status           string
-	User             string
+	UserID           string
+	UserName         string
+	Extra            string
 	DeviceSerial     string
 	DispatchedDevice string
 	DispatchedTime   string
@@ -52,7 +54,9 @@ var DefaultTargetFields = TargetFields{
 	Scene:            "Scene",
 	Datetime:         "Datetime",
 	Status:           "Status",
-	User:             "User",
+	UserID:           "UserID",
+	UserName:         "UserName",
+	Extra:            "Extra",
 	DeviceSerial:     "DeviceSerial",
 	DispatchedDevice: "DispatchedDevice",
 	DispatchedTime:   "DispatchedTime",
@@ -66,7 +70,9 @@ type TargetRow struct {
 	Params            string
 	App               string
 	Scene             string
-	User              string
+	UserID            string
+	UserName          string
+	Extra             string
 	Datetime          *time.Time
 	DatetimeRaw       string
 	Status            string
@@ -88,7 +94,9 @@ type TargetRecordInput struct {
 	Datetime          *time.Time
 	DatetimeRaw       string
 	Status            string
-	User              string
+	UserID            string
+	UserName          string
+	Extra             string
 	DeviceSerial      string
 	DispatchedDevice  string
 	DispatchedTime    *time.Time
@@ -686,9 +694,17 @@ func (fields TargetFields) merge(override TargetFields) TargetFields {
 		log.Warn().Str("new", override.Status).Msg("overriding field Status")
 		result.Status = override.Status
 	}
-	if strings.TrimSpace(override.User) != "" {
-		log.Warn().Str("new", override.User).Msg("overriding field User")
-		result.User = override.User
+	if strings.TrimSpace(override.UserID) != "" {
+		log.Warn().Str("new", override.UserID).Msg("overriding field UserID")
+		result.UserID = override.UserID
+	}
+	if strings.TrimSpace(override.UserName) != "" {
+		log.Warn().Str("new", override.UserName).Msg("overriding field UserName")
+		result.UserName = override.UserName
+	}
+	if strings.TrimSpace(override.Extra) != "" {
+		log.Warn().Str("new", override.Extra).Msg("overriding field Extra")
+		result.Extra = override.Extra
 	}
 	if strings.TrimSpace(override.DeviceSerial) != "" {
 		log.Warn().Str("new", override.DeviceSerial).Msg("overriding field DeviceSerial")
@@ -777,7 +793,9 @@ func buildTargetRecordPayloads(records []TargetRecordInput, fields TargetFields)
 		if strings.TrimSpace(fields.Status) != "" && rec.Status != "" {
 			row[fields.Status] = rec.Status
 		}
-		addOptionalField(row, fields.User, rec.User)
+		addOptionalField(row, fields.UserID, rec.UserID)
+		addOptionalField(row, fields.UserName, rec.UserName)
+		addOptionalField(row, fields.Extra, rec.Extra)
 		addOptionalField(row, fields.DeviceSerial, rec.DeviceSerial)
 		addOptionalField(row, fields.DispatchedDevice, rec.DispatchedDevice)
 		if strings.TrimSpace(fields.ElapsedSeconds) != "" && rec.ElapsedSeconds != nil {
@@ -1031,7 +1049,9 @@ func decodeTargetRow(rec bitableRecord, fields TargetFields) (TargetRow, error) 
 		App:              bitableOptionalString(rec.Fields, fields.App),
 		Scene:            bitableOptionalString(rec.Fields, fields.Scene),
 		Status:           status,
-		User:             bitableOptionalString(rec.Fields, fields.User),
+		UserID:           bitableOptionalString(rec.Fields, fields.UserID),
+		UserName:         bitableOptionalString(rec.Fields, fields.UserName),
+		Extra:            bitableOptionalString(rec.Fields, fields.Extra),
 		DeviceSerial:     targetDevice,
 		DispatchedDevice: dispatchedDevice,
 	}

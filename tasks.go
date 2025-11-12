@@ -135,7 +135,9 @@ type FeishuTask struct {
 	App               string
 	Scene             string
 	Status            string
-	User              string
+	UserID            string
+	UserName          string
+	Extra             string
 	DeviceSerial      string
 	DispatchedDevice  string
 	Datetime          *time.Time
@@ -290,7 +292,9 @@ func fetchFeishuTasksWithFilter(ctx context.Context, client targetTableClient, b
 			App:               row.App,
 			Scene:             row.Scene,
 			Status:            row.Status,
-			User:              row.User,
+			UserID:            row.UserID,
+			UserName:          row.UserName,
+			Extra:             row.Extra,
 			DeviceSerial:      row.DeviceSerial,
 			DispatchedDevice:  row.DispatchedDevice,
 			Datetime:          row.Datetime,
@@ -340,11 +344,13 @@ func summarizeFeishuTasks(tasks []*FeishuTask) []map[string]any {
 			continue
 		}
 		entry := map[string]any{
-			"task_id": task.TaskID,
-			"params":  task.Params,
-			"scene":   task.Scene,
-			"status":  task.Status,
-			"user":    task.User,
+			"task_id":   task.TaskID,
+			"params":    task.Params,
+			"scene":     task.Scene,
+			"status":    task.Status,
+			"user_id":   task.UserID,
+			"user_name": task.UserName,
+			"extra":     task.Extra,
 		}
 		if task.Datetime != nil {
 			entry["datetime"] = task.Datetime.In(task.Datetime.Location()).Format(tsLayout)

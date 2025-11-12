@@ -169,11 +169,13 @@ func (pr *Reporter) ReportMatches(ctx context.Context, app string, matches []Mat
 			continue
 		}
 		records = append(records, feishu.TargetRecordInput{
-			App:    strings.TrimSpace(app),
-			Scene:  "个人页搜索",
-			Params: strings.TrimSpace(match.Params),
-			User:   strings.TrimSpace(match.UserID),
-			Status: "PiracyDetected",
+			App:      strings.TrimSpace(app),
+			Scene:    "个人页搜索",
+			Params:   strings.TrimSpace(match.Params),
+			UserID:   strings.TrimSpace(match.UserID),
+			UserName: strings.TrimSpace(match.UserName),
+			Extra:    fmt.Sprintf("ratio=%.2f%%", match.Ratio*100), // 存储实际检测比例值（百分比形式）
+			Status:   "PiracyDetected",
 		})
 	}
 

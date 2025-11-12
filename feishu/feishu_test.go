@@ -162,7 +162,9 @@ func TestDecodeTargetRow(t *testing.T) {
 			DefaultTargetFields.Scene:            "auto",
 			DefaultTargetFields.Datetime:         "2025-11-08 10:30:00",
 			DefaultTargetFields.Status:           "pending",
-			DefaultTargetFields.User:             "tester",
+			DefaultTargetFields.UserID:           "user-123",
+			DefaultTargetFields.UserName:         "tester",
+			DefaultTargetFields.Extra:            "0.85",
 			DefaultTargetFields.DeviceSerial:     "dev-target",
 			DefaultTargetFields.DispatchedDevice: "dev-actual",
 		},
@@ -180,8 +182,14 @@ func TestDecodeTargetRow(t *testing.T) {
 	if row.Status != "pending" {
 		t.Fatalf("unexpected status %q", row.Status)
 	}
-	if row.User != "tester" {
-		t.Fatalf("unexpected user %+v", row)
+	if row.UserID != "user-123" {
+		t.Fatalf("unexpected user id %+v", row)
+	}
+	if row.UserName != "tester" {
+		t.Fatalf("unexpected user name %+v", row)
+	}
+	if row.Extra != "0.85" {
+		t.Fatalf("unexpected extra %+v", row)
 	}
 	if row.DeviceSerial != "dev-target" {
 		t.Fatalf("unexpected target device %#v", row.DeviceSerial)
@@ -207,7 +215,9 @@ func TestDecodeTargetRowAllowsEmptyStatus(t *testing.T) {
 			DefaultTargetFields.Scene:            "auto",
 			DefaultTargetFields.Datetime:         "2025-11-08",
 			DefaultTargetFields.Status:           "",
-			DefaultTargetFields.User:             "",
+			DefaultTargetFields.UserID:           "",
+			DefaultTargetFields.UserName:         "",
+			DefaultTargetFields.Extra:            "",
 			DefaultTargetFields.DeviceSerial:     "",
 			DefaultTargetFields.DispatchedDevice: "",
 		},
@@ -219,8 +229,8 @@ func TestDecodeTargetRowAllowsEmptyStatus(t *testing.T) {
 	if row.Status != "" {
 		t.Fatalf("expected empty status, got %q", row.Status)
 	}
-	if row.User != "" || row.DeviceSerial != "" || row.DispatchedDevice != "" {
-		t.Fatalf("expected empty user/device, got %+v", row)
+	if row.UserID != "" || row.UserName != "" || row.Extra != "" || row.DeviceSerial != "" || row.DispatchedDevice != "" {
+		t.Fatalf("expected empty user/device fields, got %+v", row)
 	}
 }
 
@@ -415,7 +425,7 @@ func TestCreateTargetRecords(t *testing.T) {
 
 	when := time.Date(2024, 10, 1, 12, 0, 0, 0, time.UTC)
 	records := []TargetRecordInput{
-		{TaskID: 301, Params: `{"foo":1}`, App: "netease", Scene: "parse", Datetime: &when, Status: "pending", User: "tester"},
+		{TaskID: 301, Params: `{"foo":1}`, App: "netease", Scene: "parse", Datetime: &when, Status: "pending", UserID: "user-123", UserName: "tester", Extra: "0.90"},
 		{TaskID: 0, Params: `{"foo":2}`, DatetimeRaw: "2024-10-02 08:00:00", Status: "queued"},
 	}
 	override := &TargetFields{Status: "biz_status"}
@@ -912,18 +922,20 @@ func TestTargetRecordLifecycleLive(t *testing.T) {
 	baseTaskID := time.Now().Unix()
 	records := []TargetRecordInput{
 		{
-			Params: fmt.Sprintf("{\"test\":\"create_live\",\"id\":%d}", baseTaskID),
-			App:    "test-live",
-			Scene:  "integration",
-			Status: "pending",
-			User:   "test-suite",
+			Params:   fmt.Sprintf("{\"test\":\"create_live\",\"id\":%d}", baseTaskID),
+			App:      "test-live",
+			Scene:    "integration",
+			Status:   "pending",
+			UserID:   "test-suite-id",
+			UserName: "test-suite",
 		},
 		{
-			Params: fmt.Sprintf("{\"test\":\"create_live\",\"id\":%d}", baseTaskID+1),
-			App:    "test-live",
-			Scene:  "integration",
-			Status: "queued",
-			User:   "test-suite",
+			Params:   fmt.Sprintf("{\"test\":\"create_live\",\"id\":%d}", baseTaskID+1),
+			App:      "test-live",
+			Scene:    "integration",
+			Status:   "queued",
+			UserID:   "test-suite-id",
+			UserName: "test-suite",
 		},
 	}
 	ids, err := client.CreateTargetRecords(ctx, bitableURL, records, nil)

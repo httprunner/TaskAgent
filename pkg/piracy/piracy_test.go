@@ -268,7 +268,6 @@ func TestConfigApplyDefaultsWithEnv(t *testing.T) {
 	}
 }
 
-
 func TestConfigApplyDefaults(t *testing.T) {
 	tests := []struct {
 		name   string
