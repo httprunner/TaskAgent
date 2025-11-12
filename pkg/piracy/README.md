@@ -130,6 +130,9 @@ piracy report --app com.smile.gifmaker --params "短剧A,短剧B"
 
 # Full automation
 piracy auto --app com.smile.gifmaker --output results/piracy_auto.csv
+
+# Increase concurrency
+piracy auto --app com.smile.gifmaker --concurrency 20
 ```
 
 ## Configuration

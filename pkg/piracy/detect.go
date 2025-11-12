@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/httprunner/TaskAgent/feishu"
 	"github.com/rs/zerolog/log"
@@ -123,7 +124,46 @@ func fetchRows(ctx context.Context, client *feishu.Client, cfg TableConfig) ([]R
 	if cfg.Limit > 0 {
 		queryOpts.Limit = cfg.Limit
 	}
-	return client.FetchBitableRows(ctx, cfg.URL, queryOpts)
+	return fetchRowsWithRetry(ctx, client, cfg.URL, queryOpts, 3)
+}
+
+func fetchRowsWithRetry(ctx context.Context, client *feishu.Client, url string, opts *feishu.TargetQueryOptions, attempts int) ([]Row, error) {
+	if attempts <= 0 {
+		attempts = 1
+	}
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		rows, err := client.FetchBitableRows(ctx, url, opts)
+		if err == nil {
+			return rows, nil
+		}
+		lastErr = err
+		if !isTransientFeishuError(err) || i == attempts-1 {
+			break
+		}
+		backoff := time.Duration(1<<i) * 500 * time.Millisecond
+		select {
+		case <-time.After(backoff):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return nil, lastErr
+}
+
+func isTransientFeishuError(err error) bool {
+	return isFeishuDataNotReady(err)
+}
+
+func isFeishuDataNotReady(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "data not ready") {
+		return true
+	}
+	return strings.Contains(err.Error(), "\"code\":1254607")
 }
 
 // analyzeRows performs the piracy detection analysis on the fetched rows.

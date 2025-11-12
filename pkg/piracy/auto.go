@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/httprunner/TaskAgent/feishu"
@@ -21,16 +22,18 @@ type AutoOptions struct {
 	OutputCSV    string
 	ResultFilter string
 	DramaFilter  string
+	Concurrency  int
 }
 
 // AutoSummary captures the aggregated outcome of an auto run.
 type AutoSummary struct {
-	CSVPath    string
-	MatchCount int
-	DramaCount int
-	Matches    []Match
-	Dramas     []Drama
-	Threshold  float64
+	CSVPath     string
+	MatchCount  int
+	DramaCount  int
+	Matches     []Match
+	Dramas      []Drama
+	Threshold   float64
+	Concurrency int
 }
 
 // RunAuto executes the end-to-end piracy detection and reporting workflow.
@@ -64,50 +67,104 @@ func RunAuto(ctx context.Context, opts AutoOptions) (*AutoSummary, error) {
 		log.Warn().Msg("no dramas found in drama table")
 	}
 
-	allMatches := make([]Match, 0)
+	concurrency := opts.Concurrency
+	if concurrency <= 0 {
+		concurrency = 10
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	sem := make(chan struct{}, concurrency)
+	var (
+		wg         sync.WaitGroup
+		errOnce    sync.Once
+		runErr     error
+		matchesMu  sync.Mutex
+		allMatches = make([]Match, 0)
+	)
+
 	for idx, drama := range dramas {
 		name := strings.TrimSpace(drama.Name)
 		if name == "" || drama.Duration <= 0 {
 			continue
 		}
 
-		paramFilter := buildParamsFilter([]string{name}, cfg.ParamsField)
-		resultFilter := combineFilters(opts.ResultFilter, paramFilter)
-
-		log.Info().
-			Int("index", idx+1).
-			Int("total", len(dramas)).
-			Str("drama", name).
-			Str("result_filter", resultFilter).
-			Msg("Running auto detection for drama")
-
-		resultRows, err := fetchRows(ctx, client, TableConfig{
-			URL:    reporter.ResultTableURL(),
-			Filter: resultFilter,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch result rows for %s: %w", name, err)
+		if ctx.Err() != nil {
+			break
 		}
 
-		dramaRow := Row{Fields: map[string]any{
-			cfg.DramaParamsField:   name,
-			cfg.DramaDurationField: drama.Duration,
-		}}
+		wg.Add(1)
+		go func(idx int, drama Drama, name string) {
+			defer wg.Done()
 
-		report := analyzeRows(resultRows, []Row{dramaRow}, cfg)
-		if len(report.Matches) == 0 {
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			defer func() { <-sem }()
+
+			paramFilter := buildParamsFilter([]string{name}, cfg.ParamsField)
+			resultFilter := combineFilters(opts.ResultFilter, paramFilter)
+
 			log.Info().
+				Int("index", idx+1).
+				Int("total", len(dramas)).
 				Str("drama", name).
-				Int("records", len(resultRows)).
-				Msg("No suspicious combos found for drama")
-			continue
-		}
+				Str("result_filter", resultFilter).
+				Msg("Running auto detection for drama")
 
-		if err := reporter.ReportMatches(ctx, opts.App, report.Matches); err != nil {
-			return nil, fmt.Errorf("failed to report matches for %s: %w", name, err)
-		}
+			resultRows, err := fetchRows(ctx, client, TableConfig{
+				URL:    reporter.ResultTableURL(),
+				Filter: resultFilter,
+			})
+			if err != nil {
+				if isFeishuDataNotReady(err) {
+					log.Warn().
+						Str("drama", name).
+						Msg("Result table data not ready, skipping")
+					return
+				}
+				errOnce.Do(func() {
+					runErr = fmt.Errorf("failed to fetch result rows for %s: %w", name, err)
+					cancel()
+				})
+				return
+			}
 
-		allMatches = append(allMatches, report.Matches...)
+			dramaRow := Row{Fields: map[string]any{
+				cfg.DramaParamsField:   name,
+				cfg.DramaDurationField: drama.Duration,
+			}}
+
+			report := analyzeRows(resultRows, []Row{dramaRow}, cfg)
+			if len(report.Matches) == 0 {
+				log.Info().
+					Str("drama", name).
+					Int("records", len(resultRows)).
+					Msg("No suspicious combos found for drama")
+				return
+			}
+
+			if err := reporter.ReportMatches(ctx, opts.App, report.Matches); err != nil {
+				errOnce.Do(func() {
+					runErr = fmt.Errorf("failed to report matches for %s: %w", name, err)
+					cancel()
+				})
+				return
+			}
+
+			matchesMu.Lock()
+			allMatches = append(allMatches, report.Matches...)
+			matchesMu.Unlock()
+		}(idx, drama, name)
+	}
+
+	wg.Wait()
+
+	if runErr != nil {
+		return nil, runErr
 	}
 
 	csvPath := strings.TrimSpace(opts.OutputCSV)
@@ -120,12 +177,13 @@ func RunAuto(ctx context.Context, opts AutoOptions) (*AutoSummary, error) {
 	}
 
 	return &AutoSummary{
-		CSVPath:    csvPath,
-		MatchCount: len(allMatches),
-		DramaCount: len(dramas),
-		Matches:    allMatches,
-		Dramas:     dramas,
-		Threshold:  cfg.Threshold,
+		CSVPath:     csvPath,
+		MatchCount:  len(allMatches),
+		DramaCount:  len(dramas),
+		Matches:     allMatches,
+		Dramas:      dramas,
+		Threshold:   cfg.Threshold,
+		Concurrency: concurrency,
 	}, nil
 }
 
