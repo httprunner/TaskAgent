@@ -145,6 +145,7 @@ type FeishuTask struct {
 	DispatchedTime    *time.Time
 	DispatchedTimeRaw string
 	ElapsedSeconds    int64
+	TargetCount       int
 
 	source *feishuTaskSource
 }
