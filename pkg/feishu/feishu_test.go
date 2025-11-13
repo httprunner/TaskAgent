@@ -545,7 +545,7 @@ func TestBuildResultRecordPayloads(t *testing.T) {
 			UserID:       "author-1",
 			Tags:         "tag1,tag2",
 			TaskID:       101,
-			PayloadJSON:  map[string]any{"foo": "bar"},
+			Extra:        map[string]any{"foo": "bar"},
 		},
 	}, DefaultResultFields)
 	if err != nil {
@@ -559,9 +559,9 @@ func TestBuildResultRecordPayloads(t *testing.T) {
 	if !ok || ts <= 0 {
 		t.Fatalf("expected unix ms int for datetime, got %#v", row[DefaultResultFields.Datetime])
 	}
-	payloadStr, ok := row[DefaultResultFields.PayloadJSON].(string)
+	payloadStr, ok := row[DefaultResultFields.Extra].(string)
 	if !ok || payloadStr == "" {
-		t.Fatalf("expected payload json string, got %#v", row[DefaultResultFields.PayloadJSON])
+		t.Fatalf("expected payload json string, got %#v", row[DefaultResultFields.Extra])
 	}
 	var decoded map[string]string
 	if err := json.Unmarshal([]byte(payloadStr), &decoded); err != nil {
@@ -574,7 +574,7 @@ func TestBuildResultRecordPayloads(t *testing.T) {
 		t.Fatalf("item url mismatch, got %#v", row[DefaultResultFields.ItemURL])
 	}
 	if _, err := buildResultRecordPayloads([]ResultRecordInput{
-		{DeviceSerial: "dev", PayloadJSON: "{not json}"},
+		{DeviceSerial: "dev", Extra: "{not json}"},
 	}, DefaultResultFields); err == nil {
 		t.Fatalf("expected error for invalid payload json")
 	}
@@ -618,14 +618,14 @@ func TestCreateResultRecords(t *testing.T) {
 			Scene:        "auto",
 			Params:       "{}",
 			ItemID:       "item-1",
-			PayloadJSON:  map[string]any{"id": 1},
+			Extra:        map[string]any{"id": 1},
 		},
 		{
 			DeviceSerial: "dev-2",
 			App:          "douyin",
 			Scene:        "manual",
 			ItemID:       "item-2",
-			PayloadJSON:  json.RawMessage(`{"id":2}`),
+			Extra:        json.RawMessage(`{"id":2}`),
 		},
 	}
 	ids, err := client.CreateResultRecords(ctx, liveResultBitableURL, records, nil)
@@ -649,8 +649,8 @@ func TestCreateResultRecords(t *testing.T) {
 	if first[DefaultResultFields.DeviceSerial] != "dev-1" {
 		t.Fatalf("unexpected dispatched device %#v", first[DefaultResultFields.DeviceSerial])
 	}
-	if _, ok := first[DefaultResultFields.PayloadJSON].(string); !ok {
-		t.Fatalf("payload json should be string, got %#v", first[DefaultResultFields.PayloadJSON])
+	if _, ok := first[DefaultResultFields.Extra].(string); !ok {
+		t.Fatalf("payload json should be string, got %#v", first[DefaultResultFields.Extra])
 	}
 }
 
@@ -688,7 +688,7 @@ func TestCreateResultRecordSingle(t *testing.T) {
 	id, err := client.CreateResultRecord(ctx, liveResultBitableURL, ResultRecordInput{
 		DeviceSerial: "dev-only",
 		App:          "netease",
-		PayloadJSON:  map[string]any{"ok": true},
+		Extra:        map[string]any{"ok": true},
 	}, nil)
 	if err != nil {
 		t.Fatalf("CreateResultRecord returned error: %v", err)
@@ -706,8 +706,8 @@ func TestCreateResultRecordSingle(t *testing.T) {
 	if fields[DefaultResultFields.DeviceSerial] != "dev-only" {
 		t.Fatalf("unexpected dispatched device %#v", fields[DefaultResultFields.DeviceSerial])
 	}
-	if _, ok := fields[DefaultResultFields.PayloadJSON].(string); !ok {
-		t.Fatalf("payload json should be string, got %#v", fields[DefaultResultFields.PayloadJSON])
+	if _, ok := fields[DefaultResultFields.Extra].(string); !ok {
+		t.Fatalf("payload json should be string, got %#v", fields[DefaultResultFields.Extra])
 	}
 }
 
@@ -984,7 +984,7 @@ func TestResultRecordCreateLive(t *testing.T) {
 		UserID:       "suite",
 		Tags:         "integration,auto",
 		TaskID:       now.UnixMilli(),
-		PayloadJSON: map[string]any{
+		Extra: map[string]any{
 			"ts":     now.UnixMilli(),
 			"status": "ok",
 		},
@@ -1013,7 +1013,7 @@ func TestResultRecordCreateLive(t *testing.T) {
 	if itemID := bitableOptionalString(got.Fields, DefaultResultFields.ItemID); itemID != record.ItemID {
 		t.Fatalf("item id mismatch: want %s got %s", record.ItemID, itemID)
 	}
-	payloadStr := bitableOptionalString(got.Fields, DefaultResultFields.PayloadJSON)
+	payloadStr := bitableOptionalString(got.Fields, DefaultResultFields.Extra)
 	if payloadStr == "" {
 		t.Fatalf("payload json missing in record")
 	}

@@ -134,8 +134,8 @@ func collectFilledResultFields(record ResultRecordInput, names ResultFields) []s
 	if strings.TrimSpace(record.AnchorPoint) != "" {
 		columns = append(columns, names.AnchorPoint)
 	}
-	if record.PayloadJSON != nil {
-		columns = append(columns, names.PayloadJSON)
+	if record.Extra != nil {
+		columns = append(columns, names.Extra)
 	}
 	if strings.TrimSpace(record.PublishTime) != "" {
 		columns = append(columns, names.PublishTime)

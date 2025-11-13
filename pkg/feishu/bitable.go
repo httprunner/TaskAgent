@@ -121,7 +121,7 @@ type ResultFields struct {
 	UserAuthEntity string
 	Tags           string
 	TaskID         string
-	PayloadJSON    string
+	Extra          string
 	LikeCount      string
 	ViewCount      string
 	AnchorPoint    string
@@ -152,7 +152,7 @@ var DefaultResultFields = ResultFields{
 	UserAuthEntity: "UserAuthEntity",
 	Tags:           "Tags",
 	TaskID:         "TaskID",
-	PayloadJSON:    "PayloadJSON",
+	Extra:          "Extra",
 	LikeCount:      "LikeCount",
 	ViewCount:      "ViewCount",
 	AnchorPoint:    "AnchorPoint",
@@ -168,7 +168,7 @@ var DefaultResultFields = ResultFields{
 
 // ResultRecordInput contains the capture metadata uploaded to the result table.
 // DatetimeRaw takes precedence when both it and Datetime are provided.
-// PayloadJSON accepts either a JSON-serializable Go value, a json.RawMessage,
+// Extra accepts either a JSON-serializable Go value, a json.RawMessage,
 // []byte, or a string that contains valid JSON.
 type ResultRecordInput struct {
 	Datetime            *time.Time
@@ -187,7 +187,7 @@ type ResultRecordInput struct {
 	UserAuthEntity      string
 	Tags                string
 	TaskID              int64
-	PayloadJSON         any
+	Extra               any
 	LikeCount           int64
 	ViewCount           int
 	AnchorPoint         string
@@ -801,8 +801,8 @@ func (fields ResultFields) merge(override ResultFields) ResultFields {
 	if strings.TrimSpace(override.TaskID) != "" {
 		result.TaskID = override.TaskID
 	}
-	if strings.TrimSpace(override.PayloadJSON) != "" {
-		result.PayloadJSON = override.PayloadJSON
+	if strings.TrimSpace(override.Extra) != "" {
+		result.Extra = override.Extra
 	}
 	if strings.TrimSpace(override.CommentCount) != "" {
 		result.CommentCount = override.CommentCount
@@ -901,10 +901,10 @@ func buildResultRecordPayloads(records []ResultRecordInput, fields ResultFields)
 		if strings.TrimSpace(fields.TaskID) != "" && rec.TaskID != 0 {
 			row[fields.TaskID] = rec.TaskID
 		}
-		if payload, err := encodePayloadJSON(rec.PayloadJSON); err != nil {
-			return nil, fmt.Errorf("feishu: result record %d invalid payload json: %w", idx, err)
-		} else if payload != "" && strings.TrimSpace(fields.PayloadJSON) != "" {
-			row[fields.PayloadJSON] = payload
+		if extra, err := encodeExtraPayload(rec.Extra); err != nil {
+			return nil, fmt.Errorf("feishu: result record %d invalid extra payload: %w", idx, err)
+		} else if extra != "" && strings.TrimSpace(fields.Extra) != "" {
+			row[fields.Extra] = extra
 		}
 		addOptionalInt64(row, fields.LikeCount, rec.LikeCount)
 		addOptionalInt64(row, fields.ViewCount, int64(rec.ViewCount))
@@ -975,7 +975,7 @@ func formatResultRecordTimestamp(dt *time.Time, raw string) (int64, bool, error)
 	return 0, false, nil
 }
 
-func encodePayloadJSON(value any) (string, error) {
+func encodeExtraPayload(value any) (string, error) {
 	switch v := value.(type) {
 	case nil:
 		return "", nil
@@ -984,7 +984,7 @@ func encodePayloadJSON(value any) (string, error) {
 			return "", nil
 		}
 		if !json.Valid([]byte(v)) {
-			return "", fmt.Errorf("payload json string is not valid JSON")
+			return "", fmt.Errorf("extra field string is not valid JSON")
 		}
 		return v, nil
 	case []byte:
@@ -995,15 +995,15 @@ func encodePayloadJSON(value any) (string, error) {
 			return "", nil
 		}
 		if !json.Valid(v) {
-			return "", fmt.Errorf("payload json bytes are not valid JSON")
+			return "", fmt.Errorf("extra field bytes are not valid JSON")
 		}
 		return string(v), nil
 	case json.RawMessage:
-		return encodePayloadJSON([]byte(v))
+		return encodeExtraPayload([]byte(v))
 	default:
 		raw, err := json.Marshal(v)
 		if err != nil {
-			return "", fmt.Errorf("marshal payload json: %w", err)
+			return "", fmt.Errorf("marshal extra field: %w", err)
 		}
 		return string(raw), nil
 	}

@@ -47,7 +47,7 @@ type Record struct {
 	Tags         string
 	TaskID       int64
 	Datetime     int64
-	PayloadJSON  interface{}
+	Extra        interface{}
 }
 
 // ResultRecord holds payloads for each sink.
@@ -183,7 +183,7 @@ func newSQLiteWriter() (Sink, error) {
 		return nil, err
 	}
 	stmt, err := db.Prepare(`INSERT INTO capture_results
-		(Params, DeviceSerial, App, ItemID, VideoID, ItemCaption, ItemDuration, UserName, UserID, Tags, TaskID, Datetime, PayloadJSON)
+		(Params, DeviceSerial, App, ItemID, VideoID, ItemCaption, ItemDuration, UserName, UserID, Tags, TaskID, Datetime, Extra)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		db.Close()
@@ -244,10 +244,11 @@ func (j *jsonlWriter) Write(_ context.Context, record ResultRecord) error {
 	if j == nil || j.writer == nil {
 		return pkgerrors.New("storage: jsonl writer nil")
 	}
-	if record.JSONPayload == nil {
-		return pkgerrors.New("storage: json payload is nil")
+	row, err := buildJSONLRow(record)
+	if err != nil {
+		return err
 	}
-	payload, err := json.Marshal(record.JSONPayload)
+	payload, err := json.Marshal(row)
 	if err != nil {
 		return pkgerrors.Wrap(err, "storage: marshal json payload failed")
 	}
@@ -293,6 +294,32 @@ func (j *jsonlWriter) Name() string {
 	return j.path
 }
 
+func buildJSONLRow(record ResultRecord) (map[string]any, error) {
+	var itemDuration any
+	if record.DBRecord.ItemDuration != nil {
+		itemDuration = *record.DBRecord.ItemDuration
+	}
+	payload, err := formatExtra(record.DBRecord.Extra)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"Params":       record.DBRecord.Params,
+		"DeviceSerial": record.DBRecord.DeviceSerial,
+		"App":          record.DBRecord.App,
+		"ItemID":       record.DBRecord.ItemID,
+		"VideoID":      record.DBRecord.VideoID,
+		"ItemCaption":  record.DBRecord.ItemCaption,
+		"ItemDuration": itemDuration,
+		"UserName":     record.DBRecord.UserName,
+		"UserID":       record.DBRecord.UserID,
+		"Tags":         record.DBRecord.Tags,
+		"TaskID":       record.DBRecord.TaskID,
+		"Datetime":     record.DBRecord.Datetime,
+		"Extra":        payload,
+	}, nil
+}
+
 type sqliteWriter struct {
 	db   *sql.DB
 	stmt *sql.Stmt
@@ -306,7 +333,7 @@ func (s *sqliteWriter) Write(ctx context.Context, record ResultRecord) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	payload, err := formatPayload(record.DBRecord.PayloadJSON)
+	payload, err := formatExtra(record.DBRecord.Extra)
 	if err != nil {
 		return err
 	}
@@ -410,7 +437,7 @@ func prepareSchema(db *sql.DB) error {
 			Tags TEXT,
 			TaskID INTEGER,
 			Datetime INTEGER,
-			PayloadJSON TEXT NOT NULL
+			Extra TEXT NOT NULL
 		);`
 	if _, err := db.Exec(createTable); err != nil {
 		return pkgerrors.Wrap(err, "storage: init sqlite schema failed")
@@ -468,8 +495,8 @@ func ensureSQLiteColumn(db *sql.DB, table, column, columnType string) error {
 	return nil
 }
 
-func formatPayload(payload interface{}) (string, error) {
-	switch v := payload.(type) {
+func formatExtra(extra interface{}) (string, error) {
+	switch v := extra.(type) {
 	case nil:
 		return "", nil
 	case string:
@@ -479,7 +506,7 @@ func formatPayload(payload interface{}) (string, error) {
 	default:
 		b, err := json.Marshal(v)
 		if err != nil {
-			return "", pkgerrors.Wrap(err, "storage: marshal payload")
+			return "", pkgerrors.Wrap(err, "storage: marshal extra payload")
 		}
 		return string(b), nil
 	}

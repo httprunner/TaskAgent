@@ -60,7 +60,7 @@ recordID, err := client.CreateTargetRecord(ctx, taskTableURL, feishu.TargetRecor
 - ItemID / ItemCaption / ItemCDNURL / ItemURL / ItemDuration（秒）
 - UserName / UserID / Tags
 - TaskID
-- PayloadJSON（完整资源信息 JSON）
+- Extra（其它字段信息 JSON）
 
 API 使用 `ResultFields` / `ResultRecordInput`：
 
@@ -81,7 +81,7 @@ resID, err := client.CreateResultRecord(ctx, resultTableURL, feishu.ResultRecord
     UserID:       "user123",                  // 字段名可通过 RESULT_USERID_FIELD 环境变量自定义
     Tags:         "热门,音乐",
     TaskID:       123456,
-    PayloadJSON: map[string]any{
+    Extra: map[string]any{
         "duration": 180,
         "metrics":  map[string]int{"likes": 123},
     },
@@ -93,7 +93,7 @@ resID, err := client.CreateResultRecord(ctx, resultTableURL, feishu.ResultRecord
 - `DatetimeRaw`: 传入可解析的字符串或毫秒/秒时间戳。
 - `Datetime`: 直接传入 `*time.Time`，SDK 自动转换为 UTC 毫秒值。
 
-`PayloadJSON` 支持字符串、`[]byte`、`json.RawMessage` 或任意 Go 结构体；内部会校验/序列化成字符串。
+`Extra` 支持字符串、`[]byte`、`json.RawMessage` 或任意 Go 结构体；内部会校验/序列化成字符串。
 
 ### Result storage helper
 
