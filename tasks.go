@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/httprunner/TaskAgent/pkg/feishu"
+	"github.com/httprunner/TaskAgent/pkg/storage"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 )
@@ -23,9 +24,14 @@ func NewFeishuTaskClient(bitableURL string) (*FeishuTaskClient, error) {
 	if err != nil {
 		return nil, err
 	}
+	mirror, err := storage.NewTargetMirror()
+	if err != nil {
+		return nil, err
+	}
 	return &FeishuTaskClient{
 		client:     client,
 		bitableURL: bitableURL,
+		mirror:     mirror,
 	}, nil
 }
 
@@ -33,11 +39,15 @@ type FeishuTaskClient struct {
 	client     *feishu.Client
 	bitableURL string
 	clock      func() time.Time
+	mirror     *storage.TargetMirror
 }
 
 func (c *FeishuTaskClient) FetchAvailableTasks(ctx context.Context, app string, limit int) ([]*Task, error) {
 	feishuTasks, err := fetchTodayPendingFeishuTasks(ctx, c.client, c.bitableURL, app, limit, c.now())
 	if err != nil {
+		return nil, err
+	}
+	if err := c.syncTargetMirror(feishuTasks); err != nil {
 		return nil, err
 	}
 	result := make([]*Task, 0, len(feishuTasks))
@@ -51,18 +61,39 @@ func (c *FeishuTaskClient) FetchPendingTasks(ctx context.Context, app string, li
 	if c == nil {
 		return nil, errors.New("feishu: task client is nil")
 	}
-	return fetchTodayPendingFeishuTasks(ctx, c.client, c.bitableURL, app, limit, c.now())
+	tasks, err := fetchTodayPendingFeishuTasks(ctx, c.client, c.bitableURL, app, limit, c.now())
+	if err != nil {
+		return nil, err
+	}
+	if err := c.syncTargetMirror(tasks); err != nil {
+		return nil, err
+	}
+	return tasks, nil
 }
 
 func (c *FeishuTaskClient) UpdateTaskStatuses(ctx context.Context, tasks []*FeishuTask, status string) error {
 	if c == nil {
 		return errors.New("feishu: task client is nil")
 	}
-	return updateFeishuTaskStatuses(ctx, tasks, status, "", c.statusUpdateMeta(status))
+	if err := updateFeishuTaskStatuses(ctx, tasks, status, "", c.statusUpdateMeta(status)); err != nil {
+		return err
+	}
+	trimmedStatus := strings.TrimSpace(status)
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		task.Status = trimmedStatus
+	}
+	return c.syncTargetMirror(tasks)
 }
 
 func (c *FeishuTaskClient) OnTasksDispatched(ctx context.Context, deviceSerial string, tasks []*Task) error {
-	if err := c.updateStatuses(ctx, tasks, feishu.StatusDispatched, deviceSerial); err != nil {
+	feishuTasks, err := c.updateStatuses(ctx, tasks, feishu.StatusDispatched, deviceSerial)
+	if err != nil {
+		return err
+	}
+	if err := c.syncTargetMirror(feishuTasks); err != nil {
 		return err
 	}
 	log.Info().
@@ -81,7 +112,11 @@ func (c *FeishuTaskClient) OnTasksCompleted(ctx context.Context, deviceSerial st
 	if strings.TrimSpace(status) == "" {
 		return nil
 	}
-	if err := c.updateStatuses(ctx, tasks, status, deviceSerial); err != nil {
+	feishuTasks, err := c.updateStatuses(ctx, tasks, status, deviceSerial)
+	if err != nil {
+		return err
+	}
+	if err := c.syncTargetMirror(feishuTasks); err != nil {
 		return err
 	}
 	resultStatus := strings.TrimSpace(status)
@@ -94,12 +129,26 @@ func (c *FeishuTaskClient) OnTasksCompleted(ctx context.Context, deviceSerial st
 	return nil
 }
 
-func (c *FeishuTaskClient) updateStatuses(ctx context.Context, tasks []*Task, status, deviceSerial string) error {
+func (c *FeishuTaskClient) updateStatuses(ctx context.Context, tasks []*Task, status, deviceSerial string) ([]*FeishuTask, error) {
 	feishuTasks, err := extractFeishuTasks(tasks)
 	if err != nil {
-		return errors.Wrap(err, "extract feishu tasks failed")
+		return nil, errors.Wrap(err, "extract feishu tasks failed")
 	}
-	return updateFeishuTaskStatuses(ctx, feishuTasks, status, deviceSerial, c.statusUpdateMeta(status))
+	if err := updateFeishuTaskStatuses(ctx, feishuTasks, status, deviceSerial, c.statusUpdateMeta(status)); err != nil {
+		return nil, err
+	}
+	trimmedStatus := strings.TrimSpace(status)
+	normalizedSerial := strings.TrimSpace(deviceSerial)
+	for _, task := range feishuTasks {
+		if task == nil {
+			continue
+		}
+		task.Status = trimmedStatus
+		if normalizedSerial != "" {
+			task.DispatchedDevice = normalizedSerial
+		}
+	}
+	return feishuTasks, nil
 }
 
 func (c *FeishuTaskClient) statusUpdateMeta(status string) *taskStatusMeta {
@@ -119,6 +168,22 @@ func (c *FeishuTaskClient) statusUpdateMeta(status string) *taskStatusMeta {
 		return &taskStatusMeta{completedAt: &ts}
 	}
 	return nil
+}
+
+func (c *FeishuTaskClient) syncTargetMirror(tasks []*FeishuTask) error {
+	if c == nil || c.mirror == nil || len(tasks) == 0 {
+		return nil
+	}
+	rows := make([]*storage.TargetTask, 0, len(tasks))
+	for _, task := range tasks {
+		if converted := toStorageTargetTask(task); converted != nil {
+			rows = append(rows, converted)
+		}
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	return c.mirror.UpsertTasks(rows)
 }
 
 func (c *FeishuTaskClient) now() time.Time {
@@ -148,6 +213,29 @@ type FeishuTask struct {
 	TargetCount       int
 
 	source *feishuTaskSource
+}
+
+func toStorageTargetTask(task *FeishuTask) *storage.TargetTask {
+	if task == nil || task.TaskID == 0 {
+		return nil
+	}
+	return &storage.TargetTask{
+		TaskID:            task.TaskID,
+		Params:            task.Params,
+		App:               task.App,
+		Scene:             task.Scene,
+		Datetime:          task.Datetime,
+		DatetimeRaw:       task.DatetimeRaw,
+		Status:            task.Status,
+		UserID:            task.UserID,
+		UserName:          task.UserName,
+		Extra:             task.Extra,
+		DeviceSerial:      task.DeviceSerial,
+		DispatchedDevice:  task.DispatchedDevice,
+		DispatchedTime:    task.DispatchedTime,
+		DispatchedTimeRaw: task.DispatchedTimeRaw,
+		ElapsedSeconds:    task.ElapsedSeconds,
+	}
 }
 
 type feishuTaskSource struct {

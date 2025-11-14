@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/httprunner/TaskAgent/pkg/feishu"
+	"github.com/httprunner/TaskAgent/pkg/storage"
 	"github.com/rs/zerolog/log"
 )
 
@@ -131,7 +132,12 @@ func fetchRows(ctx context.Context, client *feishu.Client, cfg TableConfig) ([]R
 	if cfg.Limit > 0 {
 		queryOpts.Limit = cfg.Limit
 	}
-	return fetchRowsWithRetry(ctx, client, cfg.URL, queryOpts, 3)
+	rows, err := fetchRowsWithRetry(ctx, client, cfg.URL, queryOpts, 3)
+	if err != nil {
+		return nil, err
+	}
+	storage.MirrorDramaRowsIfNeeded(cfg.URL, rows)
+	return rows, nil
 }
 
 func fetchRowsWithRetry(ctx context.Context, client *feishu.Client, url string, opts *feishu.TargetQueryOptions, attempts int) ([]Row, error) {
