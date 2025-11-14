@@ -396,6 +396,14 @@ func resolveDatabasePath() (string, error) {
 	return filepath.Join(dir, defaultDBFileName), nil
 }
 
+// ResolveDatabasePath returns the absolute path to the tracking SQLite
+// database, creating the parent directory if necessary. Callers outside the
+// storage package can reuse this helper to open read-only connections without
+// duplicating environment resolution logic.
+func ResolveDatabasePath() (string, error) {
+	return resolveDatabasePath()
+}
+
 func ensureDirExists(path string) error {
 	if path == "" {
 		return nil

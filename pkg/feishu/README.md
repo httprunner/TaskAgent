@@ -25,7 +25,7 @@
 
 - **结果表字段**：使用 `RESULT_*` 前缀（例如：`RESULT_PARAMS_FIELD`、`RESULT_USERID_FIELD`、`RESULT_DURATION_FIELD`）
 - **目标表字段**：使用 `TARGET_*` 前缀（例如：`TARGET_PARAMS_FIELD`、`TARGET_DURATION_FIELD`）
-- **剧单表字段**：使用 `DRAMA_*` 前缀（例如：`DRAMA_PARAMS_FIELD`、`DRAMA_DURATION_FIELD`）
+- **剧单表字段**：使用 `DRAMA_*` 前缀（例如：`DRAMA_NAME_FIELD`、`DRAMA_DURATION_FIELD`）
 
 如果未设置环境变量，将使用上述示例中的默认字段名称。
 

@@ -134,7 +134,7 @@ func RunAuto(ctx context.Context, opts AutoOptions) (*AutoSummary, error) {
 			}
 
 			dramaRow := Row{Fields: map[string]any{
-				cfg.DramaParamsField:   name,
+				cfg.DramaNameField:     name,
 				cfg.DramaDurationField: drama.Duration,
 			}}
 
@@ -244,7 +244,7 @@ func ensureDir(dir string) error {
 func extractDramas(rows []Row, cfg Config) []Drama {
 	durations := make(map[string]float64)
 	for _, row := range rows {
-		name := strings.TrimSpace(getString(row.Fields, cfg.DramaParamsField))
+		name := strings.TrimSpace(getString(row.Fields, cfg.DramaNameField))
 		if name == "" {
 			continue
 		}

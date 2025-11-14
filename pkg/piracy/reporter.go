@@ -115,7 +115,7 @@ func (pr *Reporter) DetectWithFilters(ctx context.Context, paramsList []string, 
 	}
 
 	paramsFilter := buildParamsFilter(paramsList, pr.config.ParamsField)
-	dramaFilter := buildParamsFilter(paramsList, pr.config.DramaParamsField)
+	dramaFilter := buildParamsFilter(paramsList, pr.config.DramaNameField)
 
 	finalResultFilter := combineFilters(resultExtraFilter, paramsFilter)
 	finalDramaFilter := combineFilters(dramaExtraFilter, dramaFilter)

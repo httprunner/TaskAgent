@@ -46,23 +46,6 @@ type TargetFields struct {
 	ElapsedSeconds   string
 }
 
-// DefaultTargetFields matches the schema provided in the requirements.
-var DefaultTargetFields = TargetFields{
-	TaskID:           "TaskID",
-	Params:           "Params",
-	App:              "App",
-	Scene:            "Scene",
-	Datetime:         "Datetime",
-	Status:           "Status",
-	UserID:           "UserID",
-	UserName:         "UserName",
-	Extra:            "Extra",
-	DeviceSerial:     "DeviceSerial",
-	DispatchedDevice: "DispatchedDevice",
-	DispatchedTime:   "DispatchedTime",
-	ElapsedSeconds:   "ElapsedSeconds",
-}
-
 // TargetRow represents a single task row stored inside the target table.
 type TargetRow struct {
 	RecordID          string
@@ -135,37 +118,6 @@ type ResultFields struct {
 	PublishTime    string
 }
 
-// DefaultResultFields matches the schema required by the capture result table.
-var DefaultResultFields = ResultFields{
-	Datetime:       "Datetime",
-	DeviceSerial:   "DeviceSerial",
-	App:            "App",
-	Scene:          "Scene",
-	Params:         "Params",
-	ItemID:         "ItemID",
-	ItemCaption:    "ItemCaption",
-	ItemCDNURL:     "ItemCDNURL",
-	ItemURL:        "ItemURL",
-	ItemDuration:   "ItemDuration",
-	UserName:       "UserName",
-	UserID:         "UserID",
-	UserAuthEntity: "UserAuthEntity",
-	Tags:           "Tags",
-	TaskID:         "TaskID",
-	Extra:          "Extra",
-	LikeCount:      "LikeCount",
-	ViewCount:      "ViewCount",
-	AnchorPoint:    "AnchorPoint",
-	CommentCount:   "CommentCount",
-	CollectCount:   "CollectCount",
-	ForwardCount:   "ForwardCount",
-	ShareCount:     "ShareCount",
-	PayMode:        "PayMode",
-	Collection:     "Collection",
-	Episode:        "Episode",
-	PublishTime:    "PublishTime",
-}
-
 // ResultRecordInput contains the capture metadata uploaded to the result table.
 // DatetimeRaw takes precedence when both it and Datetime are provided.
 // Extra accepts either a JSON-serializable Go value, a json.RawMessage,
@@ -199,6 +151,18 @@ type ResultRecordInput struct {
 	Collection          string
 	Episode             string
 	PublishTime         string
+}
+
+// DramaFields defines the schema for the short-drama catalog table referenced
+// by DRAMA_BITABLE_URL. Each field stores the column name as it appears in the
+// bitable.
+type DramaFields struct {
+	DramaID                  string
+	DramaName                string
+	TotalDuration            string
+	EpisodeCount             string
+	Priority                 string
+	RightsProtectionScenario string
 }
 
 // TargetStatusUpdate links a TaskID to the status value it should adopt.

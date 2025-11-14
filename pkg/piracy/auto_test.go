@@ -12,7 +12,7 @@ func TestExtractDramas(t *testing.T) {
 	}
 
 	cfg := Config{
-		DramaParamsField:   "Params",
+		DramaNameField:     "Params",
 		DramaDurationField: "TotalDuration",
 	}
 

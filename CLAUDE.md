@@ -102,7 +102,7 @@ Required environment variables (create `.env` file):
 ```bash
 # Original drama table
 DRAMA_BITABLE_URL=https://bytedance.larkoffice.com/wiki/xxx
-DRAMA_PARAMS_FIELD=短剧名称
+DRAMA_NAME_FIELD=短剧名称
 DRAMA_DURATION_FIELD=全剧时长（秒）
 
 # Target collection table

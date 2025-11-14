@@ -73,11 +73,11 @@ func (c *Config) ApplyDefaults() {
 			c.DramaIDField = "DramaID"
 		}
 	}
-	if strings.TrimSpace(c.DramaParamsField) == "" {
-		if dramaParamsField := os.Getenv("DRAMA_PARAMS_FIELD"); dramaParamsField != "" {
-			c.DramaParamsField = dramaParamsField
+	if strings.TrimSpace(c.DramaNameField) == "" {
+		if dramaNameField := os.Getenv("DRAMA_NAME_FIELD"); dramaNameField != "" {
+			c.DramaNameField = dramaNameField
 		} else {
-			c.DramaParamsField = "Params"
+			c.DramaNameField = feishu.DefaultDramaFields.DramaName
 		}
 	}
 	if strings.TrimSpace(c.DramaDurationField) == "" {
@@ -210,7 +210,7 @@ func analyzeRows(resultRows, dramaRows []Row, cfg Config) *Report {
 
 	var dramaRecords []DramaRecord
 	for _, row := range dramaRows {
-		params := strings.TrimSpace(getString(row.Fields, cfg.DramaParamsField))
+		params := strings.TrimSpace(getString(row.Fields, cfg.DramaNameField))
 		if params == "" {
 			continue
 		}

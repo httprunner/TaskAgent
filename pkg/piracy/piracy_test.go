@@ -27,7 +27,7 @@ func TestAnalyzeRows(t *testing.T) {
 		ParamsField:        "Params",
 		UserIDField:        "UserID",
 		DurationField:      "ItemDuration",
-		DramaParamsField:   "Params",
+		DramaNameField:     "Params",
 		DramaDurationField: "TotalDuration",
 		Threshold:          0.5,
 	}
@@ -89,7 +89,7 @@ func TestAnalyzeRowsBelowThreshold(t *testing.T) {
 		ParamsField:        "Params",
 		UserIDField:        "UserID",
 		DurationField:      "ItemDuration",
-		DramaParamsField:   "Params",
+		DramaNameField:     "Params",
 		DramaDurationField: "TotalDuration",
 		Threshold:          0.5,
 	}
@@ -121,7 +121,7 @@ func TestAnalyzeRowsMissingTarget(t *testing.T) {
 		ParamsField:        "Params",
 		UserIDField:        "UserID",
 		DurationField:      "ItemDuration",
-		DramaParamsField:   "Params",
+		DramaNameField:     "Params",
 		DramaDurationField: "TotalDuration",
 		Threshold:          0.5,
 	}
@@ -166,7 +166,7 @@ func TestAnalyzeRowsMultipleMatches(t *testing.T) {
 		ParamsField:        "Params",
 		UserIDField:        "UserID",
 		DurationField:      "ItemDuration",
-		DramaParamsField:   "Params",
+		DramaNameField:     "Params",
 		DramaDurationField: "TotalDuration",
 		Threshold:          0.5,
 	}

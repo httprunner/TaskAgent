@@ -16,6 +16,7 @@ The `pkg/piracy` package merges the functionality of two packages:
 - **Flexible Field Mapping**: Configurable field names for different table schemas
 - **Batch Processing**: Process multiple drama parameters in a single operation
 - **Comprehensive Reporting**: Detailed reports with suspicious combinations, ratios, and statistics
+- **Webhook Summaries**: Query Feishu or SQLite, aggregate drama metadata + capture records, and forward the payload to custom webhook endpoints
 
 ## Architecture
 
@@ -117,6 +118,36 @@ err := reporter.ReportPiracyForParams(ctx, "com.smile.gifmaker", params)
 if err != nil {
     return err
 }
+
+```
+
+### Sending Webhook Summaries
+
+`SendSummaryWebhook` aggregates drama metadata together with capture records (from either Feishu Bitables or the local tracking SQLite database) and POSTs a normalized JSON payload to a webhook URL. The payload flattens every column described by `feishu.DramaFields` at the top level and adds a `records` slice where each element contains the columns defined by `feishu.ResultFields`.
+
+```go
+payload, err := piracy.SendSummaryWebhook(ctx, piracy.WebhookOptions{
+    Params:      "真千金她是学霸",
+    App:         "kuaishou",
+    UserID:      "3618381723",
+    WebhookURL:  os.Getenv("SUMMARY_WEBHOOK_URL"),
+    Source:      piracy.WebhookSourceSQLite, // or piracy.WebhookSourceFeishu
+    RecordLimit: 100,
+})
+if err != nil {
+    log.Fatal().Err(err).Msg("webhook summary failed")
+}
+records := payload["records"].([]map[string]any)
+log.Info().Int("records", len(records)).Msg("summary delivered")
+```
+
+Key environment knobs for this workflow:
+
+- `DRAMA_PRIORITY_FIELD` 与 `DRAMA_RIGHTS_SCENARIO_FIELD` 可自定义短剧优先级与维权场景字段，避免表结构差异导致查询失败。
+- `RESULT_APP_FIELD` and `RESULT_USERNAME_FIELD` override the result-table App/UserName columns.
+- `DRAMA_SQLITE_TABLE` and `RESULT_SQLITE_TABLE` change the SQLite table names (defaults: `drama_catalog`, `capture_results`).
+- `TRACKING_STORAGE_DB_PATH` overrides the SQLite database path when using the local source; otherwise the helper reuses the same location as the tracking storage manager.
+- All drama columns are flattened into the webhook JSON root level, so downstream services can access source-specific fields directly.
 ```
 
 ### CLI Usage
@@ -153,9 +184,16 @@ TARGET_BITABLE_URL=https://example.feishu.cn/base/zzz  # Where to write reports
 RESULT_PARAMS_FIELD=Params
 RESULT_USERID_FIELD=UserID
 RESULT_DURATION_FIELD=ItemDuration
-DRAMA_PARAMS_FIELD=Params
+DRAMA_NAME_FIELD=短剧名称
 DRAMA_DURATION_FIELD=TotalDuration
 THRESHOLD=0.5
+# Webhook summary specific overrides
+RESULT_APP_FIELD=App
+RESULT_USERNAME_FIELD=UserName
+DRAMA_PRIORITY_FIELD=Priority
+DRAMA_RIGHTS_SCENARIO_FIELD=RightsProtectionScenario
+DRAMA_SQLITE_TABLE=drama_catalog
+RESULT_SQLITE_TABLE=capture_results
 ```
 
 ### Default Field Mappings

@@ -15,7 +15,7 @@ type Config struct {
 
 	// Fields in original drama table (source C)
 	DramaIDField       string // 短剧 ID
-	DramaParamsField   string // Params field in drama table
+	DramaNameField     string // Drama name/title column
 	DramaDurationField string // 全剧时长（秒）
 
 	// Threshold ratio (0..1), e.g., 0.5 means 50%
