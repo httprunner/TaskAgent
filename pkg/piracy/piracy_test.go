@@ -237,18 +237,18 @@ func TestGetFloat(t *testing.T) {
 
 func TestConfigApplyDefaultsWithEnv(t *testing.T) {
 	// Save original env vars to restore later
-	origParamsField := os.Getenv("RESULT_PARAMS_FIELD")
-	origUserIDField := os.Getenv("RESULT_USERID_FIELD")
+	origParamsField := os.Getenv("RESULT_FIELD_PARAMS")
+	origUserIDField := os.Getenv("RESULT_FIELD_USERID")
 	origThreshold := os.Getenv("THRESHOLD")
 	defer func() {
-		os.Setenv("RESULT_PARAMS_FIELD", origParamsField)
-		os.Setenv("RESULT_USERID_FIELD", origUserIDField)
+		os.Setenv("RESULT_FIELD_PARAMS", origParamsField)
+		os.Setenv("RESULT_FIELD_USERID", origUserIDField)
 		os.Setenv("THRESHOLD", origThreshold)
 	}()
 
 	// Test empty config with env vars set
-	os.Setenv("RESULT_PARAMS_FIELD", "MyParams")
-	os.Setenv("RESULT_USERID_FIELD", "MyUserID")
+	os.Setenv("RESULT_FIELD_PARAMS", "MyParams")
+	os.Setenv("RESULT_FIELD_USERID", "MyUserID")
 	os.Setenv("THRESHOLD", "0.75")
 
 	c := Config{}
@@ -289,8 +289,8 @@ func TestConfigApplyDefaults(t *testing.T) {
 				}
 				// Check DramaDurationField - may be overridden by environment variable
 				expectedDramaDurationField := "TotalDuration"
-				if os.Getenv("DRAMA_DURATION_FIELD") != "" {
-					expectedDramaDurationField = os.Getenv("DRAMA_DURATION_FIELD")
+				if os.Getenv("DRAMA_FIELD_DURATION") != "" {
+					expectedDramaDurationField = os.Getenv("DRAMA_FIELD_DURATION")
 				}
 				if c.DramaDurationField != expectedDramaDurationField {
 					t.Errorf("expected DramaDurationField to be '%s', got %s", expectedDramaDurationField, c.DramaDurationField)

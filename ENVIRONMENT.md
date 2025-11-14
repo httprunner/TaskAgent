@@ -20,7 +20,7 @@ defaults and where they take effect.
 | --- | --- | --- | --- |
 | `RESULT_BITABLE_URL` | Yes for Feishu reporting | – | Capture-result table URL. Consumed by `pkg/piracy` reporter/detector, webhook summaries (Feishu mode), and `pkg/storage`'s Feishu sink. |
 | `DRAMA_BITABLE_URL` | Yes when reading drama metadata from Feishu | – | Drama catalog table URL. Used by `pkg/piracy` detection/reporting and webhook summaries (Feishu mode). |
-| `TARGET_BITABLE_URL` | Required for piracy reporting | – | Target table used to write piracy alerts. Required by `piracy.Reporter`. |
+| `TARGET_BITABLE_URL` | Yes for device scheduling & piracy reporting | – | Feishu target table containing pending tasks. Required by the default `pool.DevicePoolAgent` (via `FeishuTaskClient`) and by `piracy.Reporter` when writing alerts. |
 
 ## Field Mapping & Thresholds
 
@@ -29,18 +29,17 @@ names.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `RESULT_APP_FIELD` | `App` | Result-table column storing the app/package (used when filtering webhook summaries). |
-| `RESULT_PARAMS_FIELD` | `Params` | Result-table column containing drama params/name. |
-| `RESULT_USERID_FIELD` | `UserID` | Result-table column containing the uploader ID. |
-| `RESULT_USERNAME_FIELD` | `UserName` | Result-table column storing uploader name. |
-| `RESULT_DURATION_FIELD` | `ItemDuration` | Result-table duration column (seconds). |
-| `TARGET_PARAMS_FIELD` | `Params` | Field name inside the target table for drama params. |
-| `TARGET_DURATION_FIELD` | `TotalDuration` | Field name for the drama duration stored in the target table. |
-| `DRAMA_ID_FIELD` | `DramaID` | Drama table column that stores the drama identifier. |
-| `DRAMA_NAME_FIELD` | `短剧名称` | Drama table column for short-drama names (used by webhook summaries and filters). |
-| `DRAMA_DURATION_FIELD` | `TotalDuration` | Drama table column for full duration (seconds). |
-| `DRAMA_PRIORITY_FIELD` | `Priority` | Drama table column for internal priority grading (webhook summaries). |
-| `DRAMA_RIGHTS_SCENARIO_FIELD` | `RightsProtectionScenario` | Drama table column for the rights-protection scenario text (webhook summaries). |
+| `RESULT_FIELD_APP` | `App` | Result-table column storing the app/package (used when filtering webhook summaries). |
+| `RESULT_FIELD_PARAMS` | `Params` | Result-table column containing drama params/name. |
+| `RESULT_FIELD_USERID` | `UserID` | Result-table column containing the uploader ID. |
+| `RESULT_FIELD_USERNAME` | `UserName` | Result-table column storing uploader name. |
+| `RESULT_FIELD_DURATION` | `ItemDuration` | Result-table duration column (seconds). |
+| `TARGET_FIELD_PARAMS` | `Params` | Field name inside the target table for drama params. |
+| `DRAMA_FIELD_ID` | `短剧 ID` (template; piracy detection falls back to `DramaID` if unset) | Drama table column that stores the drama identifier. |
+| `DRAMA_FIELD_NAME` | `短剧名称` | Drama table column for short-drama names (used by webhook summaries and filters). |
+| `DRAMA_FIELD_DURATION` | `全剧时长（秒）` | Drama table column for full duration (seconds). |
+| `DRAMA_FIELD_PRIORITY` | `优先级` | Drama table column for internal priority grading (webhook summaries). |
+| `DRAMA_FIELD_RIGHTS_SCENARIO` | `维权场景` | Drama table column for the rights-protection scenario text (webhook summaries). |
 | `THRESHOLD` | `0.5` | Float ratio (0–1) used by piracy detection/reporting when filtering suspicious matches. |
 
 ## Local Storage & SQLite

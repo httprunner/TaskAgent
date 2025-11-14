@@ -5,7 +5,8 @@ A unified CLI that exposes both piracy detection and reporting workflows through
 ## Subcommands
 
 ### detect
-- Fetches rows from the result and drama Feishu Bitables
+- Fetches rows from the result and drama Feishu Bitables (default)
+- Alternatively consumes local files via `--use-files` (JSONL capture data + CSV drama catalog)
 - Aggregates durations for `(Params, UserID)` combinations
 - Compares aggregated totals against original drama durations
 - Prints suspicious combos and optionally dumps a CSV
@@ -24,10 +25,14 @@ Available flags:
 - `--target-filter`: (currently unused) Filter for target table rows
 - `--drama-filter`: Filter for drama table rows
 - `--output-csv`: Optional path to persist suspicious combos as CSV
+- `--use-files`: Toggle local-file mode instead of Feishu Bitables
+- `--data-file`: JSONL capture file consumed when `--use-files` is set
+- `--drama-file`: CSV drama catalog used in file mode
+- `--filter-rate`: Percentage threshold for filtering printed matches in file mode (default 50)
 
 ### report
 - Runs detection for the supplied drama params
-- Writes suspicious matches back to the drama table via `pkg/piracyreport`
+- Writes suspicious matches into the Feishu target table via `pkg/piracy`
 
 ```bash
 go run ./cmd/piracy report \
@@ -78,5 +83,4 @@ Field names for each table can be overridden using the prefixed variables explai
 ## Development commands
 - Build: `go build ./cmd/piracy`
 - Lint: `go vet ./cmd/piracy`
-- Detection tests: `go test ./pkg/piracydetect`
-- Report tests: `go test ./pkg/piracyreport`
+- Detection/reporting tests: `go test ./pkg/piracy`

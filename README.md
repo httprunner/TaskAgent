@@ -18,7 +18,8 @@ TaskAgent is a Go 1.24 module that keeps Android capture devices busy by polling
 ## Requirements
 - Go 1.24 or newer (`go env GOVERSION` to verify).
 - A Feishu custom app with API access plus the following environment variables: `FEISHU_APP_ID`, `FEISHU_APP_SECRET`, optional `FEISHU_TENANT_KEY`, `FEISHU_BASE_URL`, and `FEISHU_LIVE_TEST` (toggles integration tests).
-- Access to the target/result Bitables referenced by your automation.
+- A Feishu target Bitable that stores pending tasks (surface its link via `TARGET_BITABLE_URL` or inject it directly into `pool.Config.BitableURL`).
+- Access to the result Bitables you plan to push to, if any.
 - Android Debug Bridge (ADB) on the PATH when using the default provider.
 
 ## Quick Start
@@ -28,7 +29,7 @@ TaskAgent is a Go 1.24 module that keeps Android capture devices busy by polling
    cd TaskAgent
    go mod download
    ```
-2. Create a `.env` file (loaded by `godotenv`) and populate Feishu credentials plus Bitable URLs.
+2. Create a `.env` file (loaded by `godotenv`) and populate Feishu credentials plus Bitable URLs such as `TARGET_BITABLE_URL`.
 3. Run tests to validate the setup:
    ```bash
    go test ./...
@@ -41,8 +42,12 @@ TaskAgent is a Go 1.24 module that keeps Android capture devices busy by polling
 
    import (
        "context"
+       "log"
+       "os"
+       "time"
 
        pool "github.com/httprunner/TaskAgent"
+       "github.com/httprunner/TaskAgent/pkg/feishu"
    )
 
    type MyRunner struct{}
@@ -58,25 +63,25 @@ TaskAgent is a Go 1.24 module that keeps Android capture devices busy by polling
        cfg := pool.Config{
            PollInterval:   30 * time.Second,
            MaxTasksPerJob: 2,
-           FeishuConfig: &pool.FeishuTaskConfig{
-               BitableURL:     "https://example.larkoffice.com/wiki/...",
-               App:            "capture-app",
-               DispatchStatus: "running",
-               SuccessStatus:  "done",
-               FailureStatus:  "failed",
-           },
+           BitableURL:     os.Getenv(feishu.EnvTargetBitableURL),
        }
+       if cfg.BitableURL == "" {
+           log.Fatal("set TARGET_BITABLE_URL before starting the pool agent")
+       }
+
        runner := &MyRunner{}
        agent, err := pool.NewDevicePoolAgent(cfg, runner)
        if err != nil {
-           panic(err)
+           log.Fatal(err)
        }
        ctx, cancel := context.WithCancel(context.Background())
        defer cancel()
-       _ = agent.Start(ctx)
+       if err := agent.Start(ctx, "capture-app"); err != nil {
+           log.Fatal(err)
+       }
    }
    ```
-   `MyRunner` must satisfy `pool.JobRunner` so the agent can call `RunJob` per device batch; decode the Feishu payload from `req.Tasks[n].Payload`.
+   `MyRunner` must satisfy `pool.JobRunner` so the agent can call `RunJob` per device batch; decode the Feishu payload from `req.Tasks[n].Payload`. Pass the `app` argument that matches the Feishu target-table `App` column so the built-in `FeishuTaskClient` filters and updates the correct rows (statuses transition through `dispatched`, `success`, and `failed`).
 
 ## Development & Testing
 - Format/lint: `go fmt ./...` and `go vet ./...` to keep style consistent.

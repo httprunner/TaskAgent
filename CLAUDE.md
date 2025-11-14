@@ -80,14 +80,15 @@ agent.RunOnce(ctx, "app-name")
 - `pool.go` / `tasks.go`: Core orchestration logic
 - `feishu/`: Feishu API client and Bitable operations
 - `providers/adb/`: Android device discovery via ADB
-- `cmd/piracy/`: Unified piracy CLI (`detect` + `report` subcommands)
-- `pkg/piracydetect/`: Reusable piracy detection library
+- `cmd/piracy/`: Unified piracy CLI (`detect`, `report`, `auto`, and file-mode detection)
+- `pkg/piracy/`: Reusable piracy detection + reporting library (includes auto workflow & webhooks)
 - `internal/`: Environment loading utilities
 
 ### Key Types
 - `DevicePoolAgent`: Main orchestrator that polls devices and dispatches jobs
 - `JobRequest`: Contains device serial and task payload for job execution
-- `FeishuTaskConfig`: Configuration for Feishu Bitable integration
+- `Config`: Controls poll intervals, retry settings, and injects the Feishu task table URL (`BitableURL`)
+- `FeishuTaskClient`: Default `TaskManager` that fetches tasks from the target Bitable and updates statuses (`dispatched/success/failed`)
 
 ## Environment Configuration
 
@@ -102,18 +103,18 @@ Required environment variables (create `.env` file):
 ```bash
 # Original drama table
 DRAMA_BITABLE_URL=https://bytedance.larkoffice.com/wiki/xxx
-DRAMA_NAME_FIELD=短剧名称
-DRAMA_DURATION_FIELD=全剧时长（秒）
+DRAMA_FIELD_NAME=短剧名称
+DRAMA_FIELD_DURATION=全剧时长（秒）
 
 # Target collection table
 TARGET_BITABLE_URL=https://bytedance.larkoffice.com/wiki/xxx
-TARGET_PARAMS_FIELD=Params
+TARGET_FIELD_PARAMS=Params
 
 # Result table
 RESULT_BITABLE_URL=https://bytedance.larkoffice.com/wiki/xxx
-RESULT_PARAMS_FIELD=Params
-RESULT_USERID_FIELD=UserID
-RESULT_DURATION_FIELD=ItemDuration
+RESULT_FIELD_PARAMS=Params
+RESULT_FIELD_USERID=UserID
+RESULT_FIELD_DURATION=ItemDuration
 
 # Piracy detection threshold
 THRESHOLD=0.5

@@ -143,8 +143,8 @@ log.Info().Int("records", len(records)).Msg("summary delivered")
 
 Key environment knobs for this workflow:
 
-- `DRAMA_PRIORITY_FIELD` 与 `DRAMA_RIGHTS_SCENARIO_FIELD` 可自定义短剧优先级与维权场景字段，避免表结构差异导致查询失败。
-- `RESULT_APP_FIELD` and `RESULT_USERNAME_FIELD` override the result-table App/UserName columns.
+- `DRAMA_FIELD_PRIORITY` 与 `DRAMA_FIELD_RIGHTS_SCENARIO` 可自定义短剧优先级与维权场景字段，避免表结构差异导致查询失败。
+- `RESULT_FIELD_APP` and `RESULT_FIELD_USERNAME` override the result-table App/UserName columns.
 - `DRAMA_SQLITE_TABLE` and `RESULT_SQLITE_TABLE` change the SQLite table names (defaults: `drama_catalog`, `capture_results`).
 - `TRACKING_STORAGE_DB_PATH` overrides the SQLite database path when using the local source; otherwise the helper reuses the same location as the tracking storage manager.
 - All drama columns are flattened into the webhook JSON root level, so downstream services can access source-specific fields directly.
@@ -181,17 +181,17 @@ DRAMA_BITABLE_URL=https://example.feishu.cn/base/yyy   # Drama durations
 TARGET_BITABLE_URL=https://example.feishu.cn/base/zzz  # Where to write reports
 
 # Optional field mappings (defaults shown)
-RESULT_PARAMS_FIELD=Params
-RESULT_USERID_FIELD=UserID
-RESULT_DURATION_FIELD=ItemDuration
-DRAMA_NAME_FIELD=短剧名称
-DRAMA_DURATION_FIELD=TotalDuration
+RESULT_FIELD_PARAMS=Params
+RESULT_FIELD_USERID=UserID
+RESULT_FIELD_DURATION=ItemDuration
+DRAMA_FIELD_NAME=短剧名称
+DRAMA_FIELD_DURATION=TotalDuration
 THRESHOLD=0.5
 # Webhook summary specific overrides
-RESULT_APP_FIELD=App
-RESULT_USERNAME_FIELD=UserName
-DRAMA_PRIORITY_FIELD=Priority
-DRAMA_RIGHTS_SCENARIO_FIELD=RightsProtectionScenario
+RESULT_FIELD_APP=App
+RESULT_FIELD_USERNAME=UserName
+DRAMA_FIELD_PRIORITY=Priority
+DRAMA_FIELD_RIGHTS_SCENARIO=RightsProtectionScenario
 DRAMA_SQLITE_TABLE=drama_catalog
 RESULT_SQLITE_TABLE=capture_results
 ```

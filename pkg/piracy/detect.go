@@ -32,56 +32,49 @@ type DramaRecord struct {
 func (c *Config) ApplyDefaults() {
 	// Read from environment or use Feishu defaults
 	if strings.TrimSpace(c.ParamsField) == "" {
-		if paramField := os.Getenv("RESULT_PARAMS_FIELD"); paramField != "" {
+		if paramField := os.Getenv("RESULT_FIELD_PARAMS"); paramField != "" {
 			c.ParamsField = paramField
 		} else {
 			c.ParamsField = feishu.DefaultResultFields.Params
 		}
 	}
 	if strings.TrimSpace(c.UserIDField) == "" {
-		if userField := os.Getenv("RESULT_USERID_FIELD"); userField != "" {
+		if userField := os.Getenv("RESULT_FIELD_USERID"); userField != "" {
 			c.UserIDField = userField
 		} else {
 			c.UserIDField = feishu.DefaultResultFields.UserID
 		}
 	}
 	if strings.TrimSpace(c.DurationField) == "" {
-		if durationField := os.Getenv("RESULT_DURATION_FIELD"); durationField != "" {
+		if durationField := os.Getenv("RESULT_FIELD_DURATION"); durationField != "" {
 			c.DurationField = durationField
 		} else {
 			c.DurationField = feishu.DefaultResultFields.ItemDuration
 		}
 	}
 	if strings.TrimSpace(c.TargetParamsField) == "" {
-		if targetParamsField := os.Getenv("TARGET_PARAMS_FIELD"); targetParamsField != "" {
+		if targetParamsField := os.Getenv("TARGET_FIELD_PARAMS"); targetParamsField != "" {
 			c.TargetParamsField = targetParamsField
 		} else {
 			c.TargetParamsField = "Params"
 		}
 	}
-	if strings.TrimSpace(c.TargetDurationField) == "" {
-		if targetDurationField := os.Getenv("TARGET_DURATION_FIELD"); targetDurationField != "" {
-			c.TargetDurationField = targetDurationField
-		} else {
-			c.TargetDurationField = "TotalDuration"
-		}
-	}
 	if strings.TrimSpace(c.DramaIDField) == "" {
-		if dramaIDField := os.Getenv("DRAMA_ID_FIELD"); dramaIDField != "" {
+		if dramaIDField := os.Getenv("DRAMA_FIELD_ID"); dramaIDField != "" {
 			c.DramaIDField = dramaIDField
 		} else {
 			c.DramaIDField = "DramaID"
 		}
 	}
 	if strings.TrimSpace(c.DramaNameField) == "" {
-		if dramaNameField := os.Getenv("DRAMA_NAME_FIELD"); dramaNameField != "" {
+		if dramaNameField := os.Getenv("DRAMA_FIELD_NAME"); dramaNameField != "" {
 			c.DramaNameField = dramaNameField
 		} else {
 			c.DramaNameField = feishu.DefaultDramaFields.DramaName
 		}
 	}
 	if strings.TrimSpace(c.DramaDurationField) == "" {
-		if dramaDurationField := os.Getenv("DRAMA_DURATION_FIELD"); dramaDurationField != "" {
+		if dramaDurationField := os.Getenv("DRAMA_FIELD_DURATION"); dramaDurationField != "" {
 			c.DramaDurationField = dramaDurationField
 		} else {
 			c.DramaDurationField = "TotalDuration"

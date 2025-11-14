@@ -1,6 +1,6 @@
 # Feishu 模块
 
-`feishu/` 包含了 AnyGrab 与飞书生态的集成能力，当前涵盖：
+`feishu/` 包含了 TaskAgent 与飞书生态的集成能力，当前涵盖：
 
 - 获取租户级访问令牌、统一发送开放平台请求（`client.go`）。
 - 操作多维表格（Bitable）任务表、结果表，包括列表、创建、更新状态等（`bitable.go`）。
@@ -23,9 +23,9 @@
 
 所有字段名称都支持通过环境变量进行自定义，使用表特定前缀：
 
-- **结果表字段**：使用 `RESULT_*` 前缀（例如：`RESULT_PARAMS_FIELD`、`RESULT_USERID_FIELD`、`RESULT_DURATION_FIELD`）
-- **目标表字段**：使用 `TARGET_*` 前缀（例如：`TARGET_PARAMS_FIELD`、`TARGET_DURATION_FIELD`）
-- **剧单表字段**：使用 `DRAMA_*` 前缀（例如：`DRAMA_NAME_FIELD`、`DRAMA_DURATION_FIELD`）
+- **结果表字段**：使用 `RESULT_FIELD_*` 前缀（例如：`RESULT_FIELD_PARAMS`、`RESULT_FIELD_USERID`、`RESULT_FIELD_DURATION`）
+- **目标表字段**：使用 `TARGET_FIELD_*` 前缀（例如：`TARGET_FIELD_PARAMS`）
+- **剧单表字段**：使用 `DRAMA_FIELD_*` 前缀（例如：`DRAMA_FIELD_NAME`、`DRAMA_FIELD_DURATION`）
 
 如果未设置环境变量，将使用上述示例中的默认字段名称。
 
@@ -41,7 +41,7 @@ client, _ := feishu.NewClientFromEnv()
 ctx := context.Background()
 recordID, err := client.CreateTargetRecord(ctx, taskTableURL, feishu.TargetRecordInput{
     TaskID:  123,
-    Params:  `{"keyword":"jay"}`,        // 字段名可通过 TARGET_PARAMS_FIELD 环境变量自定义
+    Params:  `{"keyword":"jay"}`,        // 字段名可通过 TARGET_FIELD_PARAMS 环境变量自定义
     App:     "netease",
     Scene:   "batch",
     Status:  "pending",
@@ -70,15 +70,15 @@ resID, err := client.CreateResultRecord(ctx, resultTableURL, feishu.ResultRecord
     DeviceSerial: "dev-001",
     App:          "douyin",
     Scene:        "ugc",
-    Params:       `{"task":42}`,              // 字段名可通过 RESULT_PARAMS_FIELD 环境变量自定义
+    Params:       `{"task":42}`,              // 字段名可通过 RESULT_FIELD_PARAMS 环境变量自定义
     ItemID:       "vid123",
     ItemCaption:  "示例标题",
     ItemCDNURL:      "https://cdn.example.com/vid123.mp4",
     ItemURL:      "https://www.kuaishou.com/short-video/vid123",
-    // 可选：新增 ItemDuration，单位为秒，字段名可通过 RESULT_DURATION_FIELD 环境变量自定义
+    // 可选：新增 ItemDuration，单位为秒，字段名可通过 RESULT_FIELD_DURATION 环境变量自定义
     ItemDurationSeconds: &durationSeconds,
     UserName:     "作者",
-    UserID:       "user123",                  // 字段名可通过 RESULT_USERID_FIELD 环境变量自定义
+    UserID:       "user123",                  // 字段名可通过 RESULT_FIELD_USERID 环境变量自定义
     Tags:         "热门,音乐",
     TaskID:       123456,
     Extra: map[string]any{

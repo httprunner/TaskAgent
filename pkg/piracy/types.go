@@ -10,8 +10,7 @@ type Config struct {
 	DurationField string // item duration seconds
 
 	// Fields in target table (source B)
-	TargetParamsField   string // Params field in target table
-	TargetDurationField string // total duration seconds
+	TargetParamsField string // Params field in target table
 
 	// Fields in original drama table (source C)
 	DramaIDField       string // 短剧 ID
