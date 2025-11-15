@@ -110,6 +110,17 @@ func (pr *Reporter) DetectMatchesForParams(ctx context.Context, paramsList []str
 
 // DetectWithFilters returns detection report for the provided params with additional table filters.
 func (pr *Reporter) DetectWithFilters(ctx context.Context, paramsList []string, resultExtraFilter, dramaExtraFilter string) (*Report, error) {
+	return pr.detectWithFiltersInternal(ctx, paramsList, resultExtraFilter, dramaExtraFilter, nil)
+}
+
+// DetectWithFiltersThreshold runs piracy detection with an explicit threshold override.
+func (pr *Reporter) DetectWithFiltersThreshold(ctx context.Context, paramsList []string, resultExtraFilter, dramaExtraFilter string, threshold float64) (*Report, error) {
+	override := &Config{}
+	override.Threshold = threshold
+	return pr.detectWithFiltersInternal(ctx, paramsList, resultExtraFilter, dramaExtraFilter, override)
+}
+
+func (pr *Reporter) detectWithFiltersInternal(ctx context.Context, paramsList []string, resultExtraFilter, dramaExtraFilter string, cfgOverride *Config) (*Report, error) {
 	if len(paramsList) == 0 {
 		return &Report{Threshold: pr.threshold}, nil
 	}
@@ -136,6 +147,15 @@ func (pr *Reporter) DetectWithFilters(ctx context.Context, paramsList []string, 
 			Filter: finalDramaFilter,
 		},
 		Config: pr.Config(),
+	}
+	if cfgOverride != nil {
+		ops.Config.Threshold = cfgOverride.Threshold
+		if cfgOverride.ParamsField != "" {
+			ops.Config.ParamsField = cfgOverride.ParamsField
+		}
+		if cfgOverride.DramaNameField != "" {
+			ops.Config.DramaNameField = cfgOverride.DramaNameField
+		}
 	}
 
 	ops.Config.ApplyDefaults()
@@ -175,7 +195,7 @@ func (pr *Reporter) ReportMatches(ctx context.Context, app string, matches []Mat
 			UserID:   strings.TrimSpace(match.UserID),
 			UserName: strings.TrimSpace(match.UserName),
 			Extra:    fmt.Sprintf("ratio=%.2f%%", match.Ratio*100), // 存储实际检测比例值（百分比形式）
-			Status:   "PiracyDetected",
+			Status:   feishu.StatusPending,
 		})
 	}
 

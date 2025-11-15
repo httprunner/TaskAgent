@@ -134,12 +134,22 @@ func (c *FeishuTaskClient) updateStatuses(ctx context.Context, tasks []*Task, st
 	if err != nil {
 		return nil, errors.Wrap(err, "extract feishu tasks failed")
 	}
-	if err := updateFeishuTaskStatuses(ctx, feishuTasks, status, deviceSerial, c.statusUpdateMeta(status)); err != nil {
+	if len(feishuTasks) == 0 {
+		return nil, nil
+	}
+	selected := filterTasksForStatusOverride(feishuTasks, status)
+	if len(selected) == 0 {
+		log.Debug().
+			Str("status", strings.TrimSpace(status)).
+			Msg("skip feishu status override: all tasks already finalized")
+		return feishuTasks, nil
+	}
+	if err := updateFeishuTaskStatuses(ctx, selected, status, deviceSerial, c.statusUpdateMeta(status)); err != nil {
 		return nil, err
 	}
 	trimmedStatus := strings.TrimSpace(status)
 	normalizedSerial := strings.TrimSpace(deviceSerial)
-	for _, task := range feishuTasks {
+	for _, task := range selected {
 		if task == nil {
 			continue
 		}
@@ -149,6 +159,56 @@ func (c *FeishuTaskClient) updateStatuses(ctx context.Context, tasks []*Task, st
 		}
 	}
 	return feishuTasks, nil
+}
+
+// TaskExtraUpdate describes an extra-field update for a Feishu task.
+type TaskExtraUpdate struct {
+	Task  *FeishuTask
+	Extra string
+}
+
+// UpdateTaskExtras updates the Extra column for the provided tasks.
+func (c *FeishuTaskClient) UpdateTaskExtras(ctx context.Context, updates []TaskExtraUpdate) error {
+	if c == nil {
+		return errors.New("feishu: task client is nil")
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	grouped := make(map[*feishuTaskSource][]TaskExtraUpdate, len(updates))
+	for _, upd := range updates {
+		if upd.Task == nil || upd.Task.source == nil || upd.Task.source.client == nil || upd.Task.source.table == nil {
+			return errors.New("feishu: task missing source context for extra update")
+		}
+		grouped[upd.Task.source] = append(grouped[upd.Task.source], upd)
+	}
+
+	var errs []string
+	touched := make([]*FeishuTask, 0, len(updates))
+	for source, subset := range grouped {
+		extraField := strings.TrimSpace(source.table.Fields.Extra)
+		if extraField == "" {
+			return errors.New("feishu: extra field is not configured in target table")
+		}
+		for _, upd := range subset {
+			fields := map[string]any{
+				extraField: upd.Extra,
+			}
+			if err := source.client.UpdateTargetFields(ctx, source.table, upd.Task.TaskID, fields); err != nil {
+				errs = append(errs, fmt.Sprintf("task %d: %v", upd.Task.TaskID, err))
+				continue
+			}
+			upd.Task.Extra = upd.Extra
+			touched = append(touched, upd.Task)
+		}
+	}
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
+	}
+	if len(touched) == 0 {
+		return nil
+	}
+	return c.syncTargetMirror(touched)
 }
 
 func (c *FeishuTaskClient) statusUpdateMeta(status string) *taskStatusMeta {
@@ -163,7 +223,7 @@ func (c *FeishuTaskClient) statusUpdateMeta(status string) *taskStatusMeta {
 		ts := c.now()
 		return &taskStatusMeta{dispatchedAt: &ts}
 	}
-	if trimmed == feishu.StatusSuccess || trimmed == feishu.StatusFailed {
+	if trimmed == feishu.StatusSuccess || trimmed == feishu.StatusFailed || trimmed == feishu.StatusSyncSuccess || trimmed == feishu.StatusSyncFailed {
 		ts := c.now()
 		return &taskStatusMeta{completedAt: &ts}
 	}
@@ -200,6 +260,7 @@ type FeishuTask struct {
 	App               string
 	Scene             string
 	Status            string
+	OriginalStatus    string
 	UserID            string
 	UserName          string
 	Extra             string
@@ -272,7 +333,7 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient,
 	dayEnd := dayStart.Add(24 * time.Hour)
 	fields := feishu.DefaultTargetFields
 
-	statusPriority := []string{"", "failed"}
+	statusPriority := []string{feishu.StatusPending, "", feishu.StatusFailed, feishu.StatusSyncFailed}
 
 	result := make([]*FeishuTask, 0, limit)
 	seen := make(map[int64]struct{}, limit)
@@ -381,6 +442,7 @@ func fetchFeishuTasksWithFilter(ctx context.Context, client targetTableClient, b
 			App:               row.App,
 			Scene:             row.Scene,
 			Status:            row.Status,
+			OriginalStatus:    row.Status,
 			UserID:            row.UserID,
 			UserName:          row.UserName,
 			Extra:             row.Extra,
@@ -624,6 +686,39 @@ func updateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 		return errors.New(strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+func filterTasksForStatusOverride(tasks []*FeishuTask, newStatus string) []*FeishuTask {
+	if len(tasks) == 0 {
+		return nil
+	}
+	desired := strings.TrimSpace(newStatus)
+	result := make([]*FeishuTask, 0, len(tasks))
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		current := strings.TrimSpace(task.Status)
+		if shouldSkipFeishuStatusOverride(current, desired) {
+			log.Debug().
+				Int64("task_id", task.TaskID).
+				Str("current", current).
+				Str("desired", desired).
+				Msg("feishu task already in terminal state; skip status override")
+			continue
+		}
+		result = append(result, task)
+	}
+	return result
+}
+
+func shouldSkipFeishuStatusOverride(currentStatus, desiredStatus string) bool {
+	switch desiredStatus {
+	case feishu.StatusSuccess:
+		return currentStatus == feishu.StatusSyncSuccess || currentStatus == feishu.StatusSyncFailed
+	default:
+		return false
+	}
 }
 
 func elapsedSecondsForTask(task *FeishuTask, completedAt time.Time) (int64, bool) {

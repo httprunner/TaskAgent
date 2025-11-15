@@ -346,3 +346,48 @@ func TestUpdateFeishuTaskStatusesAssignsElapsedSeconds(t *testing.T) {
 		t.Fatalf("expected task elapsed seconds to be 95, got %d", task.ElapsedSeconds)
 	}
 }
+
+func TestUpdateStatusesSkipsSyncOverrides(t *testing.T) {
+	client := &FeishuTaskClient{}
+	recorder := &recordingTargetClient{}
+	table := &feishusvc.TargetTable{Fields: feishusvc.DefaultTargetFields}
+	source := &feishuTaskSource{client: recorder, table: table}
+	tasks := []*Task{
+		{Payload: &FeishuTask{TaskID: 11, Status: feishusvc.StatusSyncSuccess, source: source}},
+		{Payload: &FeishuTask{TaskID: 12, Status: feishusvc.StatusSyncFailed, source: source}},
+	}
+	updated, err := client.updateStatuses(context.Background(), tasks, feishusvc.StatusSuccess, "device-1")
+	if err != nil {
+		t.Fatalf("updateStatuses returned error: %v", err)
+	}
+	if len(recorder.updates) != 0 {
+		t.Fatalf("expected no updates for sync-success/fail tasks, got %d", len(recorder.updates))
+	}
+	if updated[0].Status != feishusvc.StatusSyncSuccess {
+		t.Fatalf("task 11 status changed unexpectedly: %s", updated[0].Status)
+	}
+	if updated[1].Status != feishusvc.StatusSyncFailed {
+		t.Fatalf("task 12 status changed unexpectedly: %s", updated[1].Status)
+	}
+}
+
+func TestUpdateStatusesStillUpdatesPendingTasks(t *testing.T) {
+	client := &FeishuTaskClient{}
+	recorder := &recordingTargetClient{}
+	table := &feishusvc.TargetTable{Fields: feishusvc.DefaultTargetFields}
+	source := &feishuTaskSource{client: recorder, table: table}
+	task := &FeishuTask{TaskID: 21, Status: feishusvc.StatusPending, source: source}
+	updated, err := client.updateStatuses(context.Background(), []*Task{{Payload: task}}, feishusvc.StatusSuccess, "device-1")
+	if err != nil {
+		t.Fatalf("updateStatuses returned error: %v", err)
+	}
+	if len(updated) != 1 {
+		t.Fatalf("expected 1 task in response, got %d", len(updated))
+	}
+	if len(recorder.updates) != 1 {
+		t.Fatalf("expected 1 update for pending task, got %d", len(recorder.updates))
+	}
+	if task.Status != feishusvc.StatusSuccess {
+		t.Fatalf("expected task status to update to success, got %s", task.Status)
+	}
+}

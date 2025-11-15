@@ -9,12 +9,18 @@ const (
 	// EnvResultBitableURL indicates where to push Feishu result rows.
 	EnvResultBitableURL = "RESULT_BITABLE_URL"
 
+	// StatusPending marks a task row as pending execution.
+	StatusPending = "pending"
 	// StatusSuccess marks a task row as completed successfully.
 	StatusSuccess = "success"
 	// StatusFailed marks a task row as failed.
 	StatusFailed = "failed"
 	// StatusDispatched marks a task row as dispatched.
 	StatusDispatched = "dispatched"
+	// StatusSyncSuccess marks a personal-search row whose webhook already synced.
+	StatusSyncSuccess = "sync-success"
+	// StatusSyncFailed marks a personal-search row whose webhook sync failed.
+	StatusSyncFailed = "sync-failed"
 )
 
 // DefaultDramaFields matches the default schema used by the built-in drama
