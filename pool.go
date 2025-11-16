@@ -8,6 +8,7 @@ import (
 	"time"
 
 	envload "github.com/httprunner/TaskAgent/internal"
+	"github.com/httprunner/TaskAgent/pkg/feishu"
 	adbprovider "github.com/httprunner/TaskAgent/providers/adb"
 	gadb "github.com/httprunner/httprunner/v5/pkg/gadb"
 	"github.com/pkg/errors"
@@ -23,6 +24,7 @@ type Task struct {
 	ID           string
 	Payload      any
 	DeviceSerial string
+	ResultStatus string
 }
 
 // DeviceProvider returns the set of currently connected device serials.
@@ -408,9 +410,7 @@ func (a *DevicePoolAgent) runDeviceJob(ctx context.Context, dev *deviceState, jo
 		}
 	}
 
-	if hookErr := a.taskManager.OnTasksCompleted(context.Background(), job.deviceSerial, job.tasks, err); hookErr != nil {
-		log.Error().Err(hookErr).Str("serial", job.deviceSerial).Msg("task completion hook failed")
-	}
+	a.handleTaskResults(job, err)
 
 	a.deviceMu.Lock()
 	dev.status = statusIdle
@@ -427,6 +427,45 @@ func (a *DevicePoolAgent) runDeviceJob(ctx context.Context, dev *deviceState, jo
 	if remove {
 		a.removeDevice(job.deviceSerial)
 	}
+}
+
+func (a *DevicePoolAgent) handleTaskResults(job *deviceJob, jobErr error) {
+	ctx := context.Background()
+	successTasks, failedTasks, pendingTasks := splitTasksByResultStatus(job.tasks)
+
+	report := func(tasks []*Task, err error) {
+		if len(tasks) == 0 {
+			return
+		}
+		if hookErr := a.taskManager.OnTasksCompleted(ctx, job.deviceSerial, tasks, err); hookErr != nil {
+			log.Error().Err(hookErr).Str("serial", job.deviceSerial).Msg("task completion hook failed")
+		}
+	}
+
+	report(successTasks, nil)
+	if len(failedTasks) > 0 {
+		report(failedTasks, errors.New("job runner reported task failure"))
+	}
+	if len(pendingTasks) > 0 {
+		report(pendingTasks, jobErr)
+	}
+}
+
+func splitTasksByResultStatus(tasks []*Task) (success []*Task, failed []*Task, pending []*Task) {
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		switch strings.TrimSpace(task.ResultStatus) {
+		case feishu.StatusSuccess:
+			success = append(success, task)
+		case feishu.StatusFailed:
+			failed = append(failed, task)
+		default:
+			pending = append(pending, task)
+		}
+	}
+	return
 }
 
 func (a *DevicePoolAgent) removeDevice(serial string) {
