@@ -37,6 +37,7 @@ type TargetFields struct {
 	Scene            string
 	Datetime         string
 	Status           string
+	Webhook          string
 	UserID           string
 	UserName         string
 	Extra            string
@@ -59,6 +60,7 @@ type TargetRow struct {
 	Datetime          *time.Time
 	DatetimeRaw       string
 	Status            string
+	Webhook           string
 	DeviceSerial      string
 	DispatchedDevice  string
 	DispatchedTime    *time.Time
@@ -77,6 +79,7 @@ type TargetRecordInput struct {
 	Datetime          *time.Time
 	DatetimeRaw       string
 	Status            string
+	Webhook           string
 	UserID            string
 	UserName          string
 	Extra             string
@@ -213,6 +216,18 @@ func (t *TargetTable) updateLocalStatus(taskID int64, status string) {
 	for i := range t.Rows {
 		if t.Rows[i].TaskID == taskID {
 			t.Rows[i].Status = status
+			break
+		}
+	}
+}
+
+func (t *TargetTable) updateLocalWebhook(taskID int64, webhook string) {
+	if t == nil {
+		return
+	}
+	for i := range t.Rows {
+		if t.Rows[i].TaskID == taskID {
+			t.Rows[i].Webhook = webhook
 			break
 		}
 	}
@@ -499,6 +514,11 @@ func (c *Client) UpdateTargetFields(ctx context.Context, table *TargetTable, tas
 			table.updateLocalStatus(taskID, toString(val))
 		}
 	}
+	if webhookField := strings.TrimSpace(table.Fields.Webhook); webhookField != "" {
+		if val, ok := fields[webhookField]; ok {
+			table.updateLocalWebhook(taskID, toString(val))
+		}
+	}
 	if dispatchedField := strings.TrimSpace(table.Fields.DispatchedDevice); dispatchedField != "" {
 		if val, ok := fields[dispatchedField]; ok {
 			table.updateLocalDispatchedDevice(taskID, toString(val))
@@ -694,6 +714,10 @@ func (fields TargetFields) merge(override TargetFields) TargetFields {
 		log.Warn().Str("new", override.Status).Msg("overriding field Status")
 		result.Status = override.Status
 	}
+	if strings.TrimSpace(override.Webhook) != "" {
+		log.Warn().Str("new", override.Webhook).Msg("overriding field Webhook")
+		result.Webhook = override.Webhook
+	}
 	if strings.TrimSpace(override.UserID) != "" {
 		log.Warn().Str("new", override.UserID).Msg("overriding field UserID")
 		result.UserID = override.UserID
@@ -816,6 +840,9 @@ func buildTargetRecordPayloads(records []TargetRecordInput, fields TargetFields)
 		}
 		if strings.TrimSpace(fields.Status) != "" && rec.Status != "" {
 			row[fields.Status] = rec.Status
+		}
+		if strings.TrimSpace(fields.Webhook) != "" && rec.Webhook != "" {
+			row[fields.Webhook] = rec.Webhook
 		}
 		addOptionalField(row, fields.UserID, rec.UserID)
 		addOptionalField(row, fields.UserName, rec.UserName)
@@ -1090,6 +1117,7 @@ func decodeTargetRow(rec bitableRecord, fields TargetFields) (TargetRow, error) 
 		App:              bitableOptionalString(rec.Fields, fields.App),
 		Scene:            bitableOptionalString(rec.Fields, fields.Scene),
 		Status:           status,
+		Webhook:          bitableOptionalString(rec.Fields, fields.Webhook),
 		UserID:           bitableOptionalString(rec.Fields, fields.UserID),
 		UserName:         bitableOptionalString(rec.Fields, fields.UserName),
 		Extra:            bitableOptionalString(rec.Fields, fields.Extra),

@@ -24,6 +24,7 @@ type TargetTask struct {
 	Datetime          *time.Time
 	DatetimeRaw       string
 	Status            string
+	Webhook           string
 	UserID            string
 	UserName          string
 	Extra             string
@@ -95,6 +96,7 @@ func buildTargetColumnOrder(fields feishu.TargetFields) []string {
 		fields.Scene,
 		fields.Datetime,
 		fields.Status,
+		fields.Webhook,
 		fields.UserID,
 		fields.UserName,
 		fields.Extra,
@@ -113,6 +115,7 @@ func ensureTargetSchema(db *sql.DB, table string, fields feishu.TargetFields, co
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.Scene)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.Datetime)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.Status)),
+		fmt.Sprintf("%s TEXT", quoteIdent(fields.Webhook)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.UserID)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.UserName)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.Extra)),
@@ -127,6 +130,9 @@ func ensureTargetSchema(db *sql.DB, table string, fields feishu.TargetFields, co
 );`, quoteIdent(table), strings.Join(defs, ",\n"))
 	if _, err := db.Exec(createStmt); err != nil {
 		return errors.Wrap(err, "create capture targets table failed")
+	}
+	if err := ensureColumnExists(db, table, fields.Webhook, "TEXT"); err != nil {
+		return err
 	}
 	indexes := []string{
 		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS %s ON %s(%s);`, quoteIdent("idx_"+table+"_status"), quoteIdent(table), quoteIdent(fields.Status)),
@@ -213,6 +219,7 @@ func (m *TargetMirror) upsert(task *TargetTask) error {
 		nullableString(task.Scene),
 		formatDatetime(task.DatetimeRaw, task.Datetime),
 		nullableString(task.Status),
+		nullableString(task.Webhook),
 		nullableString(task.UserID),
 		nullableString(task.UserName),
 		nullableString(task.Extra),
@@ -243,6 +250,59 @@ func formatDatetime(raw string, ts *time.Time) sql.NullString {
 		return sql.NullString{String: ts.UTC().Format(time.RFC3339), Valid: true}
 	}
 	return sql.NullString{}
+}
+
+func ensureColumnExists(db *sql.DB, table, column, columnType string) error {
+	columnName := strings.TrimSpace(column)
+	if columnName == "" {
+		return nil
+	}
+	exists, err := columnExists(db, table, columnName)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	stmt := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", quoteIdent(table), quoteIdent(columnName), columnType)
+	if _, err := db.Exec(stmt); err != nil {
+		return errors.Wrapf(err, "add column %s to table %s failed", columnName, table)
+	}
+	return nil
+}
+
+func columnExists(db *sql.DB, table, column string) (bool, error) {
+	query := fmt.Sprintf("PRAGMA table_info(%s);", quoteIdent(table))
+	rows, err := db.Query(query)
+	if err != nil {
+		return false, errors.Wrap(err, "query capture targets schema failed")
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid    int
+			name   string
+			ctype  string
+			notnul int
+			dflt   sql.NullString
+			pk     int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnul, &dflt, &pk); err != nil {
+			return false, errors.Wrap(err, "scan capture targets schema failed")
+		}
+		_ = cid
+		_ = ctype
+		_ = notnul
+		_ = dflt
+		_ = pk
+		if strings.EqualFold(strings.TrimSpace(name), column) {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, errors.Wrap(err, "iterate capture targets schema failed")
+	}
+	return false, nil
 }
 
 func quoteIdent(name string) string {

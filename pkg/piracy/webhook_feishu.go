@@ -9,13 +9,6 @@ import (
 	"github.com/httprunner/TaskAgent/pkg/feishu"
 )
 
-type feishuSummarySource struct {
-	client      *feishu.Client
-	fields      summaryFieldConfig
-	dramaTable  string
-	resultTable string
-}
-
 func newFeishuSummarySource(fields summaryFieldConfig, opts WebhookOptions) (summaryDataSource, error) {
 	dramaURL := strings.TrimSpace(opts.DramaTableURL)
 	if dramaURL == "" {
@@ -44,6 +37,13 @@ func newFeishuSummarySource(fields summaryFieldConfig, opts WebhookOptions) (sum
 		dramaTable:  dramaURL,
 		resultTable: resultURL,
 	}, nil
+}
+
+type feishuSummarySource struct {
+	client      *feishu.Client
+	fields      summaryFieldConfig
+	dramaTable  string
+	resultTable string
 }
 
 func (s *feishuSummarySource) FetchDrama(ctx context.Context, params string) (*dramaInfo, error) {

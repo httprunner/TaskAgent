@@ -17,10 +17,12 @@ const (
 	StatusFailed = "failed"
 	// StatusDispatched marks a task row as dispatched.
 	StatusDispatched = "dispatched"
-	// StatusSyncSuccess marks a personal-search row whose webhook already synced.
-	StatusSyncSuccess = "sync-success"
-	// StatusSyncFailed marks a personal-search row whose webhook sync failed.
-	StatusSyncFailed = "sync-failed"
+	// WebhookPending marks a task that requires webhook synchronization.
+	WebhookPending = "pending"
+	// WebhookSuccess marks a task whose webhook synchronization succeeded.
+	WebhookSuccess = "success"
+	// WebhookFailed marks a task whose webhook synchronization failed.
+	WebhookFailed = "failed"
 )
 
 // DefaultDramaFields matches the default schema used by the built-in drama
@@ -44,6 +46,7 @@ var DefaultTargetFields = TargetFields{
 	UserName:         "UserName",         // 用户名称
 	Datetime:         "Datetime",         // 任务执行时间配置
 	Status:           "Status",           // 任务状态
+	Webhook:          "Webhook",          // Webhook 同步状态
 	DeviceSerial:     "DeviceSerial",     // 目标执行设备
 	DispatchedDevice: "DispatchedDevice", // 实际派发设备
 	DispatchedTime:   "DispatchedTime",   // 任务派发时间

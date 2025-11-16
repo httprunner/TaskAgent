@@ -21,7 +21,7 @@ func init() {
 	output := zerolog.ConsoleWriter{Out: os.Stderr}
 	log.Logger = zerolog.New(output).With().Timestamp().Logger()
 
-	rootCmd.AddCommand(newDetectCmd(), newReportCmd(), newAutoCmd())
+	rootCmd.AddCommand(newDetectCmd(), newReportCmd(), newAutoCmd(), newWebhookCmd())
 	_ = internal.Ensure()
 }
 

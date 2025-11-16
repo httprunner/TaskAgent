@@ -13,13 +13,6 @@ import (
 	"github.com/httprunner/TaskAgent/pkg/storage"
 )
 
-type sqliteSummarySource struct {
-	db          *sql.DB
-	fields      summaryFieldConfig
-	dramaTable  string
-	resultTable string
-}
-
 func newSQLiteSummarySource(fields summaryFieldConfig, opts WebhookOptions) (summaryDataSource, error) {
 	dbPath := strings.TrimSpace(opts.SQLitePath)
 	if dbPath == "" {
@@ -57,6 +50,13 @@ func pickTableEnv(key, fallback string) string {
 		return val
 	}
 	return fallback
+}
+
+type sqliteSummarySource struct {
+	db          *sql.DB
+	fields      summaryFieldConfig
+	dramaTable  string
+	resultTable string
 }
 
 func (s *sqliteSummarySource) Close() error {

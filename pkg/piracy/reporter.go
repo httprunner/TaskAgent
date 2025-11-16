@@ -196,6 +196,7 @@ func (pr *Reporter) ReportMatches(ctx context.Context, app string, matches []Mat
 			UserName: strings.TrimSpace(match.UserName),
 			Extra:    fmt.Sprintf("ratio=%.2f%%", match.Ratio*100), // 存储实际检测比例值（百分比形式）
 			Status:   feishu.StatusPending,
+			Webhook:  feishu.WebhookPending,
 		})
 	}
 

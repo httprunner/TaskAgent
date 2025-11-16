@@ -347,27 +347,26 @@ func TestUpdateFeishuTaskStatusesAssignsElapsedSeconds(t *testing.T) {
 	}
 }
 
-func TestUpdateStatusesSkipsSyncOverrides(t *testing.T) {
+func TestUpdateStatusesSkipsDuplicateStatusWrites(t *testing.T) {
 	client := &FeishuTaskClient{}
 	recorder := &recordingTargetClient{}
 	table := &feishusvc.TargetTable{Fields: feishusvc.DefaultTargetFields}
 	source := &feishuTaskSource{client: recorder, table: table}
 	tasks := []*Task{
-		{Payload: &FeishuTask{TaskID: 11, Status: feishusvc.StatusSyncSuccess, source: source}},
-		{Payload: &FeishuTask{TaskID: 12, Status: feishusvc.StatusSyncFailed, source: source}},
+		{Payload: &FeishuTask{TaskID: 11, Status: feishusvc.StatusSuccess, source: source}},
+		{Payload: &FeishuTask{TaskID: 12, Status: feishusvc.StatusSuccess, source: source}},
 	}
 	updated, err := client.updateStatuses(context.Background(), tasks, feishusvc.StatusSuccess, "device-1")
 	if err != nil {
 		t.Fatalf("updateStatuses returned error: %v", err)
 	}
 	if len(recorder.updates) != 0 {
-		t.Fatalf("expected no updates for sync-success/fail tasks, got %d", len(recorder.updates))
+		t.Fatalf("expected no updates when desired status already set, got %d", len(recorder.updates))
 	}
-	if updated[0].Status != feishusvc.StatusSyncSuccess {
-		t.Fatalf("task 11 status changed unexpectedly: %s", updated[0].Status)
-	}
-	if updated[1].Status != feishusvc.StatusSyncFailed {
-		t.Fatalf("task 12 status changed unexpectedly: %s", updated[1].Status)
+	for _, task := range updated {
+		if task.Status != feishusvc.StatusSuccess {
+			t.Fatalf("task %d status changed unexpectedly: %s", task.TaskID, task.Status)
+		}
 	}
 }
 

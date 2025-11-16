@@ -211,6 +211,51 @@ func (c *FeishuTaskClient) UpdateTaskExtras(ctx context.Context, updates []TaskE
 	return c.syncTargetMirror(touched)
 }
 
+// UpdateTaskWebhooks updates the webhook column for the provided tasks.
+func (c *FeishuTaskClient) UpdateTaskWebhooks(ctx context.Context, tasks []*FeishuTask, webhookStatus string) error {
+	if c == nil {
+		return errors.New("feishu: task client is nil")
+	}
+	if len(tasks) == 0 {
+		return nil
+	}
+	trimmed := strings.TrimSpace(webhookStatus)
+	if trimmed == "" {
+		return errors.New("feishu: webhook status is empty")
+	}
+	grouped := make(map[*feishuTaskSource][]*FeishuTask, len(tasks))
+	for _, task := range tasks {
+		if task == nil || task.source == nil || task.source.client == nil || task.source.table == nil {
+			return errors.New("feishu: task missing source context for webhook update")
+		}
+		grouped[task.source] = append(grouped[task.source], task)
+	}
+	var errs []string
+	touched := make([]*FeishuTask, 0, len(tasks))
+	for source, subset := range grouped {
+		field := strings.TrimSpace(source.table.Fields.Webhook)
+		if field == "" {
+			return errors.New("feishu: webhook field is not configured in target table")
+		}
+		payload := map[string]any{field: trimmed}
+		for _, task := range subset {
+			if err := source.client.UpdateTargetFields(ctx, source.table, task.TaskID, payload); err != nil {
+				errs = append(errs, fmt.Sprintf("task %d: %v", task.TaskID, err))
+				continue
+			}
+			task.Webhook = trimmed
+			touched = append(touched, task)
+		}
+	}
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
+	}
+	if len(touched) == 0 {
+		return nil
+	}
+	return c.syncTargetMirror(touched)
+}
+
 func (c *FeishuTaskClient) statusUpdateMeta(status string) *taskStatusMeta {
 	if c == nil {
 		return nil
@@ -223,7 +268,7 @@ func (c *FeishuTaskClient) statusUpdateMeta(status string) *taskStatusMeta {
 		ts := c.now()
 		return &taskStatusMeta{dispatchedAt: &ts}
 	}
-	if trimmed == feishu.StatusSuccess || trimmed == feishu.StatusFailed || trimmed == feishu.StatusSyncSuccess || trimmed == feishu.StatusSyncFailed {
+	if trimmed == feishu.StatusSuccess || trimmed == feishu.StatusFailed {
 		ts := c.now()
 		return &taskStatusMeta{completedAt: &ts}
 	}
@@ -261,6 +306,7 @@ type FeishuTask struct {
 	Scene             string
 	Status            string
 	OriginalStatus    string
+	Webhook           string
 	UserID            string
 	UserName          string
 	Extra             string
@@ -288,6 +334,7 @@ func toStorageTargetTask(task *FeishuTask) *storage.TargetTask {
 		Datetime:          task.Datetime,
 		DatetimeRaw:       task.DatetimeRaw,
 		Status:            task.Status,
+		Webhook:           task.Webhook,
 		UserID:            task.UserID,
 		UserName:          task.UserName,
 		Extra:             task.Extra,
@@ -333,7 +380,7 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient,
 	dayEnd := dayStart.Add(24 * time.Hour)
 	fields := feishu.DefaultTargetFields
 
-	statusPriority := []string{feishu.StatusPending, "", feishu.StatusFailed, feishu.StatusSyncFailed}
+	statusPriority := []string{feishu.StatusPending, feishu.StatusFailed}
 
 	result := make([]*FeishuTask, 0, limit)
 	seen := make(map[int64]struct{}, limit)
@@ -443,6 +490,7 @@ func fetchFeishuTasksWithFilter(ctx context.Context, client targetTableClient, b
 			Scene:             row.Scene,
 			Status:            row.Status,
 			OriginalStatus:    row.Status,
+			Webhook:           row.Webhook,
 			UserID:            row.UserID,
 			UserName:          row.UserName,
 			Extra:             row.Extra,
@@ -499,6 +547,7 @@ func summarizeFeishuTasks(tasks []*FeishuTask) []map[string]any {
 			"params":    task.Params,
 			"scene":     task.Scene,
 			"status":    task.Status,
+			"webhook":   task.Webhook,
 			"user_id":   task.UserID,
 			"user_name": task.UserName,
 			"extra":     task.Extra,
@@ -713,12 +762,12 @@ func filterTasksForStatusOverride(tasks []*FeishuTask, newStatus string) []*Feis
 }
 
 func shouldSkipFeishuStatusOverride(currentStatus, desiredStatus string) bool {
-	switch desiredStatus {
-	case feishu.StatusSuccess:
-		return currentStatus == feishu.StatusSyncSuccess || currentStatus == feishu.StatusSyncFailed
-	default:
-		return false
+	current := strings.TrimSpace(currentStatus)
+	desired := strings.TrimSpace(desiredStatus)
+	if desired == "" {
+		return true
 	}
+	return current == desired
 }
 
 func elapsedSecondsForTask(task *FeishuTask, completedAt time.Time) (int64, bool) {
