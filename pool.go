@@ -95,6 +95,12 @@ type deviceJob struct {
 	cancel       context.CancelFunc
 }
 
+type deviceAssignment struct {
+	device   *deviceState
+	tasks    []*Task
+	capacity int
+}
+
 // NewDevicePoolAgent builds an agent with the provided configuration and job runner.
 func NewDevicePoolAgent(cfg Config, runner JobRunner) (*DevicePoolAgent, error) {
 	if runner == nil {
@@ -290,39 +296,60 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 		}
 		targeted[target] = append(targeted[target], task)
 	}
-	generalIdx := 0
+	assignments := make([]*deviceAssignment, 0, len(idle))
 	for _, dev := range idle {
-		assign := a.cfg.MaxTasksPerJob
-		if assign <= 0 {
-			assign = 1
+		capacity := a.cfg.MaxTasksPerJob
+		if capacity <= 0 {
+			capacity = 1
 		}
-		selected := make([]*Task, 0, assign)
+		assignment := &deviceAssignment{
+			device:   dev,
+			tasks:    make([]*Task, 0, capacity),
+			capacity: capacity,
+		}
 		if list := targeted[dev.serial]; len(list) > 0 {
-			take := assign
+			take := assignment.capacity
 			if take > len(list) {
 				take = len(list)
 			}
-			selected = append(selected, list[:take]...)
-			targeted[dev.serial] = list[take:]
-			assign -= take
+			assignment.tasks = append(assignment.tasks, list[:take]...)
+			assignment.capacity -= take
 		}
-		for assign > 0 && generalIdx < len(general) {
-			selected = append(selected, general[generalIdx])
+		assignments = append(assignments, assignment)
+	}
+	generalIdx := 0
+	for generalIdx < len(general) {
+		progress := false
+		for _, assignment := range assignments {
+			if assignment.capacity <= 0 {
+				continue
+			}
+			assignment.tasks = append(assignment.tasks, general[generalIdx])
+			assignment.capacity--
 			generalIdx++
-			assign--
+			progress = true
+			if generalIdx >= len(general) {
+				break
+			}
 		}
-		if len(selected) == 0 {
+		if !progress {
+			break
+		}
+	}
+	for _, assignment := range assignments {
+		if len(assignment.tasks) == 0 || assignment.device == nil {
 			continue
 		}
-		if err := a.taskManager.OnTasksDispatched(ctx, dev.serial, selected); err != nil {
+		dev := assignment.device
+		if err := a.taskManager.OnTasksDispatched(ctx, dev.serial, assignment.tasks); err != nil {
 			log.Error().Err(err).Str("serial", dev.serial).Msg("task dispatch hook failed")
 			continue
 		}
 		log.Info().
 			Str("serial", dev.serial).
-			Int("assigned_tasks", len(selected)).
+			Int("assigned_tasks", len(assignment.tasks)).
 			Msg("device pool dispatched tasks to device")
-		a.startDeviceJob(ctx, dev, selected)
+		a.startDeviceJob(ctx, dev, assignment.tasks)
 	}
 	return nil
 }

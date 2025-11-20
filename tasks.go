@@ -402,6 +402,17 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient,
 	if len(result) > limit {
 		result = result[:limit]
 	}
+	if len(result) > 1 {
+		sort.Slice(result, func(i, j int) bool {
+			if result[i] == nil {
+				return false
+			}
+			if result[j] == nil {
+				return true
+			}
+			return result[i].TaskID < result[j].TaskID
+		})
+	}
 	return result, nil
 }
 
