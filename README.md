@@ -19,6 +19,7 @@ TaskAgent is a Go 1.24 module that keeps Android capture devices busy by polling
 - Go 1.24 or newer (`go env GOVERSION` to verify).
 - A Feishu custom app with API access plus the following environment variables: `FEISHU_APP_ID`, `FEISHU_APP_SECRET`, optional `FEISHU_TENANT_KEY`, `FEISHU_BASE_URL`, and `FEISHU_LIVE_TEST` (toggles integration tests).
 - A Feishu target Bitable that stores pending tasks (surface its link via `TARGET_BITABLE_URL` or inject it directly into `pool.Config.BitableURL`).
+- Optional observability tables: `DEVICE_INFO_BITABLE_URL` (设备信息表) and `DEVICE_TASK_BITABLE_URL` (设备任务表) for recording device heartbeat/dispatch snapshots. Leave empty to disable recording. Column names are customizable via `DEVICE_INFO_FIELD_*` / `DEVICE_TASK_FIELD_*`; defaults match the sample schemas below.
 - Access to the result Bitables you plan to push to, if any.
 - Android Debug Bridge (ADB) on the PATH when using the default provider.
 
@@ -64,6 +65,8 @@ TaskAgent is a Go 1.24 module that keeps Android capture devices busy by polling
            PollInterval:   30 * time.Second,
            MaxTasksPerJob: 2,
            BitableURL:     os.Getenv(feishu.EnvTargetBitableURL),
+           DeviceRecorder: mustRecorder, // optional: write device info / job rows to Feishu
+           AgentVersion:   "v0.0.0",     // propagate to recorder rows
        }
        if cfg.BitableURL == "" {
            log.Fatal("set TARGET_BITABLE_URL before starting the pool agent")
@@ -81,6 +84,7 @@ TaskAgent is a Go 1.24 module that keeps Android capture devices busy by polling
        }
    }
    ```
+   If you configure `DEVICE_INFO_BITABLE_URL` / `DEVICE_TASK_BITABLE_URL`, the pool will upsert device heartbeats (Status/LastSeenAt) and create one row per dispatch (JobID `${serial}-YYMMDDHHMM`, AssignedTasks, Start/End, State, ErrorMessage). Leave the URLs empty to skip recording.
    `MyRunner` must satisfy `pool.JobRunner` so the agent can call `RunJob` per device batch; decode the Feishu payload from `req.Tasks[n].Payload`. Pass the `app` argument that matches the Feishu target-table `App` column so the built-in `FeishuTaskClient` filters and updates the correct rows (statuses transition through `dispatched`, `success`, and `failed`).
 
 ## Development & Testing

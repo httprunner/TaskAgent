@@ -61,6 +61,8 @@ type Config struct {
 	Provider        DeviceProvider
 	TaskManager     TaskManager
 	BitableURL      string
+	AgentVersion    string
+	DeviceRecorder  DeviceRecorder
 }
 
 // DevicePoolAgent coordinates plug-and-play devices with a task source.
@@ -68,6 +70,7 @@ type DevicePoolAgent struct {
 	cfg             Config
 	deviceProvider  DeviceProvider
 	taskManager     TaskManager
+	recorder        DeviceRecorder
 	jobRunner       JobRunner
 	deviceMu        sync.Mutex
 	devices         map[string]*deviceState
@@ -81,6 +84,8 @@ const (
 	statusCollecting deviceStatus = "collecting"
 )
 
+const offlineThreshold = 5 * time.Minute
+
 type deviceState struct {
 	serial         string
 	status         deviceStatus
@@ -91,8 +96,18 @@ type deviceState struct {
 
 type deviceJob struct {
 	deviceSerial string
+	jobID        string
 	tasks        []*Task
 	cancel       context.CancelFunc
+	startAt      time.Time
+}
+
+type noopRecorder struct{}
+
+func (noopRecorder) UpsertDevices(ctx context.Context, devices []DeviceInfoUpdate) error { return nil }
+func (noopRecorder) CreateJob(ctx context.Context, rec *DeviceJobRecord) error           { return nil }
+func (noopRecorder) UpdateJob(ctx context.Context, jobID string, upd *DeviceJobUpdate) error {
+	return nil
 }
 
 type deviceAssignment struct {
@@ -144,8 +159,12 @@ func NewDevicePoolAgent(cfg Config, runner JobRunner) (*DevicePoolAgent, error) 
 		cfg:            cfg,
 		deviceProvider: provider,
 		taskManager:    manager,
+		recorder:       cfg.DeviceRecorder,
 		jobRunner:      runner,
 		devices:        make(map[string]*deviceState),
+	}
+	if agent.recorder == nil {
+		agent.recorder = noopRecorder{}
 	}
 	return agent, nil
 }
@@ -217,6 +236,7 @@ func (a *DevicePoolAgent) refreshDevices(ctx context.Context) error {
 	}
 	now := time.Now()
 	seen := make(map[string]struct{}, len(serials))
+	updates := make([]DeviceInfoUpdate, 0, len(serials))
 
 	a.deviceMu.Lock()
 	defer a.deviceMu.Unlock()
@@ -229,6 +249,7 @@ func (a *DevicePoolAgent) refreshDevices(ctx context.Context) error {
 		seen[serial] = struct{}{}
 		if dev, ok := a.devices[serial]; ok {
 			dev.lastSeen = now
+			updates = append(updates, DeviceInfoUpdate{DeviceSerial: serial, Status: string(dev.status), OSType: a.cfg.OSType, AgentVersion: a.cfg.AgentVersion, LastSeenAt: now})
 			continue
 		}
 		a.devices[serial] = &deviceState{
@@ -236,6 +257,7 @@ func (a *DevicePoolAgent) refreshDevices(ctx context.Context) error {
 			status:   statusIdle,
 			lastSeen: now,
 		}
+		updates = append(updates, DeviceInfoUpdate{DeviceSerial: serial, Status: string(statusIdle), OSType: a.cfg.OSType, AgentVersion: a.cfg.AgentVersion, LastSeenAt: now})
 		log.Info().Str("serial", serial).Msg("device connected")
 	}
 
@@ -248,8 +270,17 @@ func (a *DevicePoolAgent) refreshDevices(ctx context.Context) error {
 			log.Warn().Str("serial", serial).Msg("device disconnected during job, will remove after completion")
 			continue
 		}
+		if now.Sub(dev.lastSeen) < offlineThreshold {
+			// wait until threshold before marking offline
+			continue
+		}
 		delete(a.devices, serial)
+		updates = append(updates, DeviceInfoUpdate{DeviceSerial: serial, Status: "offline", OSType: a.cfg.OSType, AgentVersion: a.cfg.AgentVersion, LastSeenAt: dev.lastSeen})
 		log.Info().Str("serial", serial).Msg("device disconnected")
+	}
+
+	if err := a.recorder.UpsertDevices(ctx, updates); err != nil {
+		log.Error().Err(err).Msg("device recorder upsert failed")
 	}
 	return nil
 }
@@ -345,11 +376,25 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 			log.Error().Err(err).Str("serial", dev.serial).Msg("task dispatch hook failed")
 			continue
 		}
+		now := time.Now()
+		jobID := fmt.Sprintf("%s-%s", dev.serial, now.Format("0601021504"))
+		if err := a.recorder.CreateJob(ctx, &DeviceJobRecord{
+			JobID:         jobID,
+			DeviceSerial:  dev.serial,
+			App:           app,
+			State:         "running",
+			AssignedTasks: extractTaskIDs(assignment.tasks),
+			RunningTask:   firstTaskID(assignment.tasks),
+			StartAt:       now,
+		}); err != nil {
+			log.Error().Err(err).Str("serial", dev.serial).Msg("device recorder create job failed")
+			jobID = "" // avoid later update attempts when creation failed
+		}
 		log.Info().
 			Str("serial", dev.serial).
 			Int("assigned_tasks", len(assignment.tasks)).
 			Msg("device pool dispatched tasks to device")
-		a.startDeviceJob(ctx, dev, assignment.tasks)
+		a.startDeviceJob(ctx, dev, assignment.tasks, jobID)
 	}
 	return nil
 }
@@ -366,12 +411,14 @@ func (a *DevicePoolAgent) idleDevices() []*deviceState {
 	return result
 }
 
-func (a *DevicePoolAgent) startDeviceJob(ctx context.Context, dev *deviceState, tasks []*Task) {
+func (a *DevicePoolAgent) startDeviceJob(ctx context.Context, dev *deviceState, tasks []*Task, jobID string) {
 	jobCtx, cancel := context.WithCancel(ctx)
 	job := &deviceJob{
 		deviceSerial: dev.serial,
+		jobID:        jobID,
 		tasks:        tasks,
 		cancel:       cancel,
+		startAt:      time.Now(),
 	}
 
 	a.deviceMu.Lock()
@@ -445,6 +492,28 @@ func (a *DevicePoolAgent) runDeviceJob(ctx context.Context, dev *deviceState, jo
 	remove := dev.removeAfterJob
 	a.deviceMu.Unlock()
 
+	if job.jobID != "" {
+		endAt := time.Now()
+		elapsed := endAt.Sub(job.startAt)
+		elapsedSecs := int64(elapsed.Seconds())
+		state := "success"
+		if err != nil {
+			state = "failed"
+		}
+		if remove {
+			state = "offline"
+		}
+		if recErr := a.recorder.UpdateJob(context.Background(), job.jobID, &DeviceJobUpdate{
+			State:          state,
+			RunningTask:    "",
+			EndAt:          &endAt,
+			ElapsedSeconds: &elapsedSecs,
+			ErrorMessage:   errString(err),
+		}); recErr != nil {
+			log.Error().Err(recErr).Str("job_id", job.jobID).Msg("device recorder update job failed")
+		}
+	}
+
 	if err != nil {
 		log.Error().Err(err).Str("serial", job.deviceSerial).Msg("device job failed")
 	} else {
@@ -493,6 +562,38 @@ func splitTasksByResultStatus(tasks []*Task) (success []*Task, failed []*Task, p
 		}
 	}
 	return
+}
+
+func extractTaskIDs(tasks []*Task) []string {
+	result := make([]string, 0, len(tasks))
+	for _, t := range tasks {
+		if t == nil {
+			continue
+		}
+		if id := strings.TrimSpace(t.ID); id != "" {
+			result = append(result, id)
+		}
+	}
+	return result
+}
+
+func firstTaskID(tasks []*Task) string {
+	for _, t := range tasks {
+		if t == nil {
+			continue
+		}
+		if id := strings.TrimSpace(t.ID); id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func (a *DevicePoolAgent) removeDevice(serial string) {

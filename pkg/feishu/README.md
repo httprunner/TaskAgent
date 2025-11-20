@@ -16,6 +16,10 @@
 | `FEISHU_TENANT_KEY` | 企业自建应用租户 key，可选 |
 | `FEISHU_BASE_URL` | 自定义开放平台域名，默认 `https://open.feishu.cn` |
 | `FEISHU_LIVE_TEST` | 置为 `1` 可启用真实 API 测试（需可访问的 Bitable） |
+| `DEVICE_INFO_BITABLE_URL` | 设备信息表链接，可选；为空时不写入设备画像 |
+| `DEVICE_TASK_BITABLE_URL` | 设备任务表链接，可选；为空时不记录派发/完成 |
+| `DEVICE_INFO_FIELD_*` | 覆盖设备信息表列名（如 `DEVICE_INFO_FIELD_SERIAL`、`DEVICE_INFO_FIELD_STATUS` 等） |
+| `DEVICE_TASK_FIELD_*` | 覆盖设备任务表列名（如 `DEVICE_TASK_FIELD_JOBID` 等） |
 
 建议在仓库根目录创建 `.env` 并通过 `godotenv` 自动加载。
 
@@ -26,6 +30,8 @@
 - **结果表字段**：使用 `RESULT_FIELD_*` 前缀（例如：`RESULT_FIELD_PARAMS`、`RESULT_FIELD_USERID`、`RESULT_FIELD_DURATION`）
 - **目标表字段**：使用 `TARGET_FIELD_*` 前缀（例如：`TARGET_FIELD_PARAMS`）
 - **剧单表字段**：使用 `DRAMA_FIELD_*` 前缀（例如：`DRAMA_FIELD_NAME`、`DRAMA_FIELD_DURATION`）
+- **设备信息表字段**：使用 `DEVICE_INFO_FIELD_*` 前缀（默认：DeviceSerial/OSType/OSVersion/LocationCity/IsRoot/ProviderUUID/AgentVersion/Status/LastSeenAt/LastError/Tags）
+- **设备任务表字段**：使用 `DEVICE_TASK_FIELD_*` 前缀（默认：JobID/DeviceSerial/App/State/AssignedTasks/RunningTask/StartAt/EndAt/ErrorMessage）
 
 如果未设置环境变量，将使用上述示例中的默认字段名称。
 
@@ -117,3 +123,20 @@ FEISHU_LIVE_TEST=1 go test ./feishu -run Live
 - 采集结果表：`https://bytedance.larkoffice.com/wiki/DKKwwF9XRincITkd0g1c6udUnHe?table=tblzoZuR6aminfye&view=vewTF27mJQ`
 
 在新环境中部署时，只需将上述链接替换为对应租户的多维表格地址，或通过 `override` 参数调整列名，即可复用该模块。
+## 设备信息表 & 设备任务表（新增）
+
+`DeviceInfoFields`/`DeviceInfoRecordInput` 对应设备画像表：
+
+- 默认列：`DeviceSerial`（唯一）、`OSType`、`OSVersion`、`LocationCity`、`IsRoot`、`ProviderUUID`、`AgentVersion`、`Status`、`LastSeenAt`、`LastError`、`Tags`。
+- 典型写入：`client.UpsertDeviceInfo(ctx, DEVICE_INFO_BITABLE_URL, fields, record)`；`DeviceSerial` 为键，同步更新 `Status/LastSeenAt/AgentVersion` 等。
+
+`DeviceTaskFields`/`DeviceTaskRecordInput` 对应设备任务表：
+
+- 默认列：`JobID`、`DeviceSerial`、`App`、`State`、`AssignedTasks`、`RunningTask`、`StartAt`、`EndAt`、`ErrorMessage`。
+- 创建记录：`client.CreateDeviceTaskRecord(ctx, DEVICE_TASK_BITABLE_URL, input, fields)`；更新记录：`client.UpdateDeviceTaskByJob(ctx, url, jobID, fields, update)`。
+
+TaskAgent 的 `DevicePoolAgent` 已内置 recorder 钩子：
+
+- `refreshDevices` 心跳时 upsert 设备表（5 分钟未见判 offline）。
+- `dispatch` 每次派发生成一行任务表记录（JobID=`${serial}-YYMMDDHHMM`，State=`running`）。
+- 完成/失败/掉线后更新任务表行的 `State/EndAt/ErrorMessage`。未配置对应 URL 时为 no-op。
