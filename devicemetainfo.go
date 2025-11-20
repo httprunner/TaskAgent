@@ -9,6 +9,10 @@ import (
 // fetchDeviceMeta collects OS version and root status via adb where possible.
 func (a *DevicePoolAgent) fetchDeviceMeta(serial string) deviceMeta {
 	meta := deviceMeta{providerUUID: a.hostUUID}
+	meta.osType = strings.TrimSpace(a.cfg.OSType)
+	if meta.osType == "" {
+		meta.osType = "android"
+	}
 	dev, err := a.findDevice(serial)
 	if err != nil || dev == nil {
 		return meta

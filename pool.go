@@ -98,6 +98,7 @@ type deviceState struct {
 }
 
 type deviceMeta struct {
+	osType       string
 	osVersion    string
 	isRoot       string
 	providerUUID string
@@ -263,7 +264,7 @@ func (a *DevicePoolAgent) refreshDevices(ctx context.Context) error {
 		seen[serial] = struct{}{}
 		if dev, ok := a.devices[serial]; ok {
 			dev.lastSeen = now
-			updates = append(updates, DeviceInfoUpdate{DeviceSerial: serial, Status: string(dev.status), OSType: a.cfg.OSType, OSVersion: meta.osVersion, IsRoot: meta.isRoot, ProviderUUID: meta.providerUUID, AgentVersion: a.cfg.AgentVersion, LastSeenAt: now})
+			updates = append(updates, DeviceInfoUpdate{DeviceSerial: serial, Status: string(dev.status), OSType: meta.osType, OSVersion: meta.osVersion, IsRoot: meta.isRoot, ProviderUUID: meta.providerUUID, AgentVersion: a.cfg.AgentVersion, LastSeenAt: now})
 			continue
 		}
 		a.devices[serial] = &deviceState{
@@ -271,7 +272,7 @@ func (a *DevicePoolAgent) refreshDevices(ctx context.Context) error {
 			status:   statusIdle,
 			lastSeen: now,
 		}
-		updates = append(updates, DeviceInfoUpdate{DeviceSerial: serial, Status: string(statusIdle), OSType: a.cfg.OSType, OSVersion: meta.osVersion, IsRoot: meta.isRoot, ProviderUUID: meta.providerUUID, AgentVersion: a.cfg.AgentVersion, LastSeenAt: now})
+		updates = append(updates, DeviceInfoUpdate{DeviceSerial: serial, Status: string(statusIdle), OSType: meta.osType, OSVersion: meta.osVersion, IsRoot: meta.isRoot, ProviderUUID: meta.providerUUID, AgentVersion: a.cfg.AgentVersion, LastSeenAt: now})
 		log.Info().Str("serial", serial).Msg("device connected")
 	}
 
@@ -288,8 +289,9 @@ func (a *DevicePoolAgent) refreshDevices(ctx context.Context) error {
 			// wait until threshold before marking offline
 			continue
 		}
+		meta := a.fetchDeviceMeta(serial)
 		delete(a.devices, serial)
-		updates = append(updates, DeviceInfoUpdate{DeviceSerial: serial, Status: "offline", OSType: a.cfg.OSType, AgentVersion: a.cfg.AgentVersion, LastSeenAt: dev.lastSeen})
+		updates = append(updates, DeviceInfoUpdate{DeviceSerial: serial, Status: "offline", OSType: meta.osType, AgentVersion: a.cfg.AgentVersion, LastSeenAt: dev.lastSeen})
 		log.Info().Str("serial", serial).Msg("device disconnected")
 	}
 
