@@ -11,7 +11,9 @@ type DeviceInfoUpdate struct {
 	Status       string
 	OSType       string
 	OSVersion    string
+	IsRoot       string
 	AgentVersion string
+	ProviderUUID string
 	LastError    string
 	LastSeenAt   time.Time
 }

@@ -75,6 +75,9 @@ type DevicePoolAgent struct {
 	deviceMu        sync.Mutex
 	devices         map[string]*deviceState
 	backgroundGroup sync.WaitGroup
+	adbClient       gadb.Client
+	adbReady        bool
+	hostUUID        string
 }
 
 type deviceStatus string
@@ -92,6 +95,12 @@ type deviceState struct {
 	lastSeen       time.Time
 	removeAfterJob bool
 	currentJob     *deviceJob
+}
+
+type deviceMeta struct {
+	osVersion    string
+	isRoot       string
+	providerUUID string
 }
 
 type deviceJob struct {
@@ -165,6 +174,10 @@ func NewDevicePoolAgent(cfg Config, runner JobRunner) (*DevicePoolAgent, error) 
 	}
 	if agent.recorder == nil {
 		agent.recorder = noopRecorder{}
+	}
+	// cache host UUID for ProviderUUID field; ignore error silently
+	if uuid, err := getHostUUID(); err == nil {
+		agent.hostUUID = uuid
 	}
 	return agent, nil
 }
@@ -246,10 +259,11 @@ func (a *DevicePoolAgent) refreshDevices(ctx context.Context) error {
 		if serial == "" {
 			continue
 		}
+		meta := a.fetchDeviceMeta(serial)
 		seen[serial] = struct{}{}
 		if dev, ok := a.devices[serial]; ok {
 			dev.lastSeen = now
-			updates = append(updates, DeviceInfoUpdate{DeviceSerial: serial, Status: string(dev.status), OSType: a.cfg.OSType, AgentVersion: a.cfg.AgentVersion, LastSeenAt: now})
+			updates = append(updates, DeviceInfoUpdate{DeviceSerial: serial, Status: string(dev.status), OSType: a.cfg.OSType, OSVersion: meta.osVersion, IsRoot: meta.isRoot, ProviderUUID: meta.providerUUID, AgentVersion: a.cfg.AgentVersion, LastSeenAt: now})
 			continue
 		}
 		a.devices[serial] = &deviceState{
@@ -257,7 +271,7 @@ func (a *DevicePoolAgent) refreshDevices(ctx context.Context) error {
 			status:   statusIdle,
 			lastSeen: now,
 		}
-		updates = append(updates, DeviceInfoUpdate{DeviceSerial: serial, Status: string(statusIdle), OSType: a.cfg.OSType, AgentVersion: a.cfg.AgentVersion, LastSeenAt: now})
+		updates = append(updates, DeviceInfoUpdate{DeviceSerial: serial, Status: string(statusIdle), OSType: a.cfg.OSType, OSVersion: meta.osVersion, IsRoot: meta.isRoot, ProviderUUID: meta.providerUUID, AgentVersion: a.cfg.AgentVersion, LastSeenAt: now})
 		log.Info().Str("serial", serial).Msg("device connected")
 	}
 

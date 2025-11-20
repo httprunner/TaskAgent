@@ -66,7 +66,9 @@ func (r *FeishuRecorder) UpsertDevices(ctx context.Context, devices []pool.Devic
 			DeviceSerial: d.DeviceSerial,
 			OSType:       d.OSType,
 			OSVersion:    d.OSVersion,
+			IsRoot:       d.IsRoot,
 			AgentVersion: d.AgentVersion,
+			ProviderUUID: d.ProviderUUID,
 			Status:       d.Status,
 			LastError:    d.LastError,
 		}
