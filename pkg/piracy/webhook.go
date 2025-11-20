@@ -162,72 +162,53 @@ func postWebhook(ctx context.Context, url string, payload map[string]any, client
 
 func buildWebhookPayload(drama *dramaInfo, records []CaptureRecordPayload, fields summaryFieldConfig) map[string]any {
 	var raw map[string]any
-	var fallbackName string
+	var dramaName string
 	if drama != nil {
 		raw = drama.RawFields
-		fallbackName = drama.Name
+		dramaName = drama.Name
 	}
 	payload := flattenDramaFields(raw, fields.Drama)
-	nameKey := strings.TrimSpace(fields.Drama.DramaName)
-	if nameKey != "" {
-		if val, ok := payload[nameKey]; !ok || strings.TrimSpace(fmt.Sprint(val)) == "" {
-			payload[nameKey] = fallbackName
-		}
+	// Ensure drama name is always populated even if the raw field is empty.
+	if val, ok := payload["DramaName"]; !ok || strings.TrimSpace(fmt.Sprint(val)) == "" {
+		payload["DramaName"] = dramaName
 	}
 	payload["records"] = flattenRecordFields(records, fields.Result)
 	return payload
 }
 
 func flattenDramaFields(raw map[string]any, schema feishu.DramaFields) map[string]any {
-	names := structFieldNames(schema)
-	payload := make(map[string]any, len(raw)+len(names)+1)
-	seen := make(map[string]struct{}, len(names))
-	for _, key := range names {
-		seen[key] = struct{}{}
+	fieldMap := structFieldMap(schema)
+	payload := make(map[string]any, len(fieldMap))
+	for engName, rawKey := range fieldMap {
 		if raw != nil {
-			payload[key] = raw[key]
+			payload[engName] = raw[rawKey]
 		} else {
-			payload[key] = nil
+			payload[engName] = nil
 		}
-	}
-	for key, val := range raw {
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		payload[key] = val
 	}
 	return payload
 }
 
 func flattenRecordFields(records []CaptureRecordPayload, schema feishu.ResultFields) []map[string]any {
-	names := structFieldNames(schema)
-	seen := make(map[string]struct{}, len(names))
-	for _, key := range names {
-		seen[key] = struct{}{}
-	}
+	fieldMap := structFieldMap(schema)
 	result := make([]map[string]any, 0, len(records))
 	for _, rec := range records {
-		entry := make(map[string]any, len(rec.Fields)+len(names)+1)
+		entry := make(map[string]any, len(fieldMap)+1)
 		entry["_record_id"] = rec.RecordID
-		for _, key := range names {
-			if val, ok := rec.Fields[key]; ok {
-				entry[key] = val
+		for engName, rawKey := range fieldMap {
+			if val, ok := rec.Fields[rawKey]; ok {
+				entry[engName] = val
 			} else {
-				entry[key] = nil
+				entry[engName] = nil
 			}
-		}
-		for key, val := range rec.Fields {
-			if _, ok := seen[key]; ok {
-				continue
-			}
-			entry[key] = val
 		}
 		result = append(result, entry)
 	}
 	return result
 }
 
-func structFieldNames(schema any) []string {
+// structFieldMap returns a mapping of struct field names (English keys) to their raw column names.
+func structFieldMap(schema any) map[string]string {
 	val := reflect.ValueOf(schema)
 	if val.Kind() == reflect.Pointer {
 		val = val.Elem()
@@ -235,16 +216,19 @@ func structFieldNames(schema any) []string {
 	if val.Kind() != reflect.Struct {
 		return nil
 	}
-	names := make([]string, 0, val.NumField())
+	typ := val.Type()
+	names := make(map[string]string, val.NumField())
 	for i := 0; i < val.NumField(); i++ {
-		field := val.Field(i)
-		if field.Kind() != reflect.String {
+		fieldVal := val.Field(i)
+		if fieldVal.Kind() != reflect.String {
 			continue
 		}
-		name := strings.TrimSpace(field.String())
-		if name != "" {
-			names = append(names, name)
+		rawName := strings.TrimSpace(fieldVal.String())
+		if rawName == "" {
+			continue
 		}
+		engName := typ.Field(i).Name
+		names[engName] = rawName
 	}
 	return names
 }
