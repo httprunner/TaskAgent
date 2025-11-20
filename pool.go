@@ -83,8 +83,8 @@ type DevicePoolAgent struct {
 type deviceStatus string
 
 const (
-	statusIdle       deviceStatus = "idle"
-	statusCollecting deviceStatus = "collecting"
+	statusIdle    deviceStatus = "idle"
+	statusRunning deviceStatus = "running"
 )
 
 const offlineThreshold = 5 * time.Minute
@@ -280,7 +280,7 @@ func (a *DevicePoolAgent) refreshDevices(ctx context.Context) error {
 		if _, ok := seen[serial]; ok {
 			continue
 		}
-		if dev.status == statusCollecting {
+		if dev.status == statusRunning {
 			dev.removeAfterJob = true
 			log.Warn().Str("serial", serial).Msg("device disconnected during job, will remove after completion")
 			continue
@@ -438,7 +438,7 @@ func (a *DevicePoolAgent) startDeviceJob(ctx context.Context, dev *deviceState, 
 	}
 
 	a.deviceMu.Lock()
-	dev.status = statusCollecting
+	dev.status = statusRunning
 	dev.currentJob = job
 	a.deviceMu.Unlock()
 
