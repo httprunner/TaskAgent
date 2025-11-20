@@ -20,6 +20,7 @@
 | `DEVICE_TASK_BITABLE_URL` | 设备任务表链接，可选；为空时不记录派发/完成 |
 | `DEVICE_INFO_FIELD_*` | 覆盖设备信息表列名（如 `DEVICE_INFO_FIELD_SERIAL`、`DEVICE_INFO_FIELD_STATUS` 等） |
 | `DEVICE_TASK_FIELD_*` | 覆盖设备任务表列名（如 `DEVICE_TASK_FIELD_JOBID` 等） |
+| `FEISHU_REPORT_RPS` | 结果表写入限速（浮点型，默认 1.0，单位：条/秒），多设备并发时可避免触发频控 |
 
 建议在仓库根目录创建 `.env` 并通过 `godotenv` 自动加载。
 
@@ -28,6 +29,7 @@
 所有字段名称都支持通过环境变量进行自定义，使用表特定前缀：
 
 - **结果表字段**：使用 `RESULT_FIELD_*` 前缀（例如：`RESULT_FIELD_PARAMS`、`RESULT_FIELD_USERID`、`RESULT_FIELD_DURATION`）
+- **结果表限速**：全局串行限速，默认 1 RPS，可通过 `FEISHU_REPORT_RPS` 调整。
 - **目标表字段**：使用 `TARGET_FIELD_*` 前缀（例如：`TARGET_FIELD_PARAMS`）
 - **剧单表字段**：使用 `DRAMA_FIELD_*` 前缀（例如：`DRAMA_FIELD_NAME`、`DRAMA_FIELD_DURATION`）
 - **设备信息表字段**：使用 `DEVICE_INFO_FIELD_*` 前缀（默认：DeviceSerial/OSType/OSVersion/LocationCity/IsRoot/ProviderUUID/AgentVersion/Status/LastSeenAt/LastError/Tags）

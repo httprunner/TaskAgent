@@ -3,8 +3,12 @@ package feishu
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
@@ -14,6 +18,44 @@ import (
 type ResultStorage struct {
 	client   *Client
 	tableURL string
+}
+
+var (
+	resultLimiterOnce sync.Once
+	resultLimiter     *rateLimiter
+)
+
+// rateLimiter provides a simple fixed-interval limiter.
+type rateLimiter struct {
+	ticker *time.Ticker
+}
+
+func newRateLimiterFromEnv() *rateLimiter {
+	val := strings.TrimSpace(os.Getenv("FEISHU_REPORT_RPS"))
+	rps := 1.0
+	if val != "" {
+		parsed, err := strconv.ParseFloat(val, 64)
+		if err == nil && parsed > 0 && !math.IsInf(parsed, 0) && !math.IsNaN(parsed) {
+			rps = parsed
+		}
+	}
+	interval := time.Duration(float64(time.Second) / rps)
+	if interval <= 0 {
+		interval = time.Second
+	}
+	return &rateLimiter{ticker: time.NewTicker(interval)}
+}
+
+func (l *rateLimiter) wait(ctx context.Context) error {
+	if l == nil || l.ticker == nil {
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-l.ticker.C:
+		return nil
+	}
 }
 
 // NewResultStorage creates a new Feishu result storage pointing at the provided table.
@@ -46,12 +88,26 @@ func (s *ResultStorage) Write(ctx context.Context, record ResultRecordInput) err
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	limiter := s.initLimiter()
+	if err := limiter.wait(ctx); err != nil {
+		return err
+	}
 	_, err := s.client.CreateResultRecord(ctx, s.tableURL, record, nil)
 	if err != nil {
 		err = annotateFeishuFieldError(err, record)
 		return errors.Wrap(err, "feishu storage: create result record failed")
 	}
 	return nil
+}
+
+func (s *ResultStorage) initLimiter() *rateLimiter {
+	resultLimiterOnce.Do(func() {
+		resultLimiter = newRateLimiterFromEnv()
+	})
+	if resultLimiter == nil {
+		resultLimiter = newRateLimiterFromEnv()
+	}
+	return resultLimiter
 }
 
 // TableURL returns the configured bitable link.
