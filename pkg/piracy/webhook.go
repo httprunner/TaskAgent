@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"reflect"
@@ -149,8 +150,12 @@ func postWebhook(ctx context.Context, url string, payload map[string]any, client
 	}
 	defer resp.Body.Close()
 
+	bodyBytes, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("webhook responded with status %d", resp.StatusCode)
+		return fmt.Errorf("webhook responded with status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+	if len(bodyBytes) > 0 {
+		log.Debug().Str("webhook_url", url).RawJSON("response_body", bodyBytes).Msg("webhook response")
 	}
 	return nil
 }
