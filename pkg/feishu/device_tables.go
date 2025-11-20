@@ -547,7 +547,10 @@ func buildDeviceTaskPayload(rec DeviceTaskRecordInput, fields DeviceTaskFields) 
 func buildDeviceTaskUpdatePayload(upd DeviceTaskUpdate, fields DeviceTaskFields) (map[string]any, error) {
 	row := make(map[string]any)
 	addOptionalField(row, fields.State, upd.State)
-	addOptionalField(row, fields.RunningTask, upd.RunningTask)
+	if strings.TrimSpace(fields.RunningTask) != "" {
+		// allow clearing running task to empty string
+		row[fields.RunningTask] = upd.RunningTask
+	}
 	if upd.EndAt != nil && strings.TrimSpace(fields.EndAt) != "" {
 		row[fields.EndAt] = upd.EndAt.UTC().UnixMilli()
 	}
