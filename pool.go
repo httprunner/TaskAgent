@@ -95,6 +95,9 @@ type deviceState struct {
 	lastSeen       time.Time
 	removeAfterJob bool
 	currentJob     *deviceJob
+	// meta contains immutable device info (os version/root). Fetch once to avoid repeated adb calls.
+	meta      deviceMeta
+	metaReady bool
 }
 
 type deviceMeta struct {
@@ -260,19 +263,44 @@ func (a *DevicePoolAgent) refreshDevices(ctx context.Context) error {
 		if serial == "" {
 			continue
 		}
-		meta := a.fetchDeviceMeta(serial)
 		seen[serial] = struct{}{}
 		if dev, ok := a.devices[serial]; ok {
 			dev.lastSeen = now
-			updates = append(updates, DeviceInfoUpdate{DeviceSerial: serial, Status: string(dev.status), OSType: meta.osType, OSVersion: meta.osVersion, IsRoot: meta.isRoot, ProviderUUID: meta.providerUUID, AgentVersion: a.cfg.AgentVersion, LastSeenAt: now})
+			if !dev.metaReady {
+				dev.meta = a.fetchDeviceMeta(serial)
+				dev.metaReady = true
+			}
+			updates = append(updates,
+				DeviceInfoUpdate{
+					DeviceSerial: serial,
+					Status:       string(dev.status),
+					OSType:       dev.meta.osType,
+					OSVersion:    dev.meta.osVersion,
+					IsRoot:       dev.meta.isRoot,
+					ProviderUUID: dev.meta.providerUUID,
+					AgentVersion: a.cfg.AgentVersion,
+					LastSeenAt:   now,
+				})
 			continue
 		}
+		meta := a.fetchDeviceMeta(serial)
 		a.devices[serial] = &deviceState{
-			serial:   serial,
-			status:   statusIdle,
-			lastSeen: now,
+			serial:    serial,
+			status:    statusIdle,
+			lastSeen:  now,
+			meta:      meta,
+			metaReady: true,
 		}
-		updates = append(updates, DeviceInfoUpdate{DeviceSerial: serial, Status: string(statusIdle), OSType: meta.osType, OSVersion: meta.osVersion, IsRoot: meta.isRoot, ProviderUUID: meta.providerUUID, AgentVersion: a.cfg.AgentVersion, LastSeenAt: now})
+		updates = append(updates, DeviceInfoUpdate{
+			DeviceSerial: serial,
+			Status:       string(statusIdle),
+			OSType:       meta.osType,
+			OSVersion:    meta.osVersion,
+			IsRoot:       meta.isRoot,
+			ProviderUUID: meta.providerUUID,
+			AgentVersion: a.cfg.AgentVersion,
+			LastSeenAt:   now,
+		})
 		log.Info().Str("serial", serial).Msg("device connected")
 	}
 
@@ -289,9 +317,22 @@ func (a *DevicePoolAgent) refreshDevices(ctx context.Context) error {
 			// wait until threshold before marking offline
 			continue
 		}
-		meta := a.fetchDeviceMeta(serial)
+		if !dev.metaReady {
+			dev.meta = a.fetchDeviceMeta(serial)
+			dev.metaReady = true
+		}
 		delete(a.devices, serial)
-		updates = append(updates, DeviceInfoUpdate{DeviceSerial: serial, Status: "offline", OSType: meta.osType, AgentVersion: a.cfg.AgentVersion, LastSeenAt: dev.lastSeen})
+		updates = append(updates,
+			DeviceInfoUpdate{
+				DeviceSerial: serial,
+				Status:       "offline",
+				OSType:       dev.meta.osType,
+				OSVersion:    dev.meta.osVersion,
+				IsRoot:       dev.meta.isRoot,
+				ProviderUUID: dev.meta.providerUUID,
+				AgentVersion: a.cfg.AgentVersion,
+				LastSeenAt:   dev.lastSeen,
+			})
 		log.Info().Str("serial", serial).Msg("device disconnected")
 	}
 
