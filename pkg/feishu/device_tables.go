@@ -365,6 +365,11 @@ func (c *Client) FetchDeviceInfoTable(ctx context.Context, rawURL string, overri
 
 // FetchDeviceTaskTable downloads the device task table.
 func (c *Client) FetchDeviceTaskTable(ctx context.Context, rawURL string, override *DeviceTaskFields) (*DeviceTaskTable, error) {
+	return c.FetchDeviceTaskTableWithOptions(ctx, rawURL, override, nil)
+}
+
+// FetchDeviceTaskTableWithOptions downloads the device task table with optional filters.
+func (c *Client) FetchDeviceTaskTableWithOptions(ctx context.Context, rawURL string, override *DeviceTaskFields, opts *TargetQueryOptions) (*DeviceTaskTable, error) {
 	if c == nil {
 		return nil, errors.New("feishu: client is nil")
 	}
@@ -379,7 +384,7 @@ func (c *Client) FetchDeviceTaskTable(ctx context.Context, rawURL string, overri
 	if override != nil {
 		fields = fields.merge(*override)
 	}
-	records, err := c.listBitableRecords(ctx, ref, defaultBitablePageSize, nil)
+	records, err := c.listBitableRecords(ctx, ref, defaultBitablePageSize, opts)
 	if err != nil {
 		return nil, err
 	}

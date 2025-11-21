@@ -2,6 +2,7 @@ package devrecorder
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -88,6 +89,22 @@ func (r *FeishuRecorder) CreateJob(ctx context.Context, rec *pool.DeviceJobRecor
 	if r == nil || r.client == nil || r.taskURL == "" || rec == nil {
 		return nil
 	}
+
+	// Before starting a new job on this device, close any previous rows that
+	// are still marked as running. This prevents stale running states when the
+	// agent restarts mid-job.
+	if updated, err := r.failRunningJobsForDevice(ctx, rec.DeviceSerial); err != nil {
+		log.Error().
+			Err(err).
+			Str("serial", rec.DeviceSerial).
+			Msg("feishu recorder: fail stale running jobs")
+	} else if updated > 0 {
+		log.Info().
+			Str("serial", rec.DeviceSerial).
+			Int("closed_running_jobs", updated).
+			Msg("feishu recorder: closed stale running jobs before creating new job")
+	}
+
 	payload := feishu.DeviceTaskRecordInput{
 		JobID:         rec.JobID,
 		DeviceSerial:  rec.DeviceSerial,
@@ -128,4 +145,56 @@ func (r *FeishuRecorder) now() time.Time {
 		return r.clock()
 	}
 	return time.Now()
+}
+
+// failRunningJobsForDevice marks all "running" rows for the specified device as
+// failed with EndAt set to now. It best-effort logs errors instead of failing
+// the caller to avoid blocking dispatch.
+func (r *FeishuRecorder) failRunningJobsForDevice(ctx context.Context, deviceSerial string) (int, error) {
+	if r == nil || r.client == nil || r.taskURL == "" {
+		return 0, nil
+	}
+	serial := strings.TrimSpace(deviceSerial)
+	if serial == "" {
+		return 0, nil
+	}
+
+	escapedSerial := strings.ReplaceAll(serial, "\"", "\\\"")
+	filter := fmt.Sprintf("AND(CurrentValue.[%s] = \"%s\", CurrentValue.[%s] = \"running\")",
+		r.taskFields.DeviceSerial, escapedSerial, r.taskFields.State)
+	opts := &feishu.TargetQueryOptions{
+		Filter: filter,
+	}
+
+	table, err := r.client.FetchDeviceTaskTableWithOptions(ctx, r.taskURL, &r.taskFields, opts)
+	if err != nil {
+		return 0, err
+	}
+
+	updated := 0
+	for _, row := range table.Rows {
+		if strings.TrimSpace(row.DeviceSerial) != serial {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(row.State), "running") {
+			continue
+		}
+
+		endAt := r.now()
+		if err := r.client.UpdateDeviceTaskByJob(ctx, r.taskURL, row.JobID, r.taskFields, feishu.DeviceTaskUpdate{
+			State:       feishu.StatusFailed,
+			RunningTask: "",
+			EndAt:       &endAt,
+		}); err != nil {
+			log.Error().
+				Err(err).
+				Str("job_id", row.JobID).
+				Str("serial", serial).
+				Msg("feishu recorder: mark stale running job failed")
+			continue
+		}
+		updated++
+	}
+
+	return updated, nil
 }
