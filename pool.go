@@ -642,7 +642,7 @@ func extractTaskIDs(tasks []*Task) []string {
 
 func firstTaskID(tasks []*Task) string {
 	for _, t := range tasks {
-		if t == nil {
+		if t == nil || isTaskFinished(t) {
 			continue
 		}
 		if id := strings.TrimSpace(t.ID); id != "" {
@@ -659,7 +659,7 @@ func remainingTaskIDs(tasks []*Task) []string {
 	result := make([]string, 0, len(tasks)-1)
 	skipFirst := true
 	for _, t := range tasks {
-		if t == nil {
+		if t == nil || isTaskFinished(t) {
 			continue
 		}
 		if id := strings.TrimSpace(t.ID); id != "" {
@@ -671,6 +671,19 @@ func remainingTaskIDs(tasks []*Task) []string {
 		}
 	}
 	return result
+}
+
+// isTaskFinished reports whether the task already has a terminal result.
+func isTaskFinished(t *Task) bool {
+	if t == nil {
+		return false
+	}
+	switch strings.TrimSpace(t.ResultStatus) {
+	case feishu.StatusSuccess, feishu.StatusFailed:
+		return true
+	default:
+		return false
+	}
 }
 
 func errString(err error) string {
