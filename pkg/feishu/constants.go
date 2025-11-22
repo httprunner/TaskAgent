@@ -36,8 +36,8 @@ var DefaultDramaFields = DramaFields{
 	RightsProtectionScenario: "维权场景",
 }
 
-// DefaultTargetFields matches the schema provided in the requirements.
-var DefaultTargetFields = TargetFields{
+// DefaultTaskFields matches the schema provided in the requirements.
+var DefaultTaskFields = TaskFields{
 	TaskID:           "TaskID",           // 任务 ID
 	App:              "App",              // 平台名称
 	Scene:            "Scene",            // 场景名称
@@ -82,7 +82,7 @@ var DefaultResultFields = ResultFields{
 	Collection:     "Collection",     // 所属合集
 	Episode:        "Episode",        // 剧集信息（总集数/免费数/付费数）
 	PublishTime:    "PublishTime",    // 发布时间
-	TaskID:         "TaskID",         // 任务 ID（关联 TargetFields）
+	TaskID:         "TaskID",         // 任务 ID（关联 TaskFields）
 	DeviceSerial:   "DeviceSerial",   // 设备序列号
 	Extra:          "Extra",          // 额外信息
 }

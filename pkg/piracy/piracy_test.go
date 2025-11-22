@@ -64,8 +64,8 @@ func TestAnalyzeRows(t *testing.T) {
 	if report.ResultRows != 3 {
 		t.Errorf("expected result rows 3, got %d", report.ResultRows)
 	}
-	if report.TargetRows != 1 {
-		t.Errorf("expected target rows 1, got %d", report.TargetRows)
+	if report.TaskRows != 1 {
+		t.Errorf("expected target rows 1, got %d", report.TaskRows)
 	}
 }
 

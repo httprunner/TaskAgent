@@ -38,7 +38,7 @@
 
 ## 多维表格任务表
 
-`TargetFields`/`TargetRecordInput` 对应任务调度表（包含 TaskID、App、Scene、Status 等）。常见流程：
+`TaskFields`/`TaskRecordInput` 对应任务调度表（包含 TaskID、App、Scene、Status 等）。常见流程：
 
 - `DeviceSerial`：指定任务的目标设备，仅该序列号可以在设备池中获取该任务；若留空则由任意空闲设备领取。
 - `DispatchedDevice`：记录实际领取并执行任务的设备序列号，`pool.DevicePoolAgent` 在派发/回调时会自动填写。
@@ -46,7 +46,7 @@
 ```go
 client, _ := feishu.NewClientFromEnv()
 ctx := context.Background()
-recordID, err := client.CreateTargetRecord(ctx, taskTableURL, feishu.TargetRecordInput{
+recordID, err := client.CreateTargetRecord(ctx, taskTableURL, feishu.TaskRecordInput{
     TaskID:  123,
     Params:  `{"keyword":"jay"}`,        // 字段名可通过 TARGET_FIELD_PARAMS 环境变量自定义
     App:     "netease",
@@ -56,7 +56,7 @@ recordID, err := client.CreateTargetRecord(ctx, taskTableURL, feishu.TargetRecor
 })
 ```
 
-也可使用 `FetchTargetTable` 读取全部行，并通过 `UpdateTargetStatus`/`UpdateTargetStatuses` 批量更新状态。`TargetFields` 支持自定义列名（`override *TargetFields`）。
+也可使用 `FetchTaskTable` 读取全部行，并通过 `UpdateTaskStatus`/`UpdateTaskStatuses` 批量更新状态。`TaskFields` 支持自定义列名（`override *TaskFields`）。
 
 ## 采集结果记录表
 

@@ -24,7 +24,7 @@ func NewFeishuTaskClient(bitableURL string) (*FeishuTaskClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	mirror, err := storage.NewTargetMirror()
+	mirror, err := storage.NewTaskMirror()
 	if err != nil {
 		return nil, err
 	}
@@ -39,7 +39,7 @@ type FeishuTaskClient struct {
 	client     *feishu.Client
 	bitableURL string
 	clock      func() time.Time
-	mirror     *storage.TargetMirror
+	mirror     *storage.TaskMirror
 }
 
 func (c *FeishuTaskClient) FetchAvailableTasks(ctx context.Context, app string, limit int) ([]*Task, error) {
@@ -47,7 +47,7 @@ func (c *FeishuTaskClient) FetchAvailableTasks(ctx context.Context, app string, 
 	if err != nil {
 		return nil, err
 	}
-	if err := c.syncTargetMirror(feishuTasks); err != nil {
+	if err := c.syncTaskMirror(feishuTasks); err != nil {
 		return nil, err
 	}
 	result := make([]*Task, 0, len(feishuTasks))
@@ -65,7 +65,7 @@ func (c *FeishuTaskClient) FetchPendingTasks(ctx context.Context, app string, li
 	if err != nil {
 		return nil, err
 	}
-	if err := c.syncTargetMirror(tasks); err != nil {
+	if err := c.syncTaskMirror(tasks); err != nil {
 		return nil, err
 	}
 	return tasks, nil
@@ -85,7 +85,7 @@ func (c *FeishuTaskClient) UpdateTaskStatuses(ctx context.Context, tasks []*Feis
 		}
 		task.Status = trimmedStatus
 	}
-	return c.syncTargetMirror(tasks)
+	return c.syncTaskMirror(tasks)
 }
 
 func (c *FeishuTaskClient) OnTasksDispatched(ctx context.Context, deviceSerial string, tasks []*Task) error {
@@ -93,7 +93,7 @@ func (c *FeishuTaskClient) OnTasksDispatched(ctx context.Context, deviceSerial s
 	if err != nil {
 		return err
 	}
-	if err := c.syncTargetMirror(feishuTasks); err != nil {
+	if err := c.syncTaskMirror(feishuTasks); err != nil {
 		return err
 	}
 	log.Info().
@@ -116,7 +116,7 @@ func (c *FeishuTaskClient) OnTasksCompleted(ctx context.Context, deviceSerial st
 	if err != nil {
 		return err
 	}
-	if err := c.syncTargetMirror(feishuTasks); err != nil {
+	if err := c.syncTaskMirror(feishuTasks); err != nil {
 		return err
 	}
 	resultStatus := strings.TrimSpace(status)
@@ -194,7 +194,7 @@ func (c *FeishuTaskClient) UpdateTaskExtras(ctx context.Context, updates []TaskE
 			fields := map[string]any{
 				extraField: upd.Extra,
 			}
-			if err := source.client.UpdateTargetFields(ctx, source.table, upd.Task.TaskID, fields); err != nil {
+			if err := source.client.UpdateTaskFields(ctx, source.table, upd.Task.TaskID, fields); err != nil {
 				errs = append(errs, fmt.Sprintf("task %d: %v", upd.Task.TaskID, err))
 				continue
 			}
@@ -208,7 +208,7 @@ func (c *FeishuTaskClient) UpdateTaskExtras(ctx context.Context, updates []TaskE
 	if len(touched) == 0 {
 		return nil
 	}
-	return c.syncTargetMirror(touched)
+	return c.syncTaskMirror(touched)
 }
 
 // UpdateTaskWebhooks updates the webhook column for the provided tasks.
@@ -239,7 +239,7 @@ func (c *FeishuTaskClient) UpdateTaskWebhooks(ctx context.Context, tasks []*Feis
 		}
 		payload := map[string]any{field: trimmed}
 		for _, task := range subset {
-			if err := source.client.UpdateTargetFields(ctx, source.table, task.TaskID, payload); err != nil {
+			if err := source.client.UpdateTaskFields(ctx, source.table, task.TaskID, payload); err != nil {
 				errs = append(errs, fmt.Sprintf("task %d: %v", task.TaskID, err))
 				continue
 			}
@@ -253,7 +253,7 @@ func (c *FeishuTaskClient) UpdateTaskWebhooks(ctx context.Context, tasks []*Feis
 	if len(touched) == 0 {
 		return nil
 	}
-	return c.syncTargetMirror(touched)
+	return c.syncTaskMirror(touched)
 }
 
 func (c *FeishuTaskClient) statusUpdateMeta(status string) *taskStatusMeta {
@@ -275,13 +275,13 @@ func (c *FeishuTaskClient) statusUpdateMeta(status string) *taskStatusMeta {
 	return nil
 }
 
-func (c *FeishuTaskClient) syncTargetMirror(tasks []*FeishuTask) error {
+func (c *FeishuTaskClient) syncTaskMirror(tasks []*FeishuTask) error {
 	if c == nil || c.mirror == nil || len(tasks) == 0 {
 		return nil
 	}
-	rows := make([]*storage.TargetTask, 0, len(tasks))
+	rows := make([]*storage.TaskStatus, 0, len(tasks))
 	for _, task := range tasks {
-		if converted := toStorageTargetTask(task); converted != nil {
+		if converted := toStorageTaskStatus(task); converted != nil {
 			rows = append(rows, converted)
 		}
 	}
@@ -326,11 +326,11 @@ type FeishuTask struct {
 	source *feishuTaskSource
 }
 
-func toStorageTargetTask(task *FeishuTask) *storage.TargetTask {
+func toStorageTaskStatus(task *FeishuTask) *storage.TaskStatus {
 	if task == nil || task.TaskID == 0 {
 		return nil
 	}
-	return &storage.TargetTask{
+	return &storage.TaskStatus{
 		TaskID:           task.TaskID,
 		Params:           task.Params,
 		App:              task.App,
@@ -356,13 +356,13 @@ func toStorageTargetTask(task *FeishuTask) *storage.TargetTask {
 
 type feishuTaskSource struct {
 	client targetTableClient
-	table  *feishu.TargetTable
+	table  *feishu.TaskTable
 }
 
 type targetTableClient interface {
-	FetchTargetTableWithOptions(ctx context.Context, rawURL string, override *feishu.TargetFields, opts *feishu.TargetQueryOptions) (*feishu.TargetTable, error)
-	UpdateTargetStatus(ctx context.Context, table *feishu.TargetTable, taskID int64, newStatus string) error
-	UpdateTargetFields(ctx context.Context, table *feishu.TargetTable, taskID int64, fields map[string]any) error
+	FetchTaskTableWithOptions(ctx context.Context, rawURL string, override *feishu.TaskFields, opts *feishu.TaskQueryOptions) (*feishu.TaskTable, error)
+	UpdateTaskStatus(ctx context.Context, table *feishu.TaskTable, taskID int64, newStatus string) error
+	UpdateTaskFields(ctx context.Context, table *feishu.TaskTable, taskID int64, fields map[string]any) error
 }
 
 const (
@@ -386,7 +386,7 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient,
 	loc := now.Location()
 	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	dayEnd := dayStart.Add(24 * time.Hour)
-	fields := feishu.DefaultTargetFields
+	fields := feishu.DefaultTaskFields
 
 	statusPriority := []string{feishu.StatusPending, feishu.StatusFailed}
 
@@ -424,7 +424,7 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient,
 	return result, nil
 }
 
-func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient, bitableURL string, fields feishu.TargetFields, app string, dayStart, dayEnd, now time.Time, statuses []string, limit int, includeDatetime bool) ([]*FeishuTask, error) {
+func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient, bitableURL string, fields feishu.TaskFields, app string, dayStart, dayEnd, now time.Time, statuses []string, limit int, includeDatetime bool) ([]*FeishuTask, error) {
 	if len(statuses) == 0 {
 		return nil, nil
 	}
@@ -483,11 +483,11 @@ func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient,
 }
 
 func fetchFeishuTasksWithFilter(ctx context.Context, client targetTableClient, bitableURL, filter string, limit int) ([]*FeishuTask, error) {
-	opts := &feishu.TargetQueryOptions{
+	opts := &feishu.TaskQueryOptions{
 		Filter: strings.TrimSpace(filter),
 		Limit:  limit,
 	}
-	table, err := client.FetchTargetTableWithOptions(ctx, bitableURL, nil, opts)
+	table, err := client.FetchTaskTableWithOptions(ctx, bitableURL, nil, opts)
 	if err != nil {
 		return nil, errors.Wrap(err, "fetch target table with options failed")
 	}
@@ -610,7 +610,7 @@ func sortFeishuTasksByStatusPriority(tasks []*FeishuTask, statuses []string) {
 	})
 }
 
-func buildFeishuFilterExpression(fields feishu.TargetFields, app string, start, end time.Time, statuses []string, includeDatetime bool) string {
+func buildFeishuFilterExpression(fields feishu.TaskFields, app string, start, end time.Time, statuses []string, includeDatetime bool) string {
 	var clauses []string
 
 	if field := strings.TrimSpace(fields.App); field != "" && strings.TrimSpace(app) != "" {
@@ -640,7 +640,7 @@ func buildFeishuFilterExpression(fields feishu.TargetFields, app string, start, 
 	}
 }
 
-func buildFeishuStatusClause(fields feishu.TargetFields, statuses []string) string {
+func buildFeishuStatusClause(fields feishu.TaskFields, statuses []string) string {
 	field := strings.TrimSpace(fields.Status)
 	if field == "" || len(statuses) == 0 {
 		return ""
@@ -765,7 +765,7 @@ func updateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 					task.ElapsedSeconds = secs
 				}
 			}
-			if err := source.client.UpdateTargetFields(ctx, source.table, task.TaskID, fields); err != nil {
+			if err := source.client.UpdateTaskFields(ctx, source.table, task.TaskID, fields); err != nil {
 				errs = append(errs, fmt.Sprintf("task %d: %v", task.TaskID, err))
 			}
 		}

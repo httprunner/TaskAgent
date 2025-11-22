@@ -47,7 +47,7 @@ type Match struct {
 type Report struct {
     Matches       []Match  // Suspicious combinations
     ResultRows    int      // Number of result rows processed
-    TargetRows    int      // Number of target rows processed
+    TaskRows    int      // Number of target rows processed
     MissingParams []string // Params without corresponding drama data
     Threshold     float64  // Applied threshold
 }

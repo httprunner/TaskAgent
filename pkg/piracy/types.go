@@ -32,7 +32,7 @@ type TableConfig struct {
 // Options defines the input options for piracy detection.
 type Options struct {
 	ResultTable TableConfig
-	TargetTable TableConfig
+	TaskTable TableConfig
 	DramaTable  TableConfig // New table for original drama information
 	Config      Config
 }
@@ -58,7 +58,7 @@ type Drama struct {
 type Report struct {
 	Matches       []Match
 	ResultRows    int
-	TargetRows    int
+	TaskRows    int
 	MissingParams []string // Params in result without corresponding target
 	Threshold     float64
 }

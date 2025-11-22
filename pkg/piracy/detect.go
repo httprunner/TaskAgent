@@ -122,7 +122,7 @@ func Detect(ctx context.Context, opts Options) (*Report, error) {
 
 // fetchRows retrieves rows from a Feishu table.
 func fetchRows(ctx context.Context, client *feishu.Client, cfg TableConfig) ([]Row, error) {
-	queryOpts := &feishu.TargetQueryOptions{}
+	queryOpts := &feishu.TaskQueryOptions{}
 	if cfg.ViewID != "" {
 		queryOpts.ViewID = cfg.ViewID
 	}
@@ -140,7 +140,7 @@ func fetchRows(ctx context.Context, client *feishu.Client, cfg TableConfig) ([]R
 	return rows, nil
 }
 
-func fetchRowsWithRetry(ctx context.Context, client *feishu.Client, url string, opts *feishu.TargetQueryOptions, attempts int) ([]Row, error) {
+func fetchRowsWithRetry(ctx context.Context, client *feishu.Client, url string, opts *feishu.TaskQueryOptions, attempts int) ([]Row, error) {
 	if attempts <= 0 {
 		attempts = 1
 	}
@@ -344,7 +344,7 @@ func DetectCommon(contentRecords []ContentRecord, dramaRecords []DramaRecord, th
 	return &Report{
 		Matches:       matches,
 		ResultRows:    len(contentRecords),
-		TargetRows:    len(dramaRecords),
+		TaskRows:    len(dramaRecords),
 		MissingParams: missingParams,
 		Threshold:     threshold,
 	}

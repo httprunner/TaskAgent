@@ -126,7 +126,7 @@ func DetectFromFiles(dataFilePath, dramaFilePath string, filterRate float64, out
 	// Print statistics
 	log.Printf("\n=== Statistics ===\n")
 	log.Printf("Total video records: %d\n", report.ResultRows)
-	log.Printf("Dramas in catalog: %d\n", report.TargetRows)
+	log.Printf("Dramas in catalog: %d\n", report.TaskRows)
 	log.Printf("Suspicious clusters: %d\n", len(report.Matches))
 
 	return nil

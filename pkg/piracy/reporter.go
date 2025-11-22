@@ -93,7 +93,7 @@ func (pr *Reporter) ReportPiracyForParams(ctx context.Context, app string, param
 	}
 
 	log.Info().
-		Int("target_rows", report.TargetRows).
+		Int("target_rows", report.TaskRows).
 		Int("result_rows", report.ResultRows).
 		Int("suspicious_combos", len(report.Matches)).
 		Int("missing_params", len(report.MissingParams)).
@@ -183,12 +183,12 @@ func (pr *Reporter) ReportMatches(ctx context.Context, app string, matches []Mat
 		return fmt.Errorf("failed to create feishu client: %w", err)
 	}
 
-	records := make([]feishu.TargetRecordInput, 0, len(matches))
+	records := make([]feishu.TaskRecordInput, 0, len(matches))
 	for _, match := range matches {
 		if match.Ratio < pr.threshold {
 			continue
 		}
-		records = append(records, feishu.TargetRecordInput{
+		records = append(records, feishu.TaskRecordInput{
 			App:      strings.TrimSpace(app),
 			Scene:    "个人页搜索",
 			Params:   strings.TrimSpace(match.Params),

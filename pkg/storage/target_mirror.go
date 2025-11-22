@@ -15,8 +15,8 @@ const (
 	targetUpdatedAtColumn = "updated_at"
 )
 
-// TargetTask contains the columns mirrored into the local capture_targets table.
-type TargetTask struct {
+// TaskStatus contains the columns mirrored into the local capture_targets table.
+type TaskStatus struct {
 	TaskID           int64
 	Params           string
 	App              string
@@ -39,17 +39,17 @@ type TargetTask struct {
 	ElapsedSeconds   int64
 }
 
-// TargetMirror keeps Feishu target rows synchronized inside SQLite.
-type TargetMirror struct {
+// TaskMirror keeps Feishu target rows synchronized inside SQLite.
+type TaskMirror struct {
 	db      *sql.DB
 	stmt    *sql.Stmt
-	fields  feishu.TargetFields
+	fields  feishu.TaskFields
 	columns []string
 }
 
-// NewTargetMirror opens the shared SQLite database (ResolveDatabasePath) and
+// NewTaskMirror opens the shared SQLite database (ResolveDatabasePath) and
 // ensures the capture_targets table exists.
-func NewTargetMirror() (*TargetMirror, error) {
+func NewTaskMirror() (*TaskMirror, error) {
 	path, err := ResolveDatabasePath()
 	if err != nil {
 		return nil, errors.Wrap(err, "resolve sqlite path for capture targets failed")
@@ -62,7 +62,7 @@ func NewTargetMirror() (*TargetMirror, error) {
 		db.Close()
 		return nil, err
 	}
-	fields := feishu.DefaultTargetFields
+	fields := feishu.DefaultTaskFields
 	columns := buildTargetColumnOrder(fields)
 	if err := ensureTargetSchema(db, captureTargetsTable, fields, columns); err != nil {
 		db.Close()
@@ -73,7 +73,7 @@ func NewTargetMirror() (*TargetMirror, error) {
 		db.Close()
 		return nil, err
 	}
-	return &TargetMirror{db: db, stmt: stmt, fields: fields, columns: columns}, nil
+	return &TaskMirror{db: db, stmt: stmt, fields: fields, columns: columns}, nil
 }
 
 func configureTargetSQLite(db *sql.DB) error {
@@ -92,7 +92,7 @@ func configureTargetSQLite(db *sql.DB) error {
 	return nil
 }
 
-func buildTargetColumnOrder(fields feishu.TargetFields) []string {
+func buildTargetColumnOrder(fields feishu.TaskFields) []string {
 	return []string{
 		fields.TaskID,
 		fields.Params,
@@ -113,7 +113,7 @@ func buildTargetColumnOrder(fields feishu.TargetFields) []string {
 	}
 }
 
-func ensureTargetSchema(db *sql.DB, table string, fields feishu.TargetFields, columns []string) error {
+func ensureTargetSchema(db *sql.DB, table string, fields feishu.TaskFields, columns []string) error {
 	defs := []string{
 		fmt.Sprintf("%s INTEGER PRIMARY KEY", quoteIdent(fields.TaskID)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.Params)),
@@ -160,7 +160,7 @@ func ensureTargetSchema(db *sql.DB, table string, fields feishu.TargetFields, co
 	return nil
 }
 
-func prepareTargetUpsert(db *sql.DB, table string, fields feishu.TargetFields, columns []string) (*sql.Stmt, error) {
+func prepareTargetUpsert(db *sql.DB, table string, fields feishu.TaskFields, columns []string) (*sql.Stmt, error) {
 	quotedCols := make([]string, len(columns))
 	placeholders := make([]string, len(columns))
 	for i, col := range columns {
@@ -192,7 +192,7 @@ func prepareTargetUpsert(db *sql.DB, table string, fields feishu.TargetFields, c
 }
 
 // Close releases sqlite resources.
-func (m *TargetMirror) Close() error {
+func (m *TaskMirror) Close() error {
 	if m == nil {
 		return nil
 	}
@@ -206,7 +206,7 @@ func (m *TargetMirror) Close() error {
 }
 
 // UpsertTasks mirrors the provided target tasks.
-func (m *TargetMirror) UpsertTasks(tasks []*TargetTask) error {
+func (m *TaskMirror) UpsertTasks(tasks []*TaskStatus) error {
 	if m == nil || len(tasks) == 0 {
 		return nil
 	}
@@ -221,7 +221,7 @@ func (m *TargetMirror) UpsertTasks(tasks []*TargetTask) error {
 	return nil
 }
 
-func (m *TargetMirror) upsert(task *TargetTask) error {
+func (m *TaskMirror) upsert(task *TaskStatus) error {
 	elapsed := sql.NullInt64{}
 	if task.ElapsedSeconds > 0 {
 		elapsed = sql.NullInt64{Int64: task.ElapsedSeconds, Valid: true}

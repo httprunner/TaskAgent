@@ -152,26 +152,26 @@ func TestParseBitableURL(t *testing.T) {
 	}
 }
 
-func TestDecodeTargetRow(t *testing.T) {
+func TestDecodeTaskRow(t *testing.T) {
 	rec := bitableRecord{
 		RecordID: "rec123",
 		Fields: map[string]any{
-			DefaultTargetFields.TaskID:           float64(42),
-			DefaultTargetFields.Params:           []any{"{\"song\":\"foo\"}"},
-			DefaultTargetFields.App:              "netease",
-			DefaultTargetFields.Scene:            "auto",
-			DefaultTargetFields.Datetime:         "2025-11-08 10:30:00",
-			DefaultTargetFields.Status:           "pending",
-			DefaultTargetFields.UserID:           "user-123",
-			DefaultTargetFields.UserName:         "tester",
-			DefaultTargetFields.Extra:            "0.85",
-			DefaultTargetFields.DeviceSerial:     "dev-target",
-			DefaultTargetFields.DispatchedDevice: "dev-actual",
+			DefaultTaskFields.TaskID:           float64(42),
+			DefaultTaskFields.Params:           []any{"{\"song\":\"foo\"}"},
+			DefaultTaskFields.App:              "netease",
+			DefaultTaskFields.Scene:            "auto",
+			DefaultTaskFields.Datetime:         "2025-11-08 10:30:00",
+			DefaultTaskFields.Status:           "pending",
+			DefaultTaskFields.UserID:           "user-123",
+			DefaultTaskFields.UserName:         "tester",
+			DefaultTaskFields.Extra:            "0.85",
+			DefaultTaskFields.DeviceSerial:     "dev-target",
+			DefaultTaskFields.DispatchedDevice: "dev-actual",
 		},
 	}
-	row, err := decodeTargetRow(rec, DefaultTargetFields)
+	row, err := decodeTaskRow(rec, DefaultTaskFields)
 	if err != nil {
-		t.Fatalf("decodeTargetRow returned error: %v", err)
+		t.Fatalf("decodeTaskRow returned error: %v", err)
 	}
 	if row.TaskID != 42 {
 		t.Fatalf("unexpected TaskID %d", row.TaskID)
@@ -205,26 +205,26 @@ func TestDecodeTargetRow(t *testing.T) {
 	}
 }
 
-func TestDecodeTargetRowAllowsEmptyStatus(t *testing.T) {
+func TestDecodeTaskRowAllowsEmptyStatus(t *testing.T) {
 	rec := bitableRecord{
 		RecordID: "recEmpty",
 		Fields: map[string]any{
-			DefaultTargetFields.TaskID:           float64(43),
-			DefaultTargetFields.Params:           "{}",
-			DefaultTargetFields.App:              "netease",
-			DefaultTargetFields.Scene:            "auto",
-			DefaultTargetFields.Datetime:         "2025-11-08",
-			DefaultTargetFields.Status:           "",
-			DefaultTargetFields.UserID:           "",
-			DefaultTargetFields.UserName:         "",
-			DefaultTargetFields.Extra:            "",
-			DefaultTargetFields.DeviceSerial:     "",
-			DefaultTargetFields.DispatchedDevice: "",
+			DefaultTaskFields.TaskID:           float64(43),
+			DefaultTaskFields.Params:           "{}",
+			DefaultTaskFields.App:              "netease",
+			DefaultTaskFields.Scene:            "auto",
+			DefaultTaskFields.Datetime:         "2025-11-08",
+			DefaultTaskFields.Status:           "",
+			DefaultTaskFields.UserID:           "",
+			DefaultTaskFields.UserName:         "",
+			DefaultTaskFields.Extra:            "",
+			DefaultTaskFields.DeviceSerial:     "",
+			DefaultTaskFields.DispatchedDevice: "",
 		},
 	}
-	row, err := decodeTargetRow(rec, DefaultTargetFields)
+	row, err := decodeTaskRow(rec, DefaultTaskFields)
 	if err != nil {
-		t.Fatalf("decodeTargetRow should allow empty status: %v", err)
+		t.Fatalf("decodeTaskRow should allow empty status: %v", err)
 	}
 	if row.Status != "" {
 		t.Fatalf("expected empty status, got %q", row.Status)
@@ -234,46 +234,46 @@ func TestDecodeTargetRowAllowsEmptyStatus(t *testing.T) {
 	}
 }
 
-func TestDecodeTargetRowWithOnlyTargetDeviceSerial(t *testing.T) {
+func TestDecodeTaskRowWithOnlyTargetDeviceSerial(t *testing.T) {
 	rec := bitableRecord{
 		RecordID: "recTargetOnly",
 		Fields: map[string]any{
-			DefaultTargetFields.TaskID:       float64(55),
-			DefaultTargetFields.Params:       "{}",
-			DefaultTargetFields.App:          "netease",
-			DefaultTargetFields.Scene:        "auto",
-			DefaultTargetFields.Status:       "pending",
-			DefaultTargetFields.DeviceSerial: "dev-only",
+			DefaultTaskFields.TaskID:       float64(55),
+			DefaultTaskFields.Params:       "{}",
+			DefaultTaskFields.App:          "netease",
+			DefaultTaskFields.Scene:        "auto",
+			DefaultTaskFields.Status:       "pending",
+			DefaultTaskFields.DeviceSerial: "dev-only",
 		},
 	}
-	row, err := decodeTargetRow(rec, DefaultTargetFields)
+	row, err := decodeTaskRow(rec, DefaultTaskFields)
 	if err != nil {
-		t.Fatalf("decodeTargetRow returned error: %v", err)
+		t.Fatalf("decodeTaskRow returned error: %v", err)
 	}
 	if row.DeviceSerial != "dev-only" || row.DispatchedDevice != "" {
 		t.Fatalf("unexpected device fields: %+v", row)
 	}
 }
 
-func TestDecodeTargetRowMissingStatus(t *testing.T) {
+func TestDecodeTaskRowMissingStatus(t *testing.T) {
 	rec := bitableRecord{
 		RecordID: "recMissing",
 		Fields: map[string]any{
-			DefaultTargetFields.TaskID:   float64(44),
-			DefaultTargetFields.Params:   "{}",
-			DefaultTargetFields.App:      "netease",
-			DefaultTargetFields.Scene:    "auto",
-			DefaultTargetFields.Datetime: "2025-11-08",
+			DefaultTaskFields.TaskID:   float64(44),
+			DefaultTaskFields.Params:   "{}",
+			DefaultTaskFields.App:      "netease",
+			DefaultTaskFields.Scene:    "auto",
+			DefaultTaskFields.Datetime: "2025-11-08",
 		},
 	}
-	if _, err := decodeTargetRow(rec, DefaultTargetFields); err == nil {
+	if _, err := decodeTaskRow(rec, DefaultTaskFields); err == nil {
 		t.Fatalf("expected error when status field missing")
 	}
 }
 
 func TestRecordIDByTaskID(t *testing.T) {
-	table := &TargetTable{
-		Rows:      []TargetRow{{RecordID: "rec1", TaskID: 7, Status: "pending"}},
+	table := &TaskTable{
+		Rows:      []TaskRow{{RecordID: "rec1", TaskID: 7, Status: "pending"}},
 		taskIndex: map[int64]string{7: "rec1"},
 	}
 	if id, ok := table.RecordIDByTaskID(7); !ok || id != "rec1" {
@@ -293,7 +293,7 @@ func TestParseBitableTimeFallback(t *testing.T) {
 	}
 }
 
-func TestFetchTargetTableExampleMock(t *testing.T) {
+func TestFetchTaskTableExampleMock(t *testing.T) {
 	ctx := context.Background()
 	const wikiResponse = `{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnMockToken","obj_type":"bitable"}}}`
 	listResponseData := map[string]any{
@@ -304,23 +304,23 @@ func TestFetchTargetTableExampleMock(t *testing.T) {
 				{
 					"record_id": "recYUOQd9",
 					"fields": map[string]any{
-						DefaultTargetFields.TaskID:   101,
-						DefaultTargetFields.Params:   "{\"song\":\"foo\"}",
-						DefaultTargetFields.App:      "netease",
-						DefaultTargetFields.Scene:    "batch",
-						DefaultTargetFields.Datetime: "2025-11-07 12:30:00",
-						DefaultTargetFields.Status:   "pending",
+						DefaultTaskFields.TaskID:   101,
+						DefaultTaskFields.Params:   "{\"song\":\"foo\"}",
+						DefaultTaskFields.App:      "netease",
+						DefaultTaskFields.Scene:    "batch",
+						DefaultTaskFields.Datetime: "2025-11-07 12:30:00",
+						DefaultTaskFields.Status:   "pending",
 					},
 				},
 				{
 					"record_id": "recTy0283",
 					"fields": map[string]any{
-						DefaultTargetFields.TaskID:   102,
-						DefaultTargetFields.Params:   "{\"song\":\"bar\"}",
-						DefaultTargetFields.App:      "qqmusic",
-						DefaultTargetFields.Scene:    "batch",
-						DefaultTargetFields.Datetime: "2025-11-07 13:00:00",
-						DefaultTargetFields.Status:   "done",
+						DefaultTaskFields.TaskID:   102,
+						DefaultTaskFields.Params:   "{\"song\":\"bar\"}",
+						DefaultTaskFields.App:      "qqmusic",
+						DefaultTaskFields.Scene:    "batch",
+						DefaultTaskFields.Datetime: "2025-11-07 13:00:00",
+						DefaultTaskFields.Status:   "done",
 					},
 				},
 			},
@@ -360,9 +360,9 @@ func TestFetchTargetTableExampleMock(t *testing.T) {
 		},
 	}
 
-	table, err := client.FetchTargetTable(ctx, liveWritableBitableURL, nil)
+	table, err := client.FetchTaskTable(ctx, liveWritableBitableURL, nil)
 	if err != nil {
-		t.Fatalf("FetchTargetTable returned error: %v", err)
+		t.Fatalf("FetchTaskTable returned error: %v", err)
 	}
 	if !wikiCalled {
 		t.Fatalf("expected wiki resolver call")
@@ -376,8 +376,8 @@ func TestFetchTargetTableExampleMock(t *testing.T) {
 	if id, ok := table.RecordIDByTaskID(101); !ok || id != "recYUOQd9" {
 		t.Fatalf("expected record id recYUOQd9 for task 101, got %q ok=%v", id, ok)
 	}
-	if err := client.UpdateTargetStatus(ctx, table, 101, "processing"); err != nil {
-		t.Fatalf("UpdateTargetStatus error: %v", err)
+	if err := client.UpdateTaskStatus(ctx, table, 101, "processing"); err != nil {
+		t.Fatalf("UpdateTaskStatus error: %v", err)
 	}
 	if table.Rows[0].Status != "processing" {
 		t.Fatalf("local table status not updated, got %q", table.Rows[0].Status)
@@ -386,7 +386,7 @@ func TestFetchTargetTableExampleMock(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected captured fields map, got %#v", capturedPayload)
 	}
-	if fields[DefaultTargetFields.Status] != "processing" {
+	if fields[DefaultTaskFields.Status] != "processing" {
 		t.Fatalf("expected status payload 'processing', got %#v", fields)
 	}
 	t.Logf("decoded rows from example table (mock): %+v", table.Rows)
@@ -424,11 +424,11 @@ func TestCreateTargetRecords(t *testing.T) {
 	}
 
 	when := time.Date(2024, 10, 1, 12, 0, 0, 0, time.UTC)
-	records := []TargetRecordInput{
+	records := []TaskRecordInput{
 		{TaskID: 301, Params: `{"foo":1}`, App: "netease", Scene: "parse", Datetime: &when, Status: "pending", UserID: "user-123", UserName: "tester", Extra: "0.90"},
 		{TaskID: 0, Params: `{"foo":2}`, DatetimeRaw: "2024-10-02 08:00:00", Status: "queued"},
 	}
-	override := &TargetFields{Status: "biz_status"}
+	override := &TaskFields{Status: "biz_status"}
 	ids, err := client.CreateTargetRecords(ctx, liveWritableBitableURL, records, override)
 	if err != nil {
 		t.Fatalf("CreateTargetRecords returned error: %v", err)
@@ -450,27 +450,27 @@ func TestCreateTargetRecords(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected fields map, got %T", recordPayloads[0]["fields"])
 	}
-	if firstFields[DefaultTargetFields.TaskID] != int64(301) {
-		t.Fatalf("unexpected task id payload %#v", firstFields[DefaultTargetFields.TaskID])
+	if firstFields[DefaultTaskFields.TaskID] != int64(301) {
+		t.Fatalf("unexpected task id payload %#v", firstFields[DefaultTaskFields.TaskID])
 	}
 	if firstFields["biz_status"] != "pending" {
 		t.Fatalf("expected biz_status pending, got %#v", firstFields["biz_status"])
 	}
-	if _, exists := firstFields[DefaultTargetFields.Status]; exists {
+	if _, exists := firstFields[DefaultTaskFields.Status]; exists {
 		t.Fatalf("default status field should be absent when override is set")
 	}
-	if firstFields[DefaultTargetFields.Datetime] != when.Format(time.RFC3339) {
-		t.Fatalf("unexpected datetime %v", firstFields[DefaultTargetFields.Datetime])
+	if firstFields[DefaultTaskFields.Datetime] != when.Format(time.RFC3339) {
+		t.Fatalf("unexpected datetime %v", firstFields[DefaultTaskFields.Datetime])
 	}
 	secondFields, ok := recordPayloads[1]["fields"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected fields map for second record, got %T", recordPayloads[1]["fields"])
 	}
-	if _, exists := secondFields[DefaultTargetFields.TaskID]; exists {
-		t.Fatalf("TaskID should be omitted for auto-increment scenario, got %#v", secondFields[DefaultTargetFields.TaskID])
+	if _, exists := secondFields[DefaultTaskFields.TaskID]; exists {
+		t.Fatalf("TaskID should be omitted for auto-increment scenario, got %#v", secondFields[DefaultTaskFields.TaskID])
 	}
-	if secondFields[DefaultTargetFields.Datetime] != "2024-10-02 08:00:00" {
-		t.Fatalf("expected raw datetime preserved, got %#v", secondFields[DefaultTargetFields.Datetime])
+	if secondFields[DefaultTaskFields.Datetime] != "2024-10-02 08:00:00" {
+		t.Fatalf("expected raw datetime preserved, got %#v", secondFields[DefaultTaskFields.Datetime])
 	}
 }
 
@@ -505,7 +505,7 @@ func TestCreateTargetRecordSingle(t *testing.T) {
 		},
 	}
 
-	rec := TargetRecordInput{Status: "pending"}
+	rec := TaskRecordInput{Status: "pending"}
 	id, err := client.CreateTargetRecord(ctx, liveWritableBitableURL, rec, nil)
 	if err != nil {
 		t.Fatalf("CreateTargetRecord error: %v", err)
@@ -520,11 +520,11 @@ func TestCreateTargetRecordSingle(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected fields map, got %T", captured["fields"])
 	}
-	if _, exists := fields[DefaultTargetFields.TaskID]; exists {
-		t.Fatalf("TaskID should be omitted when not provided, got %#v", fields[DefaultTargetFields.TaskID])
+	if _, exists := fields[DefaultTaskFields.TaskID]; exists {
+		t.Fatalf("TaskID should be omitted when not provided, got %#v", fields[DefaultTaskFields.TaskID])
 	}
-	if fields[DefaultTargetFields.Status] != "pending" {
-		t.Fatalf("unexpected status %#v", fields[DefaultTargetFields.Status])
+	if fields[DefaultTaskFields.Status] != "pending" {
+		t.Fatalf("unexpected status %#v", fields[DefaultTaskFields.Status])
 	}
 }
 
@@ -711,7 +711,7 @@ func TestCreateResultRecordSingle(t *testing.T) {
 	}
 }
 
-func TestUpdateTargetStatuses(t *testing.T) {
+func TestUpdateTaskStatuses(t *testing.T) {
 	const wikiResponse = `{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnUpdate","obj_type":"bitable"}}}`
 	const customStatusField = "biz_status"
 	listResponseData := map[string]any{
@@ -722,14 +722,14 @@ func TestUpdateTargetStatuses(t *testing.T) {
 				{
 					"record_id": "recA1",
 					"fields": map[string]any{
-						DefaultTargetFields.TaskID: 101,
+						DefaultTaskFields.TaskID: 101,
 						customStatusField:          "pending",
 					},
 				},
 				{
 					"record_id": "recA2",
 					"fields": map[string]any{
-						DefaultTargetFields.TaskID: 102,
+						DefaultTaskFields.TaskID: 102,
 						customStatusField:          "pending",
 					},
 				},
@@ -773,10 +773,10 @@ func TestUpdateTargetStatuses(t *testing.T) {
 		},
 	}
 
-	changes := []TargetStatusUpdate{{TaskID: 101, NewStatus: "processing"}, {TaskID: 102, NewStatus: "done"}}
-	override := &TargetFields{Status: customStatusField}
-	if err := client.UpdateTargetStatuses(ctx, liveWritableBitableURL, changes, override); err != nil {
-		t.Fatalf("UpdateTargetStatuses returned error: %v", err)
+	changes := []TaskStatusUpdate{{TaskID: 101, NewStatus: "processing"}, {TaskID: 102, NewStatus: "done"}}
+	override := &TaskFields{Status: customStatusField}
+	if err := client.UpdateTaskStatuses(ctx, liveWritableBitableURL, changes, override); err != nil {
+		t.Fatalf("UpdateTaskStatuses returned error: %v", err)
 	}
 	if !wikiCalled || !listCalled {
 		t.Fatalf("expected wiki and list calls")
@@ -800,7 +800,7 @@ func TestUpdateTargetStatuses(t *testing.T) {
 	}
 }
 
-func TestFetchTargetTableExampleLive(t *testing.T) {
+func TestFetchTaskTableExampleLive(t *testing.T) {
 	if os.Getenv("FEISHU_LIVE_TEST") != "1" {
 		t.Skip("set FEISHU_LIVE_TEST=1 to run live Feishu integration test")
 	}
@@ -812,9 +812,9 @@ func TestFetchTargetTableExampleLive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClientFromEnv error: %v", err)
 	}
-	table, err := client.FetchTargetTable(ctx, liveReadableBitableURL, nil)
+	table, err := client.FetchTaskTable(ctx, liveReadableBitableURL, nil)
 	if err != nil {
-		t.Fatalf("FetchTargetTable live call failed: %v", err)
+		t.Fatalf("FetchTaskTable live call failed: %v", err)
 	}
 	if table == nil || len(table.Rows) == 0 {
 		t.Fatalf("expected rows from live table, got %+v", table)
@@ -824,7 +824,7 @@ func TestFetchTargetTableExampleLive(t *testing.T) {
 		first.TaskID, first.Params, first.App, first.Scene, first.DatetimeRaw, first.Status)
 }
 
-func TestFetchTargetTableWithOptionsLive(t *testing.T) {
+func TestFetchTaskTableWithOptionsLive(t *testing.T) {
 	if os.Getenv("FEISHU_LIVE_TEST") != "1" {
 		t.Skip("set FEISHU_LIVE_TEST=1 to run live Feishu integration test")
 	}
@@ -836,12 +836,12 @@ func TestFetchTargetTableWithOptionsLive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewClientFromEnv error: %v", err)
 	}
-	appRef := fmt.Sprintf("CurrentValue.[%s]", DefaultTargetFields.App)
+	appRef := fmt.Sprintf("CurrentValue.[%s]", DefaultTaskFields.App)
 	filter := fmt.Sprintf("%s = \"%s\"", appRef, liveTargetApp)
-	opts := &TargetQueryOptions{Filter: filter, Limit: 5}
-	table, err := client.FetchTargetTableWithOptions(ctx, liveReadableBitableURL, nil, opts)
+	opts := &TaskQueryOptions{Filter: filter, Limit: 5}
+	table, err := client.FetchTaskTableWithOptions(ctx, liveReadableBitableURL, nil, opts)
 	if err != nil {
-		t.Fatalf("FetchTargetTableWithOptions live call failed: %v", err)
+		t.Fatalf("FetchTaskTableWithOptions live call failed: %v", err)
 	}
 	if table == nil || len(table.Rows) == 0 {
 		t.Fatalf("expected rows for %s, got %+v", liveTargetApp, table)
@@ -871,7 +871,7 @@ func TestTargetRecordLifecycleLive(t *testing.T) {
 		t.Fatalf("NewClientFromEnv error: %v", err)
 	}
 	baseTaskID := time.Now().Unix()
-	records := []TargetRecordInput{
+	records := []TaskRecordInput{
 		{
 			Params:   fmt.Sprintf("{\"test\":\"create_live\",\"id\":%d}", baseTaskID),
 			App:      "test-live",
@@ -903,11 +903,11 @@ func TestTargetRecordLifecycleLive(t *testing.T) {
 	if err := client.ensureBitableAppToken(ctx, &ref); err != nil {
 		t.Fatalf("ensureBitableAppToken error: %v", err)
 	}
-	fields := DefaultTargetFields
-	localTable := &TargetTable{
+	fields := DefaultTaskFields
+	localTable := &TaskTable{
 		Ref:       ref,
 		Fields:    fields,
-		Rows:      make([]TargetRow, 0, len(ids)),
+		Rows:      make([]TaskRow, 0, len(ids)),
 		Invalid:   nil,
 		taskIndex: make(map[int64]string, len(ids)),
 	}
@@ -916,9 +916,9 @@ func TestTargetRecordLifecycleLive(t *testing.T) {
 		if err != nil {
 			t.Fatalf("getBitableRecord error: %v", err)
 		}
-		row, err := decodeTargetRow(rec, fields)
+		row, err := decodeTaskRow(rec, fields)
 		if err != nil {
-			t.Fatalf("decodeTargetRow error: %v", err)
+			t.Fatalf("decodeTaskRow error: %v", err)
 		}
 		localTable.Rows = append(localTable.Rows, row)
 		localTable.taskIndex[row.TaskID] = row.RecordID
@@ -929,13 +929,13 @@ func TestTargetRecordLifecycleLive(t *testing.T) {
 			t.Fatalf("unexpected initial status for task %d: got %s", row.TaskID, row.Status)
 		}
 	}
-	updates := []TargetStatusUpdate{
+	updates := []TaskStatusUpdate{
 		{TaskID: localTable.Rows[0].TaskID, NewStatus: "processing"},
 		{TaskID: localTable.Rows[1].TaskID, NewStatus: "done"},
 	}
 	for _, upd := range updates {
-		if err := client.UpdateTargetStatus(ctx, localTable, upd.TaskID, upd.NewStatus); err != nil {
-			t.Fatalf("UpdateTargetStatus live error: %v", err)
+		if err := client.UpdateTaskStatus(ctx, localTable, upd.TaskID, upd.NewStatus); err != nil {
+			t.Fatalf("UpdateTaskStatus live error: %v", err)
 		}
 	}
 	for _, upd := range updates {
@@ -947,9 +947,9 @@ func TestTargetRecordLifecycleLive(t *testing.T) {
 		if err != nil {
 			t.Fatalf("getBitableRecord after update error: %v", err)
 		}
-		row, err := decodeTargetRow(rec, fields)
+		row, err := decodeTaskRow(rec, fields)
 		if err != nil {
-			t.Fatalf("decodeTargetRow after update error: %v", err)
+			t.Fatalf("decodeTaskRow after update error: %v", err)
 		}
 		if row.Status != upd.NewStatus {
 			t.Fatalf("task %d status mismatch after update: want %s got %s", upd.TaskID, upd.NewStatus, row.Status)

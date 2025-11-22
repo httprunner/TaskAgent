@@ -162,12 +162,12 @@ func (w *WebhookWorker) processOnce(ctx context.Context) error {
 	return nil
 }
 
-func (w *WebhookWorker) fetchWebhookCandidates(ctx context.Context) (*feishu.TargetTable, error) {
-	opts := &feishu.TargetQueryOptions{
+func (w *WebhookWorker) fetchWebhookCandidates(ctx context.Context) (*feishu.TaskTable, error) {
+	opts := &feishu.TaskQueryOptions{
 		Filter: w.buildFilterExpression(),
 		Limit:  w.batchLimit,
 	}
-	table, err := w.client.FetchTargetTableWithOptions(ctx, w.bitableURL, nil, opts)
+	table, err := w.client.FetchTaskTableWithOptions(ctx, w.bitableURL, nil, opts)
 	if err != nil {
 		return nil, errors.Wrap(err, "fetch webhook candidates failed")
 	}
@@ -175,7 +175,7 @@ func (w *WebhookWorker) fetchWebhookCandidates(ctx context.Context) (*feishu.Tar
 }
 
 func (w *WebhookWorker) buildFilterExpression() string {
-	fields := feishu.DefaultTargetFields
+	fields := feishu.DefaultTaskFields
 	var clauses []string
 	if appRef := strings.TrimSpace(fields.App); appRef != "" && strings.TrimSpace(w.app) != "" {
 		clauses = append(clauses, fmt.Sprintf("%s = \"%s\"", bitableFieldRef(appRef), escapeBitableFilterValue(w.app)))
@@ -219,7 +219,7 @@ func (w *WebhookWorker) sendSummary(ctx context.Context, app, params, userID, us
 	return nil
 }
 
-func (w *WebhookWorker) updateWebhookState(ctx context.Context, table *feishu.TargetTable, taskIDs []int64, state string) error {
+func (w *WebhookWorker) updateWebhookState(ctx context.Context, table *feishu.TaskTable, taskIDs []int64, state string) error {
 	if table == nil || len(taskIDs) == 0 {
 		return nil
 	}
@@ -233,7 +233,7 @@ func (w *WebhookWorker) updateWebhookState(ctx context.Context, table *feishu.Ta
 		if taskID == 0 {
 			continue
 		}
-		if err := w.client.UpdateTargetFields(ctx, table, taskID, payload); err != nil {
+		if err := w.client.UpdateTaskFields(ctx, table, taskID, payload); err != nil {
 			errs = append(errs, fmt.Sprintf("task %d: %v", taskID, err))
 		}
 	}

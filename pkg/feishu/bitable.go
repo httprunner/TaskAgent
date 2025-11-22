@@ -29,8 +29,8 @@ type BitableRef struct {
 	WikiToken string
 }
 
-// TargetFields lists the expected column names inside the target table.
-type TargetFields struct {
+// TaskFields lists the expected column names inside the task status table.
+type TaskFields struct {
 	TaskID           string
 	App              string
 	Scene            string
@@ -49,8 +49,8 @@ type TargetFields struct {
 	ElapsedSeconds   string
 }
 
-// TargetRow represents a single task row stored inside the target table.
-type TargetRow struct {
+// TaskRow represents a single task row stored inside the task status table.
+type TaskRow struct {
 	RecordID         string
 	TaskID           int64
 	Params           string
@@ -74,10 +74,10 @@ type TargetRow struct {
 	ElapsedSeconds   int64
 }
 
-// TargetRecordInput describes the payload needed to create a new record.
+// TaskRecordInput describes the payload needed to create a new record.
 // If TaskID is zero, the field is omitted so Feishu can auto-increment it.
 // DatetimeRaw takes precedence if both it and Datetime are set.
-type TargetRecordInput struct {
+type TaskRecordInput struct {
 	TaskID           int64
 	Params           string
 	App              string
@@ -178,37 +178,37 @@ type DramaFields struct {
 	RightsProtectionScenario string
 }
 
-// TargetStatusUpdate links a TaskID to the status value it should adopt.
-type TargetStatusUpdate struct {
+// TaskStatusUpdate links a TaskID to the status value it should adopt.
+type TaskStatusUpdate struct {
 	TaskID    int64
 	NewStatus string
 }
 
-// TargetRowError captures rows that failed to decode during FetchTargetTable.
-type TargetRowError struct {
+// TaskRowError captures rows that failed to decode during FetchTaskTable.
+type TaskRowError struct {
 	RecordID string
 	Err      error
 }
 
-// TargetTable contains decoded rows alongside a quick lookup index.
-type TargetTable struct {
+// TaskTable contains decoded rows alongside a quick lookup index.
+type TaskTable struct {
 	Ref     BitableRef
-	Fields  TargetFields
-	Rows    []TargetRow
-	Invalid []TargetRowError
+	Fields  TaskFields
+	Rows    []TaskRow
+	Invalid []TaskRowError
 
 	taskIndex map[int64]string
 }
 
-// TargetQueryOptions allows configuring additional filters when fetching target tables.
-type TargetQueryOptions struct {
+// TaskQueryOptions allows configuring additional filters when fetching target tables.
+type TaskQueryOptions struct {
 	ViewID string
 	Filter string
 	Limit  int
 }
 
 // RecordIDByTaskID returns the record id for a given TaskID if present.
-func (t *TargetTable) RecordIDByTaskID(taskID int64) (string, bool) {
+func (t *TaskTable) RecordIDByTaskID(taskID int64) (string, bool) {
 	if t == nil {
 		return "", false
 	}
@@ -219,7 +219,7 @@ func (t *TargetTable) RecordIDByTaskID(taskID int64) (string, bool) {
 	return id, ok
 }
 
-func (t *TargetTable) updateLocalStatus(taskID int64, status string) {
+func (t *TaskTable) updateLocalStatus(taskID int64, status string) {
 	if t == nil {
 		return
 	}
@@ -231,7 +231,7 @@ func (t *TargetTable) updateLocalStatus(taskID int64, status string) {
 	}
 }
 
-func (t *TargetTable) updateLocalWebhook(taskID int64, webhook string) {
+func (t *TaskTable) updateLocalWebhook(taskID int64, webhook string) {
 	if t == nil {
 		return
 	}
@@ -243,7 +243,7 @@ func (t *TargetTable) updateLocalWebhook(taskID int64, webhook string) {
 	}
 }
 
-func (t *TargetTable) updateLocalDispatchedDevice(taskID int64, serial string) {
+func (t *TaskTable) updateLocalDispatchedDevice(taskID int64, serial string) {
 	if t == nil {
 		return
 	}
@@ -255,7 +255,7 @@ func (t *TargetTable) updateLocalDispatchedDevice(taskID int64, serial string) {
 	}
 }
 
-func (t *TargetTable) updateLocalDispatchedAt(taskID int64, raw string, dispatchedAt *time.Time) {
+func (t *TaskTable) updateLocalDispatchedAt(taskID int64, raw string, dispatchedAt *time.Time) {
 	if t == nil {
 		return
 	}
@@ -274,7 +274,7 @@ func (t *TargetTable) updateLocalDispatchedAt(taskID int64, raw string, dispatch
 	}
 }
 
-func (t *TargetTable) updateLocalElapsedSeconds(taskID int64, secs int64) {
+func (t *TaskTable) updateLocalElapsedSeconds(taskID int64, secs int64) {
 	if t == nil {
 		return
 	}
@@ -286,7 +286,7 @@ func (t *TargetTable) updateLocalElapsedSeconds(taskID int64, secs int64) {
 	}
 }
 
-func (t *TargetTable) updateLocalTargetDevice(taskID int64, serial string) {
+func (t *TaskTable) updateLocalTargetDevice(taskID int64, serial string) {
 	if t == nil {
 		return
 	}
@@ -298,7 +298,7 @@ func (t *TargetTable) updateLocalTargetDevice(taskID int64, serial string) {
 	}
 }
 
-func (t *TargetTable) updateLocalStartAt(taskID int64, raw string, ts *time.Time) {
+func (t *TaskTable) updateLocalStartAt(taskID int64, raw string, ts *time.Time) {
 	if t == nil {
 		return
 	}
@@ -317,7 +317,7 @@ func (t *TargetTable) updateLocalStartAt(taskID int64, raw string, ts *time.Time
 	}
 }
 
-func (t *TargetTable) updateLocalEndAt(taskID int64, raw string, ts *time.Time) {
+func (t *TaskTable) updateLocalEndAt(taskID int64, raw string, ts *time.Time) {
 	if t == nil {
 		return
 	}
@@ -414,13 +414,13 @@ func ParseBitableURL(raw string) (ref BitableRef, err error) {
 	return ref, nil
 }
 
-// FetchTargetTable downloads and decodes rows from the configured target table.
-func (c *Client) FetchTargetTable(ctx context.Context, rawURL string, override *TargetFields) (*TargetTable, error) {
-	return c.FetchTargetTableWithOptions(ctx, rawURL, override, nil)
+// FetchTaskTable downloads and decodes rows from the configured target table.
+func (c *Client) FetchTaskTable(ctx context.Context, rawURL string, override *TaskFields) (*TaskTable, error) {
+	return c.FetchTaskTableWithOptions(ctx, rawURL, override, nil)
 }
 
-// FetchTargetTableWithOptions downloads rows using the provided query options.
-func (c *Client) FetchTargetTableWithOptions(ctx context.Context, rawURL string, override *TargetFields, opts *TargetQueryOptions) (*TargetTable, error) {
+// FetchTaskTableWithOptions downloads rows using the provided query options.
+func (c *Client) FetchTaskTableWithOptions(ctx context.Context, rawURL string, override *TaskFields, opts *TaskQueryOptions) (*TaskTable, error) {
 	if c == nil {
 		return nil, errors.New("feishu: client is nil")
 	}
@@ -433,7 +433,7 @@ func (c *Client) FetchTargetTableWithOptions(ctx context.Context, rawURL string,
 		return nil, err
 	}
 
-	fields := DefaultTargetFields
+	fields := DefaultTaskFields
 	if override != nil {
 		fields = fields.merge(*override)
 	}
@@ -448,18 +448,18 @@ func (c *Client) FetchTargetTableWithOptions(ctx context.Context, rawURL string,
 		return nil, err
 	}
 
-	table := &TargetTable{
+	table := &TaskTable{
 		Ref:       ref,
 		Fields:    fields,
-		Rows:      make([]TargetRow, 0, len(records)),
-		Invalid:   make([]TargetRowError, 0),
+		Rows:      make([]TaskRow, 0, len(records)),
+		Invalid:   make([]TaskRowError, 0),
 		taskIndex: make(map[int64]string, len(records)),
 	}
 
 	for _, rec := range records {
-		row, err := decodeTargetRow(rec, fields)
+		row, err := decodeTaskRow(rec, fields)
 		if err != nil {
-			table.Invalid = append(table.Invalid, TargetRowError{RecordID: rec.RecordID, Err: err})
+			table.Invalid = append(table.Invalid, TaskRowError{RecordID: rec.RecordID, Err: err})
 			continue
 		}
 		table.Rows = append(table.Rows, row)
@@ -502,7 +502,7 @@ func (c *Client) ensureBitableAppToken(ctx context.Context, ref *BitableRef) (er
 }
 
 // FetchBitableRows downloads raw records from a Feishu bitable so callers can read any column.
-func (c *Client) FetchBitableRows(ctx context.Context, rawURL string, opts *TargetQueryOptions) ([]BitableRow, error) {
+func (c *Client) FetchBitableRows(ctx context.Context, rawURL string, opts *TaskQueryOptions) ([]BitableRow, error) {
 	log.Info().Str("url", rawURL).Interface("options", opts).Msg("fetching bitable rows")
 	if c == nil {
 		return nil, errors.New("feishu: client is nil")
@@ -529,18 +529,18 @@ func (c *Client) FetchBitableRows(ctx context.Context, rawURL string, opts *Targ
 	return rows, nil
 }
 
-// UpdateTargetStatus updates the status field for a given TaskID using a previously fetched table.
-func (c *Client) UpdateTargetStatus(ctx context.Context, table *TargetTable, taskID int64, newStatus string) error {
+// UpdateTaskStatus updates the status field for a given TaskID using a previously fetched table.
+func (c *Client) UpdateTaskStatus(ctx context.Context, table *TaskTable, taskID int64, newStatus string) error {
 	if strings.TrimSpace(newStatus) == "" {
 		return errors.New("feishu: new status cannot be empty")
 	}
-	return c.UpdateTargetFields(ctx, table, taskID, map[string]any{
+	return c.UpdateTaskFields(ctx, table, taskID, map[string]any{
 		table.Fields.Status: newStatus,
 	})
 }
 
-// UpdateTargetFields updates arbitrary fields for a given TaskID using a previously fetched table.
-func (c *Client) UpdateTargetFields(ctx context.Context, table *TargetTable, taskID int64, fields map[string]any) error {
+// UpdateTaskFields updates arbitrary fields for a given TaskID using a previously fetched table.
+func (c *Client) UpdateTaskFields(ctx context.Context, table *TaskTable, taskID int64, fields map[string]any) error {
 	if c == nil {
 		return errors.New("feishu: client is nil")
 	}
@@ -623,18 +623,18 @@ func (c *Client) UpdateTargetFields(ctx context.Context, table *TargetTable, tas
 	return nil
 }
 
-// UpdateTargetStatusByTaskID is a convenience helper that fetches the table before applying the update.
-func (c *Client) UpdateTargetStatusByTaskID(ctx context.Context, rawURL string, taskID int64, newStatus string, override *TargetFields) error {
-	table, err := c.FetchTargetTable(ctx, rawURL, override)
+// UpdateTaskStatusByTaskID is a convenience helper that fetches the table before applying the update.
+func (c *Client) UpdateTaskStatusByTaskID(ctx context.Context, rawURL string, taskID int64, newStatus string, override *TaskFields) error {
+	table, err := c.FetchTaskTable(ctx, rawURL, override)
 	if err != nil {
 		return err
 	}
-	return c.UpdateTargetStatus(ctx, table, taskID, newStatus)
+	return c.UpdateTaskStatus(ctx, table, taskID, newStatus)
 }
 
 // CreateTargetRecord creates a single record inside the target table.
-func (c *Client) CreateTargetRecord(ctx context.Context, rawURL string, record TargetRecordInput, override *TargetFields) (string, error) {
-	ids, err := c.CreateTargetRecords(ctx, rawURL, []TargetRecordInput{record}, override)
+func (c *Client) CreateTargetRecord(ctx context.Context, rawURL string, record TaskRecordInput, override *TaskFields) (string, error) {
+	ids, err := c.CreateTargetRecords(ctx, rawURL, []TaskRecordInput{record}, override)
 	if err != nil {
 		return "", err
 	}
@@ -644,8 +644,8 @@ func (c *Client) CreateTargetRecord(ctx context.Context, rawURL string, record T
 	return ids[0], nil
 }
 
-// CreateTargetRecords creates one or more records that match the TargetFields schema.
-func (c *Client) CreateTargetRecords(ctx context.Context, rawURL string, records []TargetRecordInput, override *TargetFields) ([]string, error) {
+// CreateTargetRecords creates one or more records that match the TaskFields schema.
+func (c *Client) CreateTargetRecords(ctx context.Context, rawURL string, records []TaskRecordInput, override *TaskFields) ([]string, error) {
 	if c == nil {
 		return nil, errors.New("feishu: client is nil")
 	}
@@ -659,7 +659,7 @@ func (c *Client) CreateTargetRecords(ctx context.Context, rawURL string, records
 	if err := c.ensureBitableAppToken(ctx, &ref); err != nil {
 		return nil, err
 	}
-	fields := DefaultTargetFields
+	fields := DefaultTaskFields
 	if override != nil {
 		fields = fields.merge(*override)
 	}
@@ -722,15 +722,15 @@ func (c *Client) CreateResultRecords(ctx context.Context, rawURL string, records
 	return c.batchCreateBitableRecords(ctx, ref, payloads)
 }
 
-// UpdateTargetStatuses updates the status field for multiple TaskIDs in one fetch cycle.
-func (c *Client) UpdateTargetStatuses(ctx context.Context, rawURL string, updates []TargetStatusUpdate, override *TargetFields) error {
+// UpdateTaskStatuses updates the status field for multiple TaskIDs in one fetch cycle.
+func (c *Client) UpdateTaskStatuses(ctx context.Context, rawURL string, updates []TaskStatusUpdate, override *TaskFields) error {
 	if c == nil {
 		return errors.New("feishu: client is nil")
 	}
 	if len(updates) == 0 {
 		return errors.New("feishu: no updates provided")
 	}
-	table, err := c.FetchTargetTable(ctx, rawURL, override)
+	table, err := c.FetchTaskTable(ctx, rawURL, override)
 	if err != nil {
 		return err
 	}
@@ -756,7 +756,7 @@ func (c *Client) UpdateTargetStatuses(ctx context.Context, rawURL string, update
 	return nil
 }
 
-func (fields TargetFields) merge(override TargetFields) TargetFields {
+func (fields TaskFields) merge(override TaskFields) TaskFields {
 	result := fields
 	if strings.TrimSpace(override.TaskID) != "" {
 		log.Warn().Str("new", override.TaskID).Msg("overriding field TaskID")
@@ -903,7 +903,7 @@ func (fields ResultFields) merge(override ResultFields) ResultFields {
 	return result
 }
 
-func buildTargetRecordPayloads(records []TargetRecordInput, fields TargetFields) ([]map[string]any, error) {
+func buildTargetRecordPayloads(records []TaskRecordInput, fields TaskFields) ([]map[string]any, error) {
 	if strings.TrimSpace(fields.TaskID) == "" {
 		return nil, errors.New("feishu: TaskID column name is empty")
 	}
@@ -1103,7 +1103,7 @@ type BitableRow struct {
 	Fields   map[string]any
 }
 
-func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSize int, opts *TargetQueryOptions) ([]bitableRecord, error) {
+func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSize int, opts *TaskQueryOptions) ([]bitableRecord, error) {
 	if strings.TrimSpace(ref.AppToken) == "" {
 		return nil, errors.New("feishu: bitable app token is empty")
 	}
@@ -1187,22 +1187,22 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 	return all, nil
 }
 
-func decodeTargetRow(rec bitableRecord, fields TargetFields) (TargetRow, error) {
+func decodeTaskRow(rec bitableRecord, fields TaskFields) (TaskRow, error) {
 	if rec.Fields == nil {
-		return TargetRow{}, fmt.Errorf("record %s has no fields", rec.RecordID)
+		return TaskRow{}, fmt.Errorf("record %s has no fields", rec.RecordID)
 	}
 	taskID, err := bitableIntField(rec.Fields, fields.TaskID)
 	if err != nil {
-		return TargetRow{}, fmt.Errorf("record %s: %w", rec.RecordID, err)
+		return TaskRow{}, fmt.Errorf("record %s: %w", rec.RecordID, err)
 	}
 	status, err := bitableStringField(rec.Fields, fields.Status, true)
 	if err != nil {
-		return TargetRow{}, fmt.Errorf("record %s: %w", rec.RecordID, err)
+		return TaskRow{}, fmt.Errorf("record %s: %w", rec.RecordID, err)
 	}
 
 	targetDevice := strings.TrimSpace(bitableOptionalString(rec.Fields, fields.DeviceSerial))
 	dispatchedDevice := strings.TrimSpace(bitableOptionalString(rec.Fields, fields.DispatchedDevice))
-	row := TargetRow{
+	row := TaskRow{
 		RecordID:         rec.RecordID,
 		TaskID:           taskID,
 		Params:           bitableOptionalString(rec.Fields, fields.Params),

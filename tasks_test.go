@@ -57,9 +57,9 @@ func TestFetchFeishuTasksWithStrategyFiltersInvalidTasks(t *testing.T) {
 	past := timePtr(time.Date(2025, 11, 8, 23, 0, 0, 0, loc))
 
 	client := &stubTargetClient{
-		tables: []*feishusvc.TargetTable{
+		tables: []*feishusvc.TaskTable{
 			{
-				Rows: []feishusvc.TargetRow{
+				Rows: []feishusvc.TaskRow{
 					{TaskID: 1, Params: "foo", App: "com.app", Datetime: valid},
 					{TaskID: 2, Params: "bar", App: "com.app", Datetime: future},
 					{TaskID: 3, Params: "baz", App: "com.app", Datetime: past},
@@ -69,7 +69,7 @@ func TestFetchFeishuTasksWithStrategyFiltersInvalidTasks(t *testing.T) {
 		},
 	}
 
-	tasks, err := fetchFeishuTasksWithStrategy(ctx, client, "https://example.com/bitable/abc", feishusvc.DefaultTargetFields, "com.app", dayStart, dayEnd, now, []string{""}, 5, true)
+	tasks, err := fetchFeishuTasksWithStrategy(ctx, client, "https://example.com/bitable/abc", feishusvc.DefaultTaskFields, "com.app", dayStart, dayEnd, now, []string{""}, 5, true)
 	if err != nil {
 		t.Fatalf("fetchFeishuTasksWithStrategy returned error: %v", err)
 	}
@@ -95,9 +95,9 @@ func TestFetchFeishuTasksWithStrategyFallbackFiltersFutureTasks(t *testing.T) {
 	future := timePtr(time.Date(2025, 11, 9, 15, 0, 0, 0, loc))
 
 	client := &stubTargetClient{
-		tables: []*feishusvc.TargetTable{
+		tables: []*feishusvc.TaskTable{
 			{
-				Rows: []feishusvc.TargetRow{
+				Rows: []feishusvc.TaskRow{
 					{TaskID: 10, Params: "foo", App: "com.app", Datetime: valid},
 					{TaskID: 20, Params: "bar", App: "com.app", Datetime: future},
 				},
@@ -105,7 +105,7 @@ func TestFetchFeishuTasksWithStrategyFallbackFiltersFutureTasks(t *testing.T) {
 		},
 	}
 
-	tasks, err := fetchFeishuTasksWithStrategy(ctx, client, "https://example.com/bitable/def", feishusvc.DefaultTargetFields, "com.app", dayStart, dayEnd, now, []string{""}, 2, false)
+	tasks, err := fetchFeishuTasksWithStrategy(ctx, client, "https://example.com/bitable/def", feishusvc.DefaultTaskFields, "com.app", dayStart, dayEnd, now, []string{""}, 2, false)
 	if err != nil {
 		t.Fatalf("fetchFeishuTasksWithStrategy fallback returned error: %v", err)
 	}
@@ -115,24 +115,24 @@ func TestFetchFeishuTasksWithStrategyFallbackFiltersFutureTasks(t *testing.T) {
 }
 
 type stubTargetClient struct {
-	tables []*feishusvc.TargetTable
+	tables []*feishusvc.TaskTable
 	index  int
 }
 
-func (s *stubTargetClient) FetchTargetTableWithOptions(ctx context.Context, rawURL string, override *feishusvc.TargetFields, opts *feishusvc.TargetQueryOptions) (*feishusvc.TargetTable, error) {
+func (s *stubTargetClient) FetchTaskTableWithOptions(ctx context.Context, rawURL string, override *feishusvc.TaskFields, opts *feishusvc.TaskQueryOptions) (*feishusvc.TaskTable, error) {
 	if s.index >= len(s.tables) {
-		return &feishusvc.TargetTable{}, nil
+		return &feishusvc.TaskTable{}, nil
 	}
 	tbl := s.tables[s.index]
 	s.index++
 	return tbl, nil
 }
 
-func (s *stubTargetClient) UpdateTargetStatus(ctx context.Context, table *feishusvc.TargetTable, taskID int64, newStatus string) error {
+func (s *stubTargetClient) UpdateTaskStatus(ctx context.Context, table *feishusvc.TaskTable, taskID int64, newStatus string) error {
 	return nil
 }
 
-func (s *stubTargetClient) UpdateTargetFields(ctx context.Context, table *feishusvc.TargetTable, taskID int64, fields map[string]any) error {
+func (s *stubTargetClient) UpdateTaskFields(ctx context.Context, table *feishusvc.TaskTable, taskID int64, fields map[string]any) error {
 	return nil
 }
 
@@ -146,11 +146,11 @@ func TestFetchTodayPendingFeishuTasksFillsWithFallback(t *testing.T) {
 	loc := time.FixedZone("UTC+8", 8*3600)
 	now := time.Date(2025, 11, 9, 10, 0, 0, 0, loc)
 	client := &filterAwareTargetClient{
-		withDatetimeRows: []feishusvc.TargetRow{
+		withDatetimeRows: []feishusvc.TaskRow{
 			{TaskID: 1, Params: "A", App: "com.app", Datetime: timePtr(time.Date(2025, 11, 9, 8, 0, 0, 0, loc))},
 			{TaskID: 2, Params: "B", App: "com.app", Datetime: timePtr(time.Date(2025, 11, 9, 9, 0, 0, 0, loc))},
 		},
-		fallbackRows: []feishusvc.TargetRow{
+		fallbackRows: []feishusvc.TaskRow{
 			{TaskID: 2, Params: "B-duplicate", App: "com.app"},
 			{TaskID: 3, Params: "C", App: "com.app"},
 			{TaskID: 4, Params: "D", App: "com.app"},
@@ -173,10 +173,10 @@ func TestFetchTodayPendingFeishuTasksSkipsFallbackWhenSufficient(t *testing.T) {
 	ctx := context.Background()
 	loc := time.FixedZone("UTC+8", 8*3600)
 	now := time.Date(2025, 11, 9, 10, 0, 0, 0, loc)
-	withDatetime := make([]feishusvc.TargetRow, 0, 6)
+	withDatetime := make([]feishusvc.TaskRow, 0, 6)
 	for i := 0; i < 6; i++ {
 		hour := 4 + i
-		withDatetime = append(withDatetime, feishusvc.TargetRow{
+		withDatetime = append(withDatetime, feishusvc.TaskRow{
 			TaskID:   int64(10 + i),
 			Params:   fmt.Sprintf("task-%d", 10+i),
 			App:      "com.app",
@@ -185,7 +185,7 @@ func TestFetchTodayPendingFeishuTasksSkipsFallbackWhenSufficient(t *testing.T) {
 	}
 	client := &filterAwareTargetClient{
 		withDatetimeRows: withDatetime,
-		fallbackRows: []feishusvc.TargetRow{
+		fallbackRows: []feishusvc.TaskRow{
 			{TaskID: 99, Params: "Z", App: "com.app"},
 		},
 	}
@@ -201,28 +201,28 @@ func TestFetchTodayPendingFeishuTasksSkipsFallbackWhenSufficient(t *testing.T) {
 }
 
 type filterAwareTargetClient struct {
-	withDatetimeRows []feishusvc.TargetRow
-	fallbackRows     []feishusvc.TargetRow
+	withDatetimeRows []feishusvc.TaskRow
+	fallbackRows     []feishusvc.TaskRow
 }
 
-func (f *filterAwareTargetClient) FetchTargetTableWithOptions(ctx context.Context, rawURL string, override *feishusvc.TargetFields, opts *feishusvc.TargetQueryOptions) (*feishusvc.TargetTable, error) {
+func (f *filterAwareTargetClient) FetchTaskTableWithOptions(ctx context.Context, rawURL string, override *feishusvc.TaskFields, opts *feishusvc.TaskQueryOptions) (*feishusvc.TaskTable, error) {
 	rows := f.fallbackRows
 	if strings.Contains(opts.Filter, "[Datetime]") {
 		rows = f.withDatetimeRows
 	}
-	clone := make([]feishusvc.TargetRow, len(rows))
+	clone := make([]feishusvc.TaskRow, len(rows))
 	copy(clone, rows)
-	return &feishusvc.TargetTable{
+	return &feishusvc.TaskTable{
 		Rows:   clone,
-		Fields: feishusvc.DefaultTargetFields,
+		Fields: feishusvc.DefaultTaskFields,
 	}, nil
 }
 
-func (f *filterAwareTargetClient) UpdateTargetStatus(ctx context.Context, table *feishusvc.TargetTable, taskID int64, newStatus string) error {
+func (f *filterAwareTargetClient) UpdateTaskStatus(ctx context.Context, table *feishusvc.TaskTable, taskID int64, newStatus string) error {
 	return nil
 }
 
-func (f *filterAwareTargetClient) UpdateTargetFields(ctx context.Context, table *feishusvc.TargetTable, taskID int64, fields map[string]any) error {
+func (f *filterAwareTargetClient) UpdateTaskFields(ctx context.Context, table *feishusvc.TaskTable, taskID int64, fields map[string]any) error {
 	return nil
 }
 
@@ -253,15 +253,15 @@ type recordingTargetClient struct {
 	updates []map[string]any
 }
 
-func (r *recordingTargetClient) FetchTargetTableWithOptions(ctx context.Context, rawURL string, override *feishusvc.TargetFields, opts *feishusvc.TargetQueryOptions) (*feishusvc.TargetTable, error) {
+func (r *recordingTargetClient) FetchTaskTableWithOptions(ctx context.Context, rawURL string, override *feishusvc.TaskFields, opts *feishusvc.TaskQueryOptions) (*feishusvc.TaskTable, error) {
 	return nil, nil
 }
 
-func (r *recordingTargetClient) UpdateTargetStatus(ctx context.Context, table *feishusvc.TargetTable, taskID int64, newStatus string) error {
+func (r *recordingTargetClient) UpdateTaskStatus(ctx context.Context, table *feishusvc.TaskTable, taskID int64, newStatus string) error {
 	return nil
 }
 
-func (r *recordingTargetClient) UpdateTargetFields(ctx context.Context, table *feishusvc.TargetTable, taskID int64, fields map[string]any) error {
+func (r *recordingTargetClient) UpdateTaskFields(ctx context.Context, table *feishusvc.TaskTable, taskID int64, fields map[string]any) error {
 	cp := make(map[string]any, len(fields))
 	for k, v := range fields {
 		cp[k] = v
@@ -272,9 +272,9 @@ func (r *recordingTargetClient) UpdateTargetFields(ctx context.Context, table *f
 
 func TestUpdateFeishuTaskStatusesAssignsDispatchedDevice(t *testing.T) {
 	client := &recordingTargetClient{}
-	table := &feishusvc.TargetTable{
+	table := &feishusvc.TaskTable{
 		Ref:    feishusvc.BitableRef{AppToken: "app", TableID: "tbl"},
-		Fields: feishusvc.DefaultTargetFields,
+		Fields: feishusvc.DefaultTaskFields,
 	}
 	task := &FeishuTask{
 		TaskID: 1,
@@ -291,9 +291,9 @@ func TestUpdateFeishuTaskStatusesAssignsDispatchedDevice(t *testing.T) {
 	if len(client.updates) != 1 {
 		t.Fatalf("expected 1 update, got %d", len(client.updates))
 	}
-	statusField := feishusvc.DefaultTargetFields.Status
-	serialField := feishusvc.DefaultTargetFields.DispatchedDevice
-	dispatchedField := feishusvc.DefaultTargetFields.DispatchedAt
+	statusField := feishusvc.DefaultTaskFields.Status
+	serialField := feishusvc.DefaultTaskFields.DispatchedDevice
+	dispatchedField := feishusvc.DefaultTaskFields.DispatchedAt
 	update := client.updates[0]
 	if got := update[statusField]; got != "dispatched" {
 		t.Fatalf("expected status field=%s got=%v", statusField, got)
@@ -317,9 +317,9 @@ func TestUpdateFeishuTaskStatusesAssignsDispatchedDevice(t *testing.T) {
 
 func TestUpdateFeishuTaskStatusesAssignsElapsedSeconds(t *testing.T) {
 	client := &recordingTargetClient{}
-	table := &feishusvc.TargetTable{
+	table := &feishusvc.TaskTable{
 		Ref:    feishusvc.BitableRef{AppToken: "app", TableID: "tbl"},
-		Fields: feishusvc.DefaultTargetFields,
+		Fields: feishusvc.DefaultTaskFields,
 	}
 	dispatchedAt := time.Date(2025, 11, 10, 9, 0, 0, 0, time.UTC)
 	task := &FeishuTask{
@@ -337,7 +337,7 @@ func TestUpdateFeishuTaskStatusesAssignsElapsedSeconds(t *testing.T) {
 	if len(client.updates) != 1 {
 		t.Fatalf("expected 1 update, got %d", len(client.updates))
 	}
-	elapsedField := feishusvc.DefaultTargetFields.ElapsedSeconds
+	elapsedField := feishusvc.DefaultTaskFields.ElapsedSeconds
 	update := client.updates[0]
 	if got := update[elapsedField]; got == nil {
 		t.Fatalf("expected elapsed seconds field=%s to be set", elapsedField)
@@ -350,7 +350,7 @@ func TestUpdateFeishuTaskStatusesAssignsElapsedSeconds(t *testing.T) {
 func TestUpdateStatusesSkipsDuplicateStatusWrites(t *testing.T) {
 	client := &FeishuTaskClient{}
 	recorder := &recordingTargetClient{}
-	table := &feishusvc.TargetTable{Fields: feishusvc.DefaultTargetFields}
+	table := &feishusvc.TaskTable{Fields: feishusvc.DefaultTaskFields}
 	source := &feishuTaskSource{client: recorder, table: table}
 	tasks := []*Task{
 		{Payload: &FeishuTask{TaskID: 11, Status: feishusvc.StatusSuccess, source: source}},
@@ -373,7 +373,7 @@ func TestUpdateStatusesSkipsDuplicateStatusWrites(t *testing.T) {
 func TestUpdateStatusesStillUpdatesPendingTasks(t *testing.T) {
 	client := &FeishuTaskClient{}
 	recorder := &recordingTargetClient{}
-	table := &feishusvc.TargetTable{Fields: feishusvc.DefaultTargetFields}
+	table := &feishusvc.TaskTable{Fields: feishusvc.DefaultTaskFields}
 	source := &feishuTaskSource{client: recorder, table: table}
 	task := &FeishuTask{TaskID: 21, Status: feishusvc.StatusPending, source: source}
 	updated, err := client.updateStatuses(context.Background(), []*Task{{Payload: task}}, feishusvc.StatusSuccess, "device-1")
