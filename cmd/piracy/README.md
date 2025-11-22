@@ -22,7 +22,7 @@ go run ./cmd/piracy detect \
 
 Available flags:
 - `--result-filter`: Filter for result table rows
-- `--target-filter`: (currently unused) Filter for target table rows
+- `--target-filter`: (currently unused) Filter for task table rows
 - `--drama-filter`: Filter for drama table rows
 - `--output-csv`: Optional path to persist suspicious combos as CSV
 - `--use-files`: Toggle local-file mode instead of Feishu Bitables
@@ -32,7 +32,7 @@ Available flags:
 
 ### report
 - Runs detection for the supplied drama params
-- Writes suspicious matches into the Feishu target table via `pkg/piracy`
+- Writes suspicious matches into the Feishu task table via `pkg/piracy`
 
 ```bash
 go run ./cmd/piracy report \

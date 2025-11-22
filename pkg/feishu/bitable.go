@@ -200,7 +200,7 @@ type TaskTable struct {
 	taskIndex map[int64]string
 }
 
-// TaskQueryOptions allows configuring additional filters when fetching target tables.
+// TaskQueryOptions allows configuring additional filters when fetching task tables.
 type TaskQueryOptions struct {
 	ViewID string
 	Filter string
@@ -414,7 +414,7 @@ func ParseBitableURL(raw string) (ref BitableRef, err error) {
 	return ref, nil
 }
 
-// FetchTaskTable downloads and decodes rows from the configured target table.
+// FetchTaskTable downloads and decodes rows from the configured task table.
 func (c *Client) FetchTaskTable(ctx context.Context, rawURL string, override *TaskFields) (*TaskTable, error) {
 	return c.FetchTaskTableWithOptions(ctx, rawURL, override, nil)
 }
@@ -545,7 +545,7 @@ func (c *Client) UpdateTaskFields(ctx context.Context, table *TaskTable, taskID 
 		return errors.New("feishu: client is nil")
 	}
 	if table == nil {
-		return errors.New("feishu: target table is nil")
+		return errors.New("feishu: task table is nil")
 	}
 	if len(fields) == 0 {
 		return errors.New("feishu: no fields provided for update")
@@ -663,7 +663,7 @@ func (c *Client) CreateTaskRecords(ctx context.Context, rawURL string, records [
 	if override != nil {
 		fields = fields.merge(*override)
 	}
-	payloads, err := buildTargetRecordPayloads(records, fields)
+	payloads, err := buildTaskRecordPayloads(records, fields)
 	if err != nil {
 		return nil, err
 	}
@@ -903,7 +903,7 @@ func (fields ResultFields) merge(override ResultFields) ResultFields {
 	return result
 }
 
-func buildTargetRecordPayloads(records []TaskRecordInput, fields TaskFields) ([]map[string]any, error) {
+func buildTaskRecordPayloads(records []TaskRecordInput, fields TaskFields) ([]map[string]any, error) {
 	if strings.TrimSpace(fields.TaskID) == "" {
 		return nil, errors.New("feishu: TaskID column name is empty")
 	}

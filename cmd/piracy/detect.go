@@ -129,7 +129,7 @@ func pickOrEnv(flagVal, envKey string) string {
 
 func printReport(report *piracy.Report) {
 	log.Info().
-		Int("target_rows", report.TaskRows).
+		Int("task_rows", report.TaskRows).
 		Int("result_rows", report.ResultRows).
 		Float64("threshold_percent", report.Threshold*100).
 		Int("suspicious_combos", len(report.Matches)).

@@ -23,7 +23,7 @@ func newWebhookCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "webhook-worker",
-		Short: "Retry pending/failed summary webhooks stored in the target bitable",
+		Short: "Retry pending/failed summary webhooks stored in the task bitable",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := firstNonEmpty(flagTargetURL, os.Getenv(feishu.EnvTaskBitableURL))
 			if strings.TrimSpace(target) == "" {
@@ -36,7 +36,7 @@ func newWebhookCmd() *cobra.Command {
 			app := firstNonEmpty(flagApp, os.Getenv("BUNDLE_ID"))
 
 			cfg := piracy.WebhookWorkerConfig{
-				TargetBitableURL:  strings.TrimSpace(target),
+				TaskBitableURL:    strings.TrimSpace(target),
 				SummaryWebhookURL: strings.TrimSpace(summary),
 				App:               strings.TrimSpace(app),
 				PollInterval:      flagPoll,
@@ -47,7 +47,7 @@ func newWebhookCmd() *cobra.Command {
 				return err
 			}
 			log.Info().
-				Str("target_bitable", cfg.TargetBitableURL).
+				Str("task_bitable", cfg.TaskBitableURL).
 				Str("webhook_url", cfg.SummaryWebhookURL).
 				Str("app_filter", cfg.App).
 				Dur("poll_interval", cfg.PollInterval).
@@ -57,7 +57,7 @@ func newWebhookCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&flagTargetURL, "target-url", "", "Feishu target bitable URL (default from TASK_BITABLE_URL)")
+	cmd.Flags().StringVar(&flagTargetURL, "target-url", "", "Feishu task bitable URL (default from TASK_BITABLE_URL)")
 	cmd.Flags().StringVar(&flagWebhookURL, "webhook-url", "", "Summary webhook URL (default from SUMMARY_WEBHOOK_URL)")
 	cmd.Flags().StringVar(&flagApp, "app", "", "Optional App filter (defaults to BUNDLE_ID env)")
 	cmd.Flags().DurationVar(&flagPoll, "poll-interval", 30*time.Second, "Interval between webhook scans")

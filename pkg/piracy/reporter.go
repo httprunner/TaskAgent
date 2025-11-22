@@ -10,11 +10,11 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Reporter handles piracy detection and reporting to target table
+// Reporter handles piracy detection and reporting to task table
 type Reporter struct {
 	resultTableURL string // Result table containing video data
 	dramaTableURL  string // Original drama table containing drama durations
-	targetTableURL string // Target table where piracy reports are written
+	taskTableURL   string // Task table where piracy reports are written
 	threshold      float64
 	config         Config
 }
@@ -24,7 +24,7 @@ func NewReporter() *Reporter {
 	// Get table URLs from environment variables
 	resultTableURL := os.Getenv("RESULT_BITABLE_URL") // Video data
 	dramaTableURL := os.Getenv("DRAMA_BITABLE_URL")   // Drama durations
-	targetTableURL := os.Getenv("TASK_BITABLE_URL") // Where to write reports
+	taskTableURL := os.Getenv("TASK_BITABLE_URL")     // Where to write reports
 
 	cfg := Config{}
 	cfg.ApplyDefaults()
@@ -39,14 +39,14 @@ func NewReporter() *Reporter {
 	if dramaTableURL == "" {
 		log.Warn().Msg("Drama table URL not configured, piracy detection will be skipped")
 	}
-	if targetTableURL == "" {
-		log.Warn().Msg("Target table URL not configured, piracy detection will be skipped")
+	if taskTableURL == "" {
+		log.Warn().Msg("Task table URL not configured, piracy detection will be skipped")
 	}
 
 	return &Reporter{
 		resultTableURL: resultTableURL,
 		dramaTableURL:  dramaTableURL,
-		targetTableURL: targetTableURL,
+		taskTableURL:   taskTableURL,
 		threshold:      threshold,
 		config:         cfg,
 	}
@@ -54,7 +54,7 @@ func NewReporter() *Reporter {
 
 // IsConfigured returns true if all required table URLs are configured
 func (pr *Reporter) IsConfigured() bool {
-	return pr.resultTableURL != "" && pr.dramaTableURL != "" && pr.targetTableURL != ""
+	return pr.resultTableURL != "" && pr.dramaTableURL != "" && pr.taskTableURL != ""
 }
 
 // Config returns a copy of the reporter configuration with defaults applied.
@@ -93,7 +93,7 @@ func (pr *Reporter) ReportPiracyForParams(ctx context.Context, app string, param
 	}
 
 	log.Info().
-		Int("target_rows", report.TaskRows).
+		Int("task_rows", report.TaskRows).
 		Int("result_rows", report.ResultRows).
 		Int("suspicious_combos", len(report.Matches)).
 		Int("missing_params", len(report.MissingParams)).
@@ -167,7 +167,7 @@ func (pr *Reporter) detectWithFiltersInternal(ctx context.Context, paramsList []
 	return report, nil
 }
 
-// ReportMatches writes suspicious combos to the target table if any exceed the threshold.
+// ReportMatches writes suspicious combos to the task table if any exceed the threshold.
 func (pr *Reporter) ReportMatches(ctx context.Context, app string, matches []Match) error {
 	if len(matches) == 0 {
 		log.Info().Msg("No suspicious combos found, nothing to report")
@@ -176,7 +176,7 @@ func (pr *Reporter) ReportMatches(ctx context.Context, app string, matches []Mat
 
 	log.Info().
 		Int("match_count", len(matches)).
-		Msg("Writing piracy matches to target table")
+		Msg("Writing piracy matches to task table")
 
 	client, err := feishu.NewClientFromEnv()
 	if err != nil {
@@ -207,17 +207,17 @@ func (pr *Reporter) ReportMatches(ctx context.Context, app string, matches []Mat
 
 	log.Info().
 		Int("record_count", len(records)).
-		Str("table_url", pr.targetTableURL).
-		Msg("Writing records to target table")
+		Str("table_url", pr.taskTableURL).
+		Msg("Writing records to task table")
 
-	recordIDs, err := client.CreateTaskRecords(ctx, pr.targetTableURL, records, nil)
+	recordIDs, err := client.CreateTaskRecords(ctx, pr.taskTableURL, records, nil)
 	if err != nil {
 		return fmt.Errorf("failed to write piracy report records: %w", err)
 	}
 
 	log.Info().
 		Int("record_count", len(recordIDs)).
-		Msg("Successfully wrote piracy report records to target table")
+		Msg("Successfully wrote piracy report records to task table")
 	return nil
 }
 

@@ -14,7 +14,7 @@ import (
 
 // WebhookWorkerConfig captures the knobs for the standalone webhook worker.
 type WebhookWorkerConfig struct {
-	TargetBitableURL  string
+	TaskBitableURL    string
 	SummaryWebhookURL string
 	App               string
 	PollInterval      time.Duration
@@ -34,9 +34,9 @@ type WebhookWorker struct {
 
 // NewWebhookWorker builds a webhook worker from the provided configuration.
 func NewWebhookWorker(cfg WebhookWorkerConfig) (*WebhookWorker, error) {
-	trimmedURL := strings.TrimSpace(cfg.TargetBitableURL)
+	trimmedURL := strings.TrimSpace(cfg.TaskBitableURL)
 	if trimmedURL == "" {
-		return nil, errors.New("target bitable url is required for webhook worker")
+		return nil, errors.New("task bitable url is required for webhook worker")
 	}
 	webhookURL := strings.TrimSpace(cfg.SummaryWebhookURL)
 	if webhookURL == "" {
@@ -225,7 +225,7 @@ func (w *WebhookWorker) updateWebhookState(ctx context.Context, table *feishu.Ta
 	}
 	field := strings.TrimSpace(table.Fields.Webhook)
 	if field == "" {
-		return errors.New("webhook column is not configured in target table")
+		return errors.New("webhook column is not configured in task table")
 	}
 	var errs []string
 	payload := map[string]any{field: state}

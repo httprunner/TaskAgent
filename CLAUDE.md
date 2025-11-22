@@ -120,7 +120,7 @@ RESULT_FIELD_DURATION=ItemDuration
 THRESHOLD=0.5
 ```
 
-**Note:** All configuration fields use table-specific prefixes for clarity. Use `RESULT_*` for result table, `TARGET_*` for target table, and `DRAMA_*` for drama table fields.
+**Note:** All configuration fields use table-specific prefixes for clarity. Use `RESULT_*` for result table, `TASK_*` for task table, and `DRAMA_*` for drama table fields.
 
 ## Testing Guidelines
 
@@ -146,7 +146,7 @@ THRESHOLD=0.5
 
 ### Configuration Management
 - Environment variables loaded automatically from `.env` file
-- All fields use table-specific prefixes (RESULT_*, TARGET_*, DRAMA_*)
+- All fields use table-specific prefixes (RESULT_*, TASK_*, DRAMA_*)
 - Use `feishu.DefaultResultFields` for standard field mappings
 - Custom field mappings supported via environment variables
 

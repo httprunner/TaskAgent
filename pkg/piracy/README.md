@@ -6,7 +6,7 @@ This package provides comprehensive piracy detection and reporting functionality
 
 The `pkg/piracy` package merges the functionality of two packages:
 - **Core Detection Engine**: Analyzes video data to identify potential piracy by comparing user video durations against original drama durations
-- **Reporter**: High-level wrapper that performs detection and automatically reports findings to target tables
+- **Reporter**: High-level wrapper that performs detection and automatically reports findings to task tables
 
 ## Features
 
@@ -202,7 +202,7 @@ The package uses sensible defaults based on Feishu's standard field names:
 
 - **Result Table**: `Params`, `UserID`, `ItemDuration`
 - **Drama Table**: `Params`, `TotalDuration`
-- **Target Table**: Fields for `App`, `Scene`, `Params`, `User`, `Status`
+- **Task Table**: Fields for `App`, `Scene`, `Params`, `User`, `Status`
 
 ## Detection Logic
 

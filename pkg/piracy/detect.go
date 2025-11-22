@@ -53,11 +53,11 @@ func (c *Config) ApplyDefaults() {
 			c.DurationField = feishu.DefaultResultFields.ItemDuration
 		}
 	}
-	if strings.TrimSpace(c.TargetParamsField) == "" {
+	if strings.TrimSpace(c.TaskParamsField) == "" {
 		if targetParamsField := os.Getenv("TASK_FIELD_PARAMS"); targetParamsField != "" {
-			c.TargetParamsField = targetParamsField
+			c.TaskParamsField = targetParamsField
 		} else {
-			c.TargetParamsField = "Params"
+			c.TaskParamsField = "Params"
 		}
 	}
 	if strings.TrimSpace(c.DramaIDField) == "" {

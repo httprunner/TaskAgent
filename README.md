@@ -18,7 +18,7 @@ TaskAgent is a Go 1.24 module that keeps Android capture devices busy by polling
 ## Requirements
 - Go 1.24 or newer (`go env GOVERSION` to verify).
 - A Feishu custom app with API access plus the following environment variables: `FEISHU_APP_ID`, `FEISHU_APP_SECRET`, optional `FEISHU_TENANT_KEY`, `FEISHU_BASE_URL`, and `FEISHU_LIVE_TEST` (toggles integration tests).
-- A Feishu target Bitable that stores pending tasks (surface its link via `TASK_BITABLE_URL` or inject it directly into `pool.Config.BitableURL`).
+- A Feishu task Bitable that stores pending tasks (surface its link via `TASK_BITABLE_URL` or inject it directly into `pool.Config.BitableURL`).
 - Optional observability tables: `DEVICE_INFO_BITABLE_URL` (设备信息表) and `DEVICE_TASK_BITABLE_URL` (设备任务表) for recording device heartbeat/dispatch snapshots. Leave empty to disable recording. Column names are customizable via `DEVICE_INFO_FIELD_*` / `DEVICE_TASK_FIELD_*`; defaults match the sample schemas below.
 - Result write throttling: Feishu结果表写入内置全局限速器，默认 1 RPS（可通过 `FEISHU_REPORT_RPS` 配置浮点值），避免多设备并发写表触发频控。
 - Access to the result Bitables you plan to push to, if any.

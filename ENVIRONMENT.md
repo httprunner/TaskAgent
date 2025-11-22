@@ -20,7 +20,7 @@ defaults and where they take effect.
 | --- | --- | --- | --- |
 | `RESULT_BITABLE_URL` | Yes for Feishu reporting | – | Capture-result table URL. Consumed by `pkg/piracy` reporter/detector, webhook summaries (Feishu mode), and `pkg/storage`'s Feishu sink. |
 | `DRAMA_BITABLE_URL` | Yes when reading drama metadata from Feishu | – | Drama catalog table URL. Used by `pkg/piracy` detection/reporting and webhook summaries (Feishu mode). |
-| `TASK_BITABLE_URL` | Yes for device scheduling & piracy reporting | – | Feishu target table containing pending tasks. Required by the default `pool.DevicePoolAgent` (via `FeishuTaskClient`) and by `piracy.Reporter` when writing alerts. |
+| `TASK_BITABLE_URL` | Yes for device scheduling & piracy reporting | – | Feishu task table containing pending tasks. Required by the default `pool.DevicePoolAgent` (via `FeishuTaskClient`) and by `piracy.Reporter` when writing alerts. |
 
 ## Field Mapping & Thresholds
 
@@ -34,7 +34,7 @@ names.
 | `RESULT_FIELD_USERID` | `UserID` | Result-table column containing the uploader ID. |
 | `RESULT_FIELD_USERNAME` | `UserName` | Result-table column storing uploader name. |
 | `RESULT_FIELD_DURATION` | `ItemDuration` | Result-table duration column (seconds). |
-| `TASK_FIELD_PARAMS` | `Params` | Field name inside the target table for drama params. |
+| `TASK_FIELD_PARAMS` | `Params` | Field name inside the task table for drama params. |
 | `DRAMA_FIELD_ID` | `短剧 ID` (template; piracy detection falls back to `DramaID` if unset) | Drama table column that stores the drama identifier. |
 | `DRAMA_FIELD_NAME` | `短剧名称` | Drama table column for short-drama names (used by webhook summaries and filters). |
 | `DRAMA_FIELD_DURATION` | `全剧时长（秒）` | Drama table column for full duration (seconds). |

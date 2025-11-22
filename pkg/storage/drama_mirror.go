@@ -87,7 +87,7 @@ func newDramaDetailStore() (*dramaDetailStore, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "open sqlite database for drama catalog failed")
 	}
-	if err := configureTargetSQLite(db); err != nil {
+	if err := configureTaskSQLite(db); err != nil {
 		db.Close()
 		return nil, err
 	}

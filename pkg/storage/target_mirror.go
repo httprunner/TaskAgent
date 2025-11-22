@@ -11,11 +11,11 @@ import (
 )
 
 const (
-	captureTargetsTable   = "capture_targets"
+	captureTasksTable     = "capture_tasks"
 	targetUpdatedAtColumn = "updated_at"
 )
 
-// TaskStatus contains the columns mirrored into the local capture_targets table.
+// TaskStatus contains the columns mirrored into the local capture_tasks table.
 type TaskStatus struct {
 	TaskID           int64
 	Params           string
@@ -39,7 +39,7 @@ type TaskStatus struct {
 	ElapsedSeconds   int64
 }
 
-// TaskMirror keeps Feishu target rows synchronized inside SQLite.
+// TaskMirror keeps Feishu task rows synchronized inside SQLite.
 type TaskMirror struct {
 	db      *sql.DB
 	stmt    *sql.Stmt
@@ -48,7 +48,7 @@ type TaskMirror struct {
 }
 
 // NewTaskMirror opens the shared SQLite database (ResolveDatabasePath) and
-// ensures the capture_targets table exists.
+// ensures the capture_tasks table exists.
 func NewTaskMirror() (*TaskMirror, error) {
 	path, err := ResolveDatabasePath()
 	if err != nil {
@@ -58,17 +58,17 @@ func NewTaskMirror() (*TaskMirror, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "open sqlite database for capture targets failed")
 	}
-	if err := configureTargetSQLite(db); err != nil {
+	if err := configureTaskSQLite(db); err != nil {
 		db.Close()
 		return nil, err
 	}
 	fields := feishu.DefaultTaskFields
-	columns := buildTargetColumnOrder(fields)
-	if err := ensureTargetSchema(db, captureTargetsTable, fields, columns); err != nil {
+	columns := buildTaskColumnOrder(fields)
+	if err := ensureTaskSchema(db, captureTasksTable, fields, columns); err != nil {
 		db.Close()
 		return nil, err
 	}
-	stmt, err := prepareTargetUpsert(db, captureTargetsTable, fields, columns)
+	stmt, err := prepareTaskUpsert(db, captureTasksTable, fields, columns)
 	if err != nil {
 		db.Close()
 		return nil, err
@@ -76,7 +76,7 @@ func NewTaskMirror() (*TaskMirror, error) {
 	return &TaskMirror{db: db, stmt: stmt, fields: fields, columns: columns}, nil
 }
 
-func configureTargetSQLite(db *sql.DB) error {
+func configureTaskSQLite(db *sql.DB) error {
 	pragmas := []string{
 		"PRAGMA journal_mode=WAL;",
 		"PRAGMA synchronous=NORMAL;",
@@ -92,7 +92,7 @@ func configureTargetSQLite(db *sql.DB) error {
 	return nil
 }
 
-func buildTargetColumnOrder(fields feishu.TaskFields) []string {
+func buildTaskColumnOrder(fields feishu.TaskFields) []string {
 	return []string{
 		fields.TaskID,
 		fields.Params,
@@ -113,7 +113,7 @@ func buildTargetColumnOrder(fields feishu.TaskFields) []string {
 	}
 }
 
-func ensureTargetSchema(db *sql.DB, table string, fields feishu.TaskFields, columns []string) error {
+func ensureTaskSchema(db *sql.DB, table string, fields feishu.TaskFields, columns []string) error {
 	defs := []string{
 		fmt.Sprintf("%s INTEGER PRIMARY KEY", quoteIdent(fields.TaskID)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.Params)),
@@ -160,7 +160,7 @@ func ensureTargetSchema(db *sql.DB, table string, fields feishu.TaskFields, colu
 	return nil
 }
 
-func prepareTargetUpsert(db *sql.DB, table string, fields feishu.TaskFields, columns []string) (*sql.Stmt, error) {
+func prepareTaskUpsert(db *sql.DB, table string, fields feishu.TaskFields, columns []string) (*sql.Stmt, error) {
 	quotedCols := make([]string, len(columns))
 	placeholders := make([]string, len(columns))
 	for i, col := range columns {

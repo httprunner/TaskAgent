@@ -188,7 +188,7 @@ func (c *FeishuTaskClient) UpdateTaskExtras(ctx context.Context, updates []TaskE
 	for source, subset := range grouped {
 		extraField := strings.TrimSpace(source.table.Fields.Extra)
 		if extraField == "" {
-			return errors.New("feishu: extra field is not configured in target table")
+			return errors.New("feishu: extra field is not configured in task table")
 		}
 		for _, upd := range subset {
 			fields := map[string]any{
@@ -235,7 +235,7 @@ func (c *FeishuTaskClient) UpdateTaskWebhooks(ctx context.Context, tasks []*Feis
 	for source, subset := range grouped {
 		field := strings.TrimSpace(source.table.Fields.Webhook)
 		if field == "" {
-			return errors.New("feishu: webhook field is not configured in target table")
+			return errors.New("feishu: webhook field is not configured in task table")
 		}
 		payload := map[string]any{field: trimmed}
 		for _, task := range subset {
@@ -489,7 +489,7 @@ func fetchFeishuTasksWithFilter(ctx context.Context, client targetTableClient, b
 	}
 	table, err := client.FetchTaskTableWithOptions(ctx, bitableURL, nil, opts)
 	if err != nil {
-		return nil, errors.Wrap(err, "fetch target table with options failed")
+		return nil, errors.Wrap(err, "fetch task table with options failed")
 	}
 	if table == nil || len(table.Rows) == 0 {
 		return nil, nil
@@ -725,12 +725,12 @@ func updateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 	for source, subset := range grouped {
 		statusField := strings.TrimSpace(source.table.Fields.Status)
 		if statusField == "" {
-			return errors.New("feishu: status field is not configured in target table")
+			return errors.New("feishu: status field is not configured in task table")
 		}
 		dispatchedField := strings.TrimSpace(source.table.Fields.DispatchedDevice)
 		updateSerial := deviceSerial != "" && dispatchedField != ""
 		if deviceSerial != "" && dispatchedField == "" {
-			log.Warn().Msg("feishu target table missing DispatchedDevice column; skip binding device serial")
+			log.Warn().Msg("feishu task table missing DispatchedDevice column; skip binding device serial")
 		}
 		dispatchedTimeField := strings.TrimSpace(source.table.Fields.DispatchedAt)
 		elapsedField := strings.TrimSpace(source.table.Fields.ElapsedSeconds)

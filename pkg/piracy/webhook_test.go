@@ -199,8 +199,8 @@ func TestSendSummaryWebhookFeishuLive(t *testing.T) {
 
 	opts := WebhookOptions{
 		App:         "com.smile.gifmaker",
-		Params:      "重生八三：从受气包到人生赢家",
-		UserID:      "3807656067",
+		Params:      "风风火火的她",
+		UserID:      "859398427",
 		WebhookURL:  server.URL,
 		Source:      WebhookSourceFeishu,
 		RecordLimit: 20,
