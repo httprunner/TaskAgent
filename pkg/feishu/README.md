@@ -30,7 +30,7 @@
 
 - **结果表字段**：使用 `RESULT_FIELD_*` 前缀（例如：`RESULT_FIELD_PARAMS`、`RESULT_FIELD_USERID`、`RESULT_FIELD_DURATION`）
 - **结果表限速**：全局串行限速，默认 1 RPS，可通过 `FEISHU_REPORT_RPS` 调整。
-- **目标表字段**：使用 `TARGET_FIELD_*` 前缀（例如：`TARGET_FIELD_PARAMS`）
+- **目标表字段**：使用 `TASK_FIELD_*` 前缀（例如：`TASK_FIELD_PARAMS`）
 - **剧单表字段**：使用 `DRAMA_FIELD_*` 前缀（例如：`DRAMA_FIELD_NAME`、`DRAMA_FIELD_DURATION`）
 - **设备信息表字段**：使用 `DEVICE_INFO_FIELD_*` 前缀（默认：DeviceSerial/OSType/OSVersion/IPLocation/IsRoot/ProviderUUID/AgentVersion/Status/LastSeenAt/LastError/Tags）
 
@@ -48,7 +48,7 @@ client, _ := feishu.NewClientFromEnv()
 ctx := context.Background()
 recordID, err := client.CreateTargetRecord(ctx, taskTableURL, feishu.TaskRecordInput{
     TaskID:  123,
-    Params:  `{"keyword":"jay"}`,        // 字段名可通过 TARGET_FIELD_PARAMS 环境变量自定义
+    Params:  `{"keyword":"jay"}`,        // 字段名可通过 TASK_FIELD_PARAMS 环境变量自定义
     App:     "netease",
     Scene:   "batch",
     Status:  "pending",

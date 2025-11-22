@@ -54,7 +54,7 @@ func (c *Config) ApplyDefaults() {
 		}
 	}
 	if strings.TrimSpace(c.TargetParamsField) == "" {
-		if targetParamsField := os.Getenv("TARGET_FIELD_PARAMS"); targetParamsField != "" {
+		if targetParamsField := os.Getenv("TASK_FIELD_PARAMS"); targetParamsField != "" {
 			c.TargetParamsField = targetParamsField
 		} else {
 			c.TargetParamsField = "Params"
@@ -344,7 +344,7 @@ func DetectCommon(contentRecords []ContentRecord, dramaRecords []DramaRecord, th
 	return &Report{
 		Matches:       matches,
 		ResultRows:    len(contentRecords),
-		TaskRows:    len(dramaRecords),
+		TaskRows:      len(dramaRecords),
 		MissingParams: missingParams,
 		Threshold:     threshold,
 	}

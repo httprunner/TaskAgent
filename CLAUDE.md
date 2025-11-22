@@ -108,7 +108,7 @@ DRAMA_FIELD_DURATION=全剧时长（秒）
 
 # Target collection table
 TASK_BITABLE_URL=https://bytedance.larkoffice.com/wiki/xxx
-TARGET_FIELD_PARAMS=Params
+TASK_FIELD_PARAMS=Params
 
 # Result table
 RESULT_BITABLE_URL=https://bytedance.larkoffice.com/wiki/xxx
