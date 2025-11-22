@@ -28,63 +28,72 @@ TaskAgent is a Go 1.24 module that keeps Android capture devices busy by polling
 ## Quick Start
 1. Clone the repository and install dependencies:
    ```bash
-   git clone git@github.com:httprunner/TaskAgent.git
-   cd TaskAgent
-   go mod download
+    git clone git@github.com:httprunner/TaskAgent.git
+    cd TaskAgent
+    go mod download
    ```
 2. Create a `.env` file (loaded by `godotenv`) and populate Feishu credentials plus Bitable URLs such as `TASK_BITABLE_URL`.
 3. Run tests to validate the setup:
    ```bash
-   go test ./...
-   # Run Feishu live tests only when you have real tables configured
-   FEISHU_LIVE_TEST=1 go test ./feishu -run Live
+    go test ./...
+    # Run Feishu live tests only when you have real tables configured
+    FEISHU_LIVE_TEST=1 go test ./feishu -run Live
    ```
 4. Embed the agent by implementing `pool.JobRunner` (import the module with an alias to match its package name):
    ```go
-   package main
+    package main
 
-   import (
-       "context"
-       "log"
-       "os"
-       "time"
+    import (
+        "context"
+        "log"
+        "os"
+        "time"
 
-       pool "github.com/httprunner/TaskAgent"
-       "github.com/httprunner/TaskAgent/pkg/feishu"
-   )
+        pool "github.com/httprunner/TaskAgent"
+        "github.com/httprunner/TaskAgent/pkg/feishu"
+    )
 
-   type MyRunner struct{}
+    type MyRunner struct{}
 
-   var _ pool.JobRunner = (*MyRunner)(nil)
+    var _ pool.JobRunner = (*MyRunner)(nil)
 
-   func (MyRunner) RunJob(ctx context.Context, req pool.JobRequest) error {
-       // Operate on req.DeviceSerial and req.Tasks.
-       return nil
-   }
+    func (MyRunner) RunJob(ctx context.Context, req pool.JobRequest) error {
+        // Operate on req.DeviceSerial and req.Tasks.
+        for _, task := range req.Tasks {
+            if req.Lifecycle != nil && req.Lifecycle.OnTaskStarted != nil {
+                req.Lifecycle.OnTaskStarted(task) // optional if you need custom side effects
+            }
+            // TODO: execute payload...
+            if req.Lifecycle != nil && req.Lifecycle.OnTaskResult != nil {
+                req.Lifecycle.OnTaskResult(task, nil)
+            }
+        }
+        return nil
+    }
 
-   func main() {
-       cfg := pool.Config{
-           PollInterval:   30 * time.Second,
-           MaxTasksPerJob: 2,
-           BitableURL:     os.Getenv(feishu.EnvTaskBitableURL),
-           DeviceRecorder: mustRecorder, // optional: write device info / job rows to Feishu
-           AgentVersion:   "v0.0.0",     // propagate to recorder rows
-       }
-       if cfg.BitableURL == "" {
-           log.Fatal("set TASK_BITABLE_URL before starting the pool agent")
-       }
+    func main() {
+        cfg := pool.Config{
+            PollInterval:   30 * time.Second,
+            MaxTasksPerJob: 2,
+            BitableURL:     os.Getenv(feishu.EnvTaskBitableURL),
+            DeviceRecorder: mustRecorder, // optional: write device info / job rows to Feishu
+            AgentVersion:   "v0.0.0",     // propagate to recorder rows
+        }
+        if cfg.BitableURL == "" {
+            log.Fatal("set TASK_BITABLE_URL before starting the pool agent")
+        }
 
-       runner := &MyRunner{}
-       agent, err := pool.NewDevicePoolAgent(cfg, runner)
-       if err != nil {
-           log.Fatal(err)
-       }
-       ctx, cancel := context.WithCancel(context.Background())
-       defer cancel()
-       if err := agent.Start(ctx, "capture-app"); err != nil {
-           log.Fatal(err)
-       }
-   }
+        runner := &MyRunner{}
+        agent, err := pool.NewDevicePoolAgent(cfg, runner)
+        if err != nil {
+            log.Fatal(err)
+        }
+        ctx, cancel := context.WithCancel(context.Background())
+        defer cancel()
+        if err := agent.Start(ctx, "capture-app"); err != nil {
+            log.Fatal(err)
+        }
+    }
    ```
    If you configure `DEVICE_BITABLE_URL` / `DEVICE_TASK_BITABLE_URL`, the pool will upsert device heartbeats (Status/LastSeenAt) and create one row per dispatch (JobID `${serial}-YYMMDDHHMM`, AssignedTasks, Start/End, State, ErrorMessage). Leave the URLs empty to skip recording.
    `MyRunner` must satisfy `pool.JobRunner` so the agent can call `RunJob` per device batch; decode the Feishu payload from `req.Tasks[n].Payload`. Pass the `app` argument that matches the Feishu target-table `App` column so the built-in `FeishuTaskClient` filters and updates the correct rows (statuses transition through `dispatched`, `success`, and `failed`).
