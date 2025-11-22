@@ -107,7 +107,7 @@ DRAMA_FIELD_NAME=短剧名称
 DRAMA_FIELD_DURATION=全剧时长（秒）
 
 # Target collection table
-TARGET_BITABLE_URL=https://bytedance.larkoffice.com/wiki/xxx
+TASK_BITABLE_URL=https://bytedance.larkoffice.com/wiki/xxx
 TARGET_FIELD_PARAMS=Params
 
 # Result table
@@ -140,7 +140,7 @@ THRESHOLD=0.5
 
 ### Feishu Integration
 - Use `feishu.NewClientFromEnv()` for API client creation
-- Bitable operations use `TargetFields`/`TargetRecordInput` for task tables
+- Bitable operations use `TaskFields`/`TaskRecordInput` for task tables
 - Result tables use `ResultFields`/`ResultRecordInput`
 - Always handle context cancellation properly
 

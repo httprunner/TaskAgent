@@ -44,7 +44,7 @@ func RunAuto(ctx context.Context, opts AutoOptions) (*AutoSummary, error) {
 
 	reporter := NewReporter()
 	if !reporter.IsConfigured() {
-		return nil, errors.New("reporter not configured. Please set RESULT_BITABLE_URL, DRAMA_BITABLE_URL, TARGET_BITABLE_URL")
+		return nil, errors.New("reporter not configured. Please set RESULT_BITABLE_URL, DRAMA_BITABLE_URL, TASK_BITABLE_URL")
 	}
 
 	cfg := reporter.Config()

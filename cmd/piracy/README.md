@@ -72,7 +72,7 @@ All table URLs, field names, and thresholds are configured through environment v
 ```bash
 RESULT_BITABLE_URL="https://example.larkoffice.com/wiki/..."
 DRAMA_BITABLE_URL="https://example.larkoffice.com/wiki/..."
-TARGET_BITABLE_URL="https://example.larkoffice.com/wiki/..."
+TASK_BITABLE_URL="https://example.larkoffice.com/wiki/..."
 FEISHU_APP_ID="cli_xxxxx"
 FEISHU_APP_SECRET="secret"
 THRESHOLD="0.5"

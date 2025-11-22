@@ -20,7 +20,7 @@ defaults and where they take effect.
 | --- | --- | --- | --- |
 | `RESULT_BITABLE_URL` | Yes for Feishu reporting | – | Capture-result table URL. Consumed by `pkg/piracy` reporter/detector, webhook summaries (Feishu mode), and `pkg/storage`'s Feishu sink. |
 | `DRAMA_BITABLE_URL` | Yes when reading drama metadata from Feishu | – | Drama catalog table URL. Used by `pkg/piracy` detection/reporting and webhook summaries (Feishu mode). |
-| `TARGET_BITABLE_URL` | Yes for device scheduling & piracy reporting | – | Feishu target table containing pending tasks. Required by the default `pool.DevicePoolAgent` (via `FeishuTaskClient`) and by `piracy.Reporter` when writing alerts. |
+| `TASK_BITABLE_URL` | Yes for device scheduling & piracy reporting | – | Feishu target table containing pending tasks. Required by the default `pool.DevicePoolAgent` (via `FeishuTaskClient`) and by `piracy.Reporter` when writing alerts. |
 
 ## Field Mapping & Thresholds
 

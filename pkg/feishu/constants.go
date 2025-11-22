@@ -3,9 +3,9 @@ package feishu
 // Shared constants for Feishu bitable integrations. Keep these in TaskAgent so
 // downstream agents can reference a single source of truth when wiring Feishu task workflows.
 const (
-	// EnvTargetBitableURL indicates where to pull Feishu target tasks from
+	// EnvTaskBitableURL indicates where to pull Feishu target tasks from
 	// when running against a bitable-backed queue.
-	EnvTargetBitableURL = "TARGET_BITABLE_URL"
+	EnvTaskBitableURL = "TASK_BITABLE_URL"
 	// EnvResultBitableURL indicates where to push Feishu result rows.
 	EnvResultBitableURL = "RESULT_BITABLE_URL"
 

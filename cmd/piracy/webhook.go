@@ -25,9 +25,9 @@ func newWebhookCmd() *cobra.Command {
 		Use:   "webhook-worker",
 		Short: "Retry pending/failed summary webhooks stored in the target bitable",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			target := firstNonEmpty(flagTargetURL, os.Getenv(feishu.EnvTargetBitableURL))
+			target := firstNonEmpty(flagTargetURL, os.Getenv(feishu.EnvTaskBitableURL))
 			if strings.TrimSpace(target) == "" {
-				return fmt.Errorf("--target-url or %s must be provided", feishu.EnvTargetBitableURL)
+				return fmt.Errorf("--target-url or %s must be provided", feishu.EnvTaskBitableURL)
 			}
 			summary := firstNonEmpty(flagWebhookURL, os.Getenv("SUMMARY_WEBHOOK_URL"))
 			if strings.TrimSpace(summary) == "" {
@@ -57,7 +57,7 @@ func newWebhookCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&flagTargetURL, "target-url", "", "Feishu target bitable URL (default from TARGET_BITABLE_URL)")
+	cmd.Flags().StringVar(&flagTargetURL, "target-url", "", "Feishu target bitable URL (default from TASK_BITABLE_URL)")
 	cmd.Flags().StringVar(&flagWebhookURL, "webhook-url", "", "Summary webhook URL (default from SUMMARY_WEBHOOK_URL)")
 	cmd.Flags().StringVar(&flagApp, "app", "", "Optional App filter (defaults to BUNDLE_ID env)")
 	cmd.Flags().DurationVar(&flagPoll, "poll-interval", 30*time.Second, "Interval between webhook scans")

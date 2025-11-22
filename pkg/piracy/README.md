@@ -178,7 +178,7 @@ FEISHU_APP_SECRET=xxxxxxxxxxxxxxxx
 # Table URLs
 RESULT_BITABLE_URL=https://example.feishu.cn/base/xxx  # Video data
 DRAMA_BITABLE_URL=https://example.feishu.cn/base/yyy   # Drama durations
-TARGET_BITABLE_URL=https://example.feishu.cn/base/zzz  # Where to write reports
+TASK_BITABLE_URL=https://example.feishu.cn/base/zzz  # Where to write reports
 
 # Optional field mappings (defaults shown)
 RESULT_FIELD_PARAMS=Params

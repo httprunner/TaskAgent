@@ -24,7 +24,7 @@ func NewReporter() *Reporter {
 	// Get table URLs from environment variables
 	resultTableURL := os.Getenv("RESULT_BITABLE_URL") // Video data
 	dramaTableURL := os.Getenv("DRAMA_BITABLE_URL")   // Drama durations
-	targetTableURL := os.Getenv("TARGET_BITABLE_URL") // Where to write reports
+	targetTableURL := os.Getenv("TASK_BITABLE_URL") // Where to write reports
 
 	cfg := Config{}
 	cfg.ApplyDefaults()

@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-TaskAgent is a Go 1.24 module centered on the `pool` package: `pool.go` and `tasks.go` orchestrate device polling, job dispatch, and Feishu task sync, while `pool_test.go` covers scheduler behavior. `feishu/` holds the API client plus Bitable helpers, and `providers/adb/` wraps httprunner `gadb` to list Android serials. Refer to `README.md` for a high-level architecture recap, and keep Feishu credentials + table links (`FEISHU_APP_ID`, `FEISHU_APP_SECRET`, optional `FEISHU_TENANT_KEY`, `FEISHU_BASE_URL`, `TARGET_BITABLE_URL`, optional `FEISHU_LIVE_TEST`) in `.env` so `godotenv` can load them for local runs.
+TaskAgent is a Go 1.24 module centered on the `pool` package: `pool.go` and `tasks.go` orchestrate device polling, job dispatch, and Feishu task sync, while `pool_test.go` covers scheduler behavior. `feishu/` holds the API client plus Bitable helpers, and `providers/adb/` wraps httprunner `gadb` to list Android serials. Refer to `README.md` for a high-level architecture recap, and keep Feishu credentials + table links (`FEISHU_APP_ID`, `FEISHU_APP_SECRET`, optional `FEISHU_TENANT_KEY`, `FEISHU_BASE_URL`, `TASK_BITABLE_URL`, optional `FEISHU_LIVE_TEST`) in `.env` so `godotenv` can load them for local runs.
 
 ## Build, Test, and Development Commands
 - `go fmt ./...` — canonical formatting before commits.
