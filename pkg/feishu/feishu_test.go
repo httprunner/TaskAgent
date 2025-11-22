@@ -392,7 +392,7 @@ func TestFetchTaskTableExampleMock(t *testing.T) {
 	t.Logf("decoded rows from example table (mock): %+v", table.Rows)
 }
 
-func TestCreateTargetRecords(t *testing.T) {
+func TestCreateTaskRecords(t *testing.T) {
 	const wikiResponse = `{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnCreateToken","obj_type":"bitable"}}}`
 	const batchCreateResponse = `{"code":0,"msg":"success","data":{"records":[{"record_id":"recAAA"},{"record_id":"recBBB"}]}}`
 
@@ -429,9 +429,9 @@ func TestCreateTargetRecords(t *testing.T) {
 		{TaskID: 0, Params: `{"foo":2}`, DatetimeRaw: "2024-10-02 08:00:00", Status: "queued"},
 	}
 	override := &TaskFields{Status: "biz_status"}
-	ids, err := client.CreateTargetRecords(ctx, liveWritableBitableURL, records, override)
+	ids, err := client.CreateTaskRecords(ctx, liveWritableBitableURL, records, override)
 	if err != nil {
-		t.Fatalf("CreateTargetRecords returned error: %v", err)
+		t.Fatalf("CreateTaskRecords returned error: %v", err)
 	}
 	if !wikiCalled || !createCalled {
 		t.Fatalf("expected wiki and batch create calls, got wiki=%v create=%v", wikiCalled, createCalled)
@@ -474,7 +474,7 @@ func TestCreateTargetRecords(t *testing.T) {
 	}
 }
 
-func TestCreateTargetRecordSingle(t *testing.T) {
+func TestCreateTaskRecordSingle(t *testing.T) {
 	const wikiResponse = `{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnSingle","obj_type":"bitable"}}}`
 	const createResponse = `{"code":0,"msg":"success","data":{"record":{"record_id":"recSingle"}}}`
 
@@ -506,9 +506,9 @@ func TestCreateTargetRecordSingle(t *testing.T) {
 	}
 
 	rec := TaskRecordInput{Status: "pending"}
-	id, err := client.CreateTargetRecord(ctx, liveWritableBitableURL, rec, nil)
+	id, err := client.CreateTaskRecord(ctx, liveWritableBitableURL, rec, nil)
 	if err != nil {
-		t.Fatalf("CreateTargetRecord error: %v", err)
+		t.Fatalf("CreateTaskRecord error: %v", err)
 	}
 	if id != "recSingle" {
 		t.Fatalf("unexpected id %q", id)
@@ -723,14 +723,14 @@ func TestUpdateTaskStatuses(t *testing.T) {
 					"record_id": "recA1",
 					"fields": map[string]any{
 						DefaultTaskFields.TaskID: 101,
-						customStatusField:          "pending",
+						customStatusField:        "pending",
 					},
 				},
 				{
 					"record_id": "recA2",
 					"fields": map[string]any{
 						DefaultTaskFields.TaskID: 102,
-						customStatusField:          "pending",
+						customStatusField:        "pending",
 					},
 				},
 			},
@@ -889,9 +889,9 @@ func TestTargetRecordLifecycleLive(t *testing.T) {
 			UserName: "test-suite",
 		},
 	}
-	ids, err := client.CreateTargetRecords(ctx, bitableURL, records, nil)
+	ids, err := client.CreateTaskRecords(ctx, bitableURL, records, nil)
 	if err != nil {
-		t.Fatalf("CreateTargetRecords live error: %v", err)
+		t.Fatalf("CreateTaskRecords live error: %v", err)
 	}
 	if len(ids) != len(records) {
 		t.Fatalf("expected %d created ids, got %d", len(records), len(ids))

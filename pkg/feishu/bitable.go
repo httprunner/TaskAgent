@@ -632,9 +632,9 @@ func (c *Client) UpdateTaskStatusByTaskID(ctx context.Context, rawURL string, ta
 	return c.UpdateTaskStatus(ctx, table, taskID, newStatus)
 }
 
-// CreateTargetRecord creates a single record inside the target table.
-func (c *Client) CreateTargetRecord(ctx context.Context, rawURL string, record TaskRecordInput, override *TaskFields) (string, error) {
-	ids, err := c.CreateTargetRecords(ctx, rawURL, []TaskRecordInput{record}, override)
+// CreateTaskRecord creates a single record inside the task status table.
+func (c *Client) CreateTaskRecord(ctx context.Context, rawURL string, record TaskRecordInput, override *TaskFields) (string, error) {
+	ids, err := c.CreateTaskRecords(ctx, rawURL, []TaskRecordInput{record}, override)
 	if err != nil {
 		return "", err
 	}
@@ -644,8 +644,8 @@ func (c *Client) CreateTargetRecord(ctx context.Context, rawURL string, record T
 	return ids[0], nil
 }
 
-// CreateTargetRecords creates one or more records that match the TaskFields schema.
-func (c *Client) CreateTargetRecords(ctx context.Context, rawURL string, records []TaskRecordInput, override *TaskFields) ([]string, error) {
+// CreateTaskRecords creates one or more records that match the TaskFields schema.
+func (c *Client) CreateTaskRecords(ctx context.Context, rawURL string, records []TaskRecordInput, override *TaskFields) ([]string, error) {
 	if c == nil {
 		return nil, errors.New("feishu: client is nil")
 	}

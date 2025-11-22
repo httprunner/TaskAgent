@@ -210,7 +210,7 @@ func (pr *Reporter) ReportMatches(ctx context.Context, app string, matches []Mat
 		Str("table_url", pr.targetTableURL).
 		Msg("Writing records to target table")
 
-	recordIDs, err := client.CreateTargetRecords(ctx, pr.targetTableURL, records, nil)
+	recordIDs, err := client.CreateTaskRecords(ctx, pr.targetTableURL, records, nil)
 	if err != nil {
 		return fmt.Errorf("failed to write piracy report records: %w", err)
 	}
