@@ -32,8 +32,7 @@
 - **结果表限速**：全局串行限速，默认 1 RPS，可通过 `FEISHU_REPORT_RPS` 调整。
 - **目标表字段**：使用 `TARGET_FIELD_*` 前缀（例如：`TARGET_FIELD_PARAMS`）
 - **剧单表字段**：使用 `DRAMA_FIELD_*` 前缀（例如：`DRAMA_FIELD_NAME`、`DRAMA_FIELD_DURATION`）
-- **设备信息表字段**：使用 `DEVICE_INFO_FIELD_*` 前缀（默认：DeviceSerial/OSType/OSVersion/LocationCity/IsRoot/ProviderUUID/AgentVersion/Status/LastSeenAt/LastError/Tags）
-- **设备任务表字段**：使用 `DEVICE_TASK_FIELD_*` 前缀（默认：JobID/DeviceSerial/App/State/AssignedTasks/RunningTask/StartAt/EndAt/ErrorMessage）
+- **设备信息表字段**：使用 `DEVICE_INFO_FIELD_*` 前缀（默认：DeviceSerial/OSType/OSVersion/IPLocation/IsRoot/ProviderUUID/AgentVersion/Status/LastSeenAt/LastError/Tags）
 
 如果未设置环境变量，将使用上述示例中的默认字段名称。
 

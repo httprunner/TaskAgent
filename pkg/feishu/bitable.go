@@ -32,16 +32,16 @@ type BitableRef struct {
 // TargetFields lists the expected column names inside the target table.
 type TargetFields struct {
 	TaskID           string
-	Params           string
 	App              string
 	Scene            string
-	StartAt          string
-	EndAt            string
-	Datetime         string
-	Status           string
-	Webhook          string
+	Params           string
 	UserID           string
 	UserName         string
+	Datetime         string
+	StartAt          string
+	EndAt            string
+	Status           string
+	Webhook          string
 	Extra            string
 	DeviceSerial     string
 	DispatchedDevice string

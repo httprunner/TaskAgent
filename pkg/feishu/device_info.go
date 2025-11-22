@@ -16,7 +16,7 @@ const (
 	EnvDeviceInfoFieldSerial       = "DEVICE_INFO_FIELD_SERIAL"
 	EnvDeviceInfoFieldOSType       = "DEVICE_INFO_FIELD_OSTYPE"
 	EnvDeviceInfoFieldOSVersion    = "DEVICE_INFO_FIELD_OSVERSION"
-	EnvDeviceInfoFieldLocationCity = "DEVICE_INFO_FIELD_LOCATION_CITY"
+	EnvDeviceInfoFieldIPLocation   = "DEVICE_INFO_FIELD_IP_LOCATION"
 	EnvDeviceInfoFieldIsRoot       = "DEVICE_INFO_FIELD_ISROOT"
 	EnvDeviceInfoFieldProviderUUID = "DEVICE_INFO_FIELD_PROVIDERUUID"
 	EnvDeviceInfoFieldAgentVersion = "DEVICE_INFO_FIELD_AGENT_VERSION"
@@ -33,7 +33,7 @@ type DeviceInfoFields struct {
 	DeviceSerial string
 	OSType       string
 	OSVersion    string
-	LocationCity string
+	IPLocation   string
 	IsRoot       string
 	ProviderUUID string
 	AgentVersion string
@@ -50,7 +50,7 @@ var DefaultDeviceInfoFields = DeviceInfoFields{
 	DeviceSerial: "DeviceSerial",
 	OSType:       "OSType",
 	OSVersion:    "OSVersion",
-	LocationCity: "LocationCity",
+	IPLocation:   "IPLocation",
 	IsRoot:       "IsRoot",
 	ProviderUUID: "ProviderUUID",
 	AgentVersion: "AgentVersion",
@@ -67,7 +67,7 @@ type DeviceInfoRecordInput struct {
 	DeviceSerial string
 	OSType       string
 	OSVersion    string
-	LocationCity string
+	IPLocation   string
 	IsRoot       string
 	ProviderUUID string
 	AgentVersion string
@@ -91,8 +91,8 @@ func DeviceInfoFieldsFromEnv() DeviceInfoFields {
 	if v := strings.TrimSpace(os.Getenv(EnvDeviceInfoFieldOSVersion)); v != "" {
 		f.OSVersion = v
 	}
-	if v := strings.TrimSpace(os.Getenv(EnvDeviceInfoFieldLocationCity)); v != "" {
-		f.LocationCity = v
+	if v := strings.TrimSpace(os.Getenv(EnvDeviceInfoFieldIPLocation)); v != "" {
+		f.IPLocation = v
 	}
 	if v := strings.TrimSpace(os.Getenv(EnvDeviceInfoFieldIsRoot)); v != "" {
 		f.IsRoot = v
@@ -178,7 +178,7 @@ func (c *Client) FetchDeviceInfoTable(ctx context.Context, rawURL string, overri
 			DeviceSerial: serial,
 			OSType:       toString(rec.Fields[fields.OSType]),
 			OSVersion:    toString(rec.Fields[fields.OSVersion]),
-			LocationCity: toString(rec.Fields[fields.LocationCity]),
+			IPLocation:   toString(rec.Fields[fields.IPLocation]),
 			IsRoot:       toString(rec.Fields[fields.IsRoot]),
 			ProviderUUID: toString(rec.Fields[fields.ProviderUUID]),
 			AgentVersion: toString(rec.Fields[fields.AgentVersion]),
@@ -245,8 +245,8 @@ func (fields DeviceInfoFields) merge(override DeviceInfoFields) DeviceInfoFields
 	if strings.TrimSpace(override.OSVersion) != "" {
 		result.OSVersion = override.OSVersion
 	}
-	if strings.TrimSpace(override.LocationCity) != "" {
-		result.LocationCity = override.LocationCity
+	if strings.TrimSpace(override.IPLocation) != "" {
+		result.IPLocation = override.IPLocation
 	}
 	if strings.TrimSpace(override.IsRoot) != "" {
 		result.IsRoot = override.IsRoot
@@ -283,7 +283,7 @@ func buildDeviceInfoPayload(rec DeviceInfoRecordInput, fields DeviceInfoFields) 
 	addOptionalField(row, fields.DeviceSerial, rec.DeviceSerial)
 	addOptionalField(row, fields.OSType, rec.OSType)
 	addOptionalField(row, fields.OSVersion, rec.OSVersion)
-	addOptionalField(row, fields.LocationCity, rec.LocationCity)
+	addOptionalField(row, fields.IPLocation, rec.IPLocation)
 	addOptionalField(row, fields.IsRoot, rec.IsRoot)
 	addOptionalField(row, fields.ProviderUUID, rec.ProviderUUID)
 	addOptionalField(row, fields.AgentVersion, rec.AgentVersion)
