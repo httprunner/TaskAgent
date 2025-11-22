@@ -58,7 +58,7 @@ type DeviceRecordInput struct {
 	LastError    string
 	Tags         string
 	RunningTask  string
-	PendingTasks []string
+	PendingTasks string
 }
 
 // DeviceFieldsFromEnv builds fields with environment overrides.
@@ -168,20 +168,7 @@ func (c *Client) FetchDeviceTable(ctx context.Context, rawURL string, override *
 			LastError:    toString(rec.Fields[fields.LastError]),
 			Tags:         toString(rec.Fields[fields.Tags]),
 			RunningTask:  toString(rec.Fields[fields.RunningTask]),
-		}
-		if v := rec.Fields[fields.PendingTasks]; v != nil {
-			switch list := v.(type) {
-			case []any:
-				for _, item := range list {
-					if s := toString(item); strings.TrimSpace(s) != "" {
-						row.PendingTasks = append(row.PendingTasks, s)
-					}
-				}
-			case string:
-				if strings.TrimSpace(list) != "" {
-					row.PendingTasks = append(row.PendingTasks, list)
-				}
-			}
+			PendingTasks: toString(rec.Fields[fields.PendingTasks]),
 		}
 		if ts := toTime(rec.Fields[fields.LastSeenAt]); ts != nil {
 			row.LastSeenAt = ts
@@ -273,9 +260,7 @@ func buildDeviceInfoPayload(rec DeviceRecordInput, fields DeviceFields) (map[str
 	addOptionalField(row, fields.LastError, rec.LastError)
 	addOptionalField(row, fields.Tags, rec.Tags)
 	addOptionalField(row, fields.RunningTask, rec.RunningTask)
-	if len(rec.PendingTasks) > 0 && strings.TrimSpace(fields.PendingTasks) != "" {
-		row[fields.PendingTasks] = rec.PendingTasks
-	}
+	addOptionalField(row, fields.PendingTasks, rec.PendingTasks)
 	if rec.LastSeenAt != nil {
 		if strings.TrimSpace(fields.LastSeenAt) == "" {
 			return nil, fmt.Errorf("feishu: LastSeenAt field not configured")

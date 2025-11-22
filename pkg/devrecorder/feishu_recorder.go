@@ -65,7 +65,7 @@ func (r *FeishuRecorder) UpsertDevices(ctx context.Context, devices []pool.Devic
 			Status:       d.Status,
 			LastError:    d.LastError,
 			RunningTask:  d.RunningTask,
-			PendingTasks: d.PendingTasks,
+			PendingTasks: strings.Join(d.PendingTasks, ","),
 		}
 		if !d.LastSeenAt.IsZero() {
 			rec.LastSeenAt = &d.LastSeenAt

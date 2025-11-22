@@ -475,6 +475,9 @@ func (a *DevicePoolAgent) idleDevices() []*deviceState {
 }
 
 func (a *DevicePoolAgent) startDeviceJob(ctx context.Context, dev *deviceState, tasks []*Task) {
+	// Mark tasks as running in Feishu (best-effort, only when using FeishuTaskClient).
+	a.markTasksRunning(ctx, tasks)
+
 	jobCtx, cancel := context.WithCancel(ctx)
 	job := &deviceJob{
 		deviceSerial: dev.serial,
@@ -682,4 +685,22 @@ func (a *DevicePoolAgent) removeDevice(serial string) {
 	defer a.deviceMu.Unlock()
 	delete(a.devices, serial)
 	log.Info().Str("serial", serial).Msg("device removed from pool")
+}
+
+// markTasksRunning updates task status to "running" when supported.
+func (a *DevicePoolAgent) markTasksRunning(ctx context.Context, tasks []*Task) {
+	if a == nil || a.taskManager == nil {
+		return
+	}
+	ftc, ok := a.taskManager.(*FeishuTaskClient)
+	if !ok || ftc == nil {
+		return
+	}
+	feishuTasks, err := extractFeishuTasks(tasks)
+	if err != nil || len(feishuTasks) == 0 {
+		return
+	}
+	if err := ftc.UpdateTaskStatuses(ctx, feishuTasks, "running"); err != nil {
+		log.Warn().Err(err).Msg("mark feishu tasks running failed")
+	}
 }
