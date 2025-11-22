@@ -64,16 +64,25 @@ func (r *FeishuRecorder) UpsertDevices(ctx context.Context, devices []pool.Devic
 			ProviderUUID: d.ProviderUUID,
 			Status:       d.Status,
 			LastError:    d.LastError,
-			RunningTask:  d.RunningTask,
-			PendingTasks: strings.Join(d.PendingTasks, ","),
+			RunningTask:  strings.TrimSpace(d.RunningTask),
+			PendingTasks: sanitizeSlice(d.PendingTasks),
 		}
 		if !d.LastSeenAt.IsZero() {
 			rec.LastSeenAt = &d.LastSeenAt
 		} else {
 			rec.LastSeenAt = &now
 		}
+
 		if err := r.client.UpsertDevice(ctx, r.infoURL, r.infoFields, rec); err != nil {
-			log.Error().Err(err).Str("serial", d.DeviceSerial).Str("status", d.Status).Msg("feishu recorder: upsert device failed")
+			log.Error().
+				Err(err).
+				Str("serial", d.DeviceSerial).
+				Str("status", d.Status).
+				Str("running_field", r.infoFields.RunningTask).
+				Str("running_task", rec.RunningTask).
+				Str("pending_field", r.infoFields.PendingTasks).
+				Strs("pending_tasks", rec.PendingTasks).
+				Msg("feishu recorder: upsert device failed")
 		}
 	}
 	return nil
@@ -84,4 +93,27 @@ func (r *FeishuRecorder) now() time.Time {
 		return r.clock()
 	}
 	return time.Now()
+}
+
+// toSlice converts a single string to a slice, trimming blanks.
+func toSlice(value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return []string{value}
+}
+
+// sanitizeSlice removes blanks from the provided string slice.
+func sanitizeSlice(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, v := range values {
+		if s := strings.TrimSpace(v); s != "" {
+			result = append(result, s)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }

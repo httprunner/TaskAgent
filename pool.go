@@ -700,7 +700,10 @@ func (a *DevicePoolAgent) markTasksRunning(ctx context.Context, tasks []*Task) {
 	if err != nil || len(feishuTasks) == 0 {
 		return
 	}
-	if err := ftc.UpdateTaskStatuses(ctx, feishuTasks, "running"); err != nil {
+	// Only the first task is actively running; the rest remain "dispatched"
+	// until the device progresses to them.
+	running := feishuTasks[:1]
+	if err := ftc.UpdateTaskStatuses(ctx, running, "running"); err != nil {
 		log.Warn().Err(err).Msg("mark feishu tasks running failed")
 	}
 }

@@ -58,7 +58,7 @@ type DeviceRecordInput struct {
 	LastError    string
 	Tags         string
 	RunningTask  string
-	PendingTasks string
+	PendingTasks []string
 }
 
 // DeviceFieldsFromEnv builds fields with environment overrides.
@@ -168,7 +168,7 @@ func (c *Client) FetchDeviceTable(ctx context.Context, rawURL string, override *
 			LastError:    toString(rec.Fields[fields.LastError]),
 			Tags:         toString(rec.Fields[fields.Tags]),
 			RunningTask:  toString(rec.Fields[fields.RunningTask]),
-			PendingTasks: toString(rec.Fields[fields.PendingTasks]),
+			PendingTasks: toStrings(rec.Fields[fields.PendingTasks]),
 		}
 		if ts := toTime(rec.Fields[fields.LastSeenAt]); ts != nil {
 			row.LastSeenAt = ts
@@ -260,7 +260,7 @@ func buildDeviceInfoPayload(rec DeviceRecordInput, fields DeviceFields) (map[str
 	addOptionalField(row, fields.LastError, rec.LastError)
 	addOptionalField(row, fields.Tags, rec.Tags)
 	addOptionalField(row, fields.RunningTask, rec.RunningTask)
-	addOptionalField(row, fields.PendingTasks, rec.PendingTasks)
+	addOptionalStringSlice(row, fields.PendingTasks, rec.PendingTasks)
 	if rec.LastSeenAt != nil {
 		if strings.TrimSpace(fields.LastSeenAt) == "" {
 			return nil, fmt.Errorf("feishu: LastSeenAt field not configured")
@@ -272,6 +272,8 @@ func buildDeviceInfoPayload(rec DeviceRecordInput, fields DeviceFields) (map[str
 	}
 	return row, nil
 }
+
+// addOptionalStringSlice writes a slice to a multi-select column when not empty.
 
 // Helpers to decode primitive values from Feishu record fields.
 func toTime(val any) *time.Time {
@@ -296,4 +298,60 @@ func toTime(val any) *time.Time {
 		}
 	}
 	return nil
+}
+
+// toStrings flattens Feishu multi-select or scalar values into a slice of strings.
+func toStrings(val any) []string {
+	switch v := val.(type) {
+	case nil:
+		return nil
+	case []string:
+		return filterNonEmpty(v)
+	case []any:
+		result := make([]string, 0, len(v))
+		for _, item := range v {
+			if s := strings.TrimSpace(toString(item)); s != "" {
+				result = append(result, s)
+			}
+		}
+		return filterNonEmpty(result)
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return nil
+		}
+		return []string{trimmed}
+	default:
+		if s := strings.TrimSpace(toString(v)); s != "" {
+			return []string{s}
+		}
+		return nil
+	}
+}
+
+func addOptionalStringSlice(dst map[string]any, column string, values []string) {
+	if strings.TrimSpace(column) == "" {
+		return
+	}
+	trimmed := filterNonEmpty(values)
+	if len(trimmed) == 0 {
+		return
+	}
+	dst[column] = trimmed
+}
+
+func filterNonEmpty(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(values))
+	for _, v := range values {
+		if s := strings.TrimSpace(v); s != "" {
+			result = append(result, s)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
