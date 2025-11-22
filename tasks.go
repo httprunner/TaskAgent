@@ -312,6 +312,10 @@ type FeishuTask struct {
 	Extra             string
 	DeviceSerial      string
 	DispatchedDevice  string
+	StartAt           *time.Time
+	StartAtRaw        string
+	EndAt             *time.Time
+	EndAtRaw          string
 	Datetime          *time.Time
 	DatetimeRaw       string
 	DispatchedTime    *time.Time
@@ -331,6 +335,10 @@ func toStorageTargetTask(task *FeishuTask) *storage.TargetTask {
 		Params:            task.Params,
 		App:               task.App,
 		Scene:             task.Scene,
+		StartAt:           task.StartAt,
+		StartAtRaw:        task.StartAtRaw,
+		EndAt:             task.EndAt,
+		EndAtRaw:          task.EndAtRaw,
 		Datetime:          task.Datetime,
 		DatetimeRaw:       task.DatetimeRaw,
 		Status:            task.Status,
@@ -507,6 +515,10 @@ func fetchFeishuTasksWithFilter(ctx context.Context, client targetTableClient, b
 			Extra:             row.Extra,
 			DeviceSerial:      row.DeviceSerial,
 			DispatchedDevice:  row.DispatchedDevice,
+			StartAt:           row.StartAt,
+			StartAtRaw:        row.StartAtRaw,
+			EndAt:             row.EndAt,
+			EndAtRaw:          row.EndAtRaw,
 			Datetime:          row.Datetime,
 			DatetimeRaw:       row.DatetimeRaw,
 			DispatchedTime:    row.DispatchedTime,
@@ -701,9 +713,13 @@ func updateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 		hasDispatchedAt = true
 	}
 	var completedAtValue *time.Time
+	var completedAtMillis int64
+	var completedAtRaw string
 	if meta != nil && meta.completedAt != nil && !meta.completedAt.IsZero() {
 		completed := meta.completedAt
 		completedAtValue = completed
+		completedAtMillis = completedAtValue.UTC().UnixMilli()
+		completedAtRaw = strconv.FormatInt(completedAtMillis, 10)
 	}
 
 	for source, subset := range grouped {
@@ -718,6 +734,8 @@ func updateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 		}
 		dispatchedTimeField := strings.TrimSpace(source.table.Fields.DispatchedTime)
 		elapsedField := strings.TrimSpace(source.table.Fields.ElapsedSeconds)
+		startField := strings.TrimSpace(source.table.Fields.StartAt)
+		endField := strings.TrimSpace(source.table.Fields.EndAt)
 
 		for _, task := range subset {
 			fields := map[string]any{
@@ -730,6 +748,16 @@ func updateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 				fields[dispatchedTimeField] = dispatchedAtMillis
 				task.DispatchedTime = dispatchedAtValue
 				task.DispatchedTimeRaw = dispatchedAtRaw
+			}
+			if startField != "" && hasDispatchedAt {
+				fields[startField] = dispatchedAtMillis
+				task.StartAt = dispatchedAtValue
+				task.StartAtRaw = dispatchedAtRaw
+			}
+			if endField != "" && completedAtValue != nil {
+				fields[endField] = completedAtMillis
+				task.EndAt = completedAtValue
+				task.EndAtRaw = completedAtRaw
 			}
 			if elapsedField != "" && completedAtValue != nil {
 				if secs, ok := elapsedSecondsForTask(task, *completedAtValue); ok {

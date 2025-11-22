@@ -109,7 +109,6 @@ type deviceMeta struct {
 
 type deviceJob struct {
 	deviceSerial string
-	jobID        string
 	tasks        []*Task
 	cancel       context.CancelFunc
 	startAt      time.Time
@@ -118,10 +117,6 @@ type deviceJob struct {
 type noopRecorder struct{}
 
 func (noopRecorder) UpsertDevices(ctx context.Context, devices []DeviceInfoUpdate) error { return nil }
-func (noopRecorder) CreateJob(ctx context.Context, rec *DeviceJobRecord) error           { return nil }
-func (noopRecorder) UpdateJob(ctx context.Context, jobID string, upd *DeviceJobUpdate) error {
-	return nil
-}
 
 type deviceAssignment struct {
 	device   *deviceState
@@ -270,6 +265,12 @@ func (a *DevicePoolAgent) refreshDevices(ctx context.Context) error {
 				dev.meta = a.fetchDeviceMeta(serial)
 				dev.metaReady = true
 			}
+			runningTask := ""
+			pendingTasks := []string(nil)
+			if dev.currentJob != nil {
+				runningTask = firstTaskID(dev.currentJob.tasks)
+				pendingTasks = remainingTaskIDs(dev.currentJob.tasks)
+			}
 			updates = append(updates,
 				DeviceInfoUpdate{
 					DeviceSerial: serial,
@@ -280,6 +281,8 @@ func (a *DevicePoolAgent) refreshDevices(ctx context.Context) error {
 					ProviderUUID: dev.meta.providerUUID,
 					AgentVersion: a.cfg.AgentVersion,
 					LastSeenAt:   now,
+					RunningTask:  runningTask,
+					PendingTasks: pendingTasks,
 				})
 			continue
 		}
@@ -434,24 +437,27 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 			continue
 		}
 		now := time.Now()
-		jobID := fmt.Sprintf("%s-%s", dev.serial, now.Format("0601021504"))
-		if err := a.recorder.CreateJob(ctx, &DeviceJobRecord{
-			JobID:         jobID,
-			DeviceSerial:  dev.serial,
-			App:           app,
-			State:         "running",
-			AssignedTasks: extractTaskIDs(assignment.tasks),
-			RunningTask:   firstTaskID(assignment.tasks),
-			StartAt:       now,
-		}); err != nil {
-			log.Error().Err(err).Str("serial", dev.serial).Msg("device recorder create job failed")
-			jobID = "" // avoid later update attempts when creation failed
+		running := firstTaskID(assignment.tasks)
+		pending := remainingTaskIDs(assignment.tasks)
+		if err := a.recorder.UpsertDevices(ctx, []DeviceInfoUpdate{{
+			DeviceSerial: dev.serial,
+			Status:       string(statusRunning),
+			OSType:       dev.meta.osType,
+			OSVersion:    dev.meta.osVersion,
+			IsRoot:       dev.meta.isRoot,
+			ProviderUUID: dev.meta.providerUUID,
+			AgentVersion: a.cfg.AgentVersion,
+			LastSeenAt:   now,
+			RunningTask:  running,
+			PendingTasks: pending,
+		}}); err != nil {
+			log.Error().Err(err).Str("serial", dev.serial).Msg("device recorder update running state failed")
 		}
 		log.Info().
 			Str("serial", dev.serial).
 			Int("assigned_tasks", len(assignment.tasks)).
 			Msg("device pool dispatched tasks to device")
-		a.startDeviceJob(ctx, dev, assignment.tasks, jobID)
+		a.startDeviceJob(ctx, dev, assignment.tasks)
 	}
 	return nil
 }
@@ -468,11 +474,10 @@ func (a *DevicePoolAgent) idleDevices() []*deviceState {
 	return result
 }
 
-func (a *DevicePoolAgent) startDeviceJob(ctx context.Context, dev *deviceState, tasks []*Task, jobID string) {
+func (a *DevicePoolAgent) startDeviceJob(ctx context.Context, dev *deviceState, tasks []*Task) {
 	jobCtx, cancel := context.WithCancel(ctx)
 	job := &deviceJob{
 		deviceSerial: dev.serial,
-		jobID:        jobID,
 		tasks:        tasks,
 		cancel:       cancel,
 		startAt:      time.Now(),
@@ -549,32 +554,30 @@ func (a *DevicePoolAgent) runDeviceJob(ctx context.Context, dev *deviceState, jo
 	remove := dev.removeAfterJob
 	a.deviceMu.Unlock()
 
-	if job.jobID != "" {
-		endAt := time.Now()
-		elapsed := endAt.Sub(job.startAt)
-		elapsedSecs := int64(elapsed.Seconds())
-		state := "success"
-		if err != nil {
-			state = "failed"
-		}
-		if remove {
-			state = "offline"
-		}
-		if recErr := a.recorder.UpdateJob(context.Background(), job.jobID, &DeviceJobUpdate{
-			State:          state,
-			RunningTask:    "",
-			EndAt:          &endAt,
-			ElapsedSeconds: &elapsedSecs,
-			ErrorMessage:   errString(err),
-		}); recErr != nil {
-			log.Error().Err(recErr).Str("job_id", job.jobID).Msg("device recorder update job failed")
-		}
-	}
-
 	if err != nil {
 		log.Error().Err(err).Str("serial", job.deviceSerial).Msg("device job failed")
 	} else {
 		log.Info().Str("serial", job.deviceSerial).Msg("device job finished")
+	}
+
+	finalStatus := string(statusIdle)
+	if remove {
+		finalStatus = "offline"
+	}
+	if recErr := a.recorder.UpsertDevices(context.Background(), []DeviceInfoUpdate{{
+		DeviceSerial: job.deviceSerial,
+		Status:       finalStatus,
+		OSType:       dev.meta.osType,
+		OSVersion:    dev.meta.osVersion,
+		IsRoot:       dev.meta.isRoot,
+		ProviderUUID: dev.meta.providerUUID,
+		AgentVersion: a.cfg.AgentVersion,
+		LastSeenAt:   time.Now(),
+		LastError:    errString(err),
+		RunningTask:  "",
+		PendingTasks: nil,
+	}}); recErr != nil {
+		log.Error().Err(recErr).Str("serial", job.deviceSerial).Msg("device recorder finalize state failed")
 	}
 
 	if remove {
@@ -644,6 +647,27 @@ func firstTaskID(tasks []*Task) string {
 		}
 	}
 	return ""
+}
+
+func remainingTaskIDs(tasks []*Task) []string {
+	if len(tasks) <= 1 {
+		return nil
+	}
+	result := make([]string, 0, len(tasks)-1)
+	skipFirst := true
+	for _, t := range tasks {
+		if t == nil {
+			continue
+		}
+		if id := strings.TrimSpace(t.ID); id != "" {
+			if skipFirst {
+				skipFirst = false
+				continue
+			}
+			result = append(result, id)
+		}
+	}
+	return result
 }
 
 func errString(err error) string {

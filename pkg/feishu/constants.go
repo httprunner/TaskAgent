@@ -50,6 +50,8 @@ var DefaultTargetFields = TargetFields{
 	DeviceSerial:     "DeviceSerial",     // 目标执行设备
 	DispatchedDevice: "DispatchedDevice", // 实际派发设备
 	DispatchedTime:   "DispatchedTime",   // 任务派发时间
+	StartAt:          "StartAt",          // 任务开始时间
+	EndAt:            "EndAt",            // 任务结束时间
 	ElapsedSeconds:   "ElapsedSeconds",   // 任务耗时（秒）
 	Extra:            "Extra",            // 额外信息
 }

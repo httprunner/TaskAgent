@@ -21,6 +21,10 @@ type TargetTask struct {
 	Params            string
 	App               string
 	Scene             string
+	StartAt           *time.Time
+	StartAtRaw        string
+	EndAt             *time.Time
+	EndAtRaw          string
 	Datetime          *time.Time
 	DatetimeRaw       string
 	Status            string
@@ -94,6 +98,8 @@ func buildTargetColumnOrder(fields feishu.TargetFields) []string {
 		fields.Params,
 		fields.App,
 		fields.Scene,
+		fields.StartAt,
+		fields.EndAt,
 		fields.Datetime,
 		fields.Status,
 		fields.Webhook,
@@ -113,6 +119,8 @@ func ensureTargetSchema(db *sql.DB, table string, fields feishu.TargetFields, co
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.Params)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.App)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.Scene)),
+		fmt.Sprintf("%s TEXT", quoteIdent(fields.StartAt)),
+		fmt.Sprintf("%s TEXT", quoteIdent(fields.EndAt)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.Datetime)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.Status)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.Webhook)),
@@ -130,6 +138,12 @@ func ensureTargetSchema(db *sql.DB, table string, fields feishu.TargetFields, co
 );`, quoteIdent(table), strings.Join(defs, ",\n"))
 	if _, err := db.Exec(createStmt); err != nil {
 		return errors.Wrap(err, "create capture targets table failed")
+	}
+	if err := ensureColumnExists(db, table, fields.StartAt, "TEXT"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(db, table, fields.EndAt, "TEXT"); err != nil {
+		return err
 	}
 	if err := ensureColumnExists(db, table, fields.Webhook, "TEXT"); err != nil {
 		return err
@@ -217,6 +231,8 @@ func (m *TargetMirror) upsert(task *TargetTask) error {
 		nullableString(task.Params),
 		nullableString(task.App),
 		nullableString(task.Scene),
+		formatDatetime(task.StartAtRaw, task.StartAt),
+		formatDatetime(task.EndAtRaw, task.EndAt),
 		formatDatetime(task.DatetimeRaw, task.Datetime),
 		nullableString(task.Status),
 		nullableString(task.Webhook),

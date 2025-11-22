@@ -35,6 +35,8 @@ type TargetFields struct {
 	Params           string
 	App              string
 	Scene            string
+	StartAt          string
+	EndAt            string
 	Datetime         string
 	Status           string
 	Webhook          string
@@ -54,6 +56,10 @@ type TargetRow struct {
 	Params            string
 	App               string
 	Scene             string
+	StartAt           *time.Time
+	StartAtRaw        string
+	EndAt             *time.Time
+	EndAtRaw          string
 	UserID            string
 	UserName          string
 	Extra             string
@@ -76,6 +82,10 @@ type TargetRecordInput struct {
 	Params            string
 	App               string
 	Scene             string
+	StartAt           *time.Time
+	StartAtRaw        string
+	EndAt             *time.Time
+	EndAtRaw          string
 	Datetime          *time.Time
 	DatetimeRaw       string
 	Status            string
@@ -285,6 +295,44 @@ func (t *TargetTable) updateLocalTargetDevice(taskID int64, serial string) {
 			t.Rows[i].DeviceSerial = serial
 			break
 		}
+	}
+}
+
+func (t *TargetTable) updateLocalStartAt(taskID int64, raw string, ts *time.Time) {
+	if t == nil {
+		return
+	}
+	for i := range t.Rows {
+		if t.Rows[i].TaskID != taskID {
+			continue
+		}
+		t.Rows[i].StartAtRaw = raw
+		if ts != nil {
+			val := *ts
+			t.Rows[i].StartAt = &val
+		} else {
+			t.Rows[i].StartAt = nil
+		}
+		break
+	}
+}
+
+func (t *TargetTable) updateLocalEndAt(taskID int64, raw string, ts *time.Time) {
+	if t == nil {
+		return
+	}
+	for i := range t.Rows {
+		if t.Rows[i].TaskID != taskID {
+			continue
+		}
+		t.Rows[i].EndAtRaw = raw
+		if ts != nil {
+			val := *ts
+			t.Rows[i].EndAt = &val
+		} else {
+			t.Rows[i].EndAt = nil
+		}
+		break
 	}
 }
 
@@ -514,6 +562,30 @@ func (c *Client) UpdateTargetFields(ctx context.Context, table *TargetTable, tas
 			table.updateLocalStatus(taskID, toString(val))
 		}
 	}
+	if startField := strings.TrimSpace(table.Fields.StartAt); startField != "" {
+		if val, ok := fields[startField]; ok {
+			raw := toString(val)
+			var parsed *time.Time
+			if raw != "" {
+				if ts, err := parseBitableTime(raw); err == nil {
+					parsed = &ts
+				}
+			}
+			table.updateLocalStartAt(taskID, raw, parsed)
+		}
+	}
+	if endField := strings.TrimSpace(table.Fields.EndAt); endField != "" {
+		if val, ok := fields[endField]; ok {
+			raw := toString(val)
+			var parsed *time.Time
+			if raw != "" {
+				if ts, err := parseBitableTime(raw); err == nil {
+					parsed = &ts
+				}
+			}
+			table.updateLocalEndAt(taskID, raw, parsed)
+		}
+	}
 	if webhookField := strings.TrimSpace(table.Fields.Webhook); webhookField != "" {
 		if val, ok := fields[webhookField]; ok {
 			table.updateLocalWebhook(taskID, toString(val))
@@ -702,6 +774,14 @@ func (fields TargetFields) merge(override TargetFields) TargetFields {
 		log.Warn().Str("new", override.Scene).Msg("overriding field Scene")
 		result.Scene = override.Scene
 	}
+	if strings.TrimSpace(override.StartAt) != "" {
+		log.Warn().Str("new", override.StartAt).Msg("overriding field StartAt")
+		result.StartAt = override.StartAt
+	}
+	if strings.TrimSpace(override.EndAt) != "" {
+		log.Warn().Str("new", override.EndAt).Msg("overriding field EndAt")
+		result.EndAt = override.EndAt
+	}
 	if strings.TrimSpace(override.Datetime) != "" {
 		log.Warn().Str("new", override.Datetime).Msg("overriding field Datetime")
 		result.Datetime = override.Datetime
@@ -832,6 +912,12 @@ func buildTargetRecordPayloads(records []TargetRecordInput, fields TargetFields)
 		addOptionalField(row, fields.Params, rec.Params)
 		addOptionalField(row, fields.App, rec.App)
 		addOptionalField(row, fields.Scene, rec.Scene)
+		if start := formatRecordDatetimeString(rec.StartAt, rec.StartAtRaw); start != "" && strings.TrimSpace(fields.StartAt) != "" {
+			row[fields.StartAt] = start
+		}
+		if end := formatRecordDatetimeString(rec.EndAt, rec.EndAtRaw); end != "" && strings.TrimSpace(fields.EndAt) != "" {
+			row[fields.EndAt] = end
+		}
 		if dt := formatRecordDatetimeString(rec.Datetime, rec.DatetimeRaw); dt != "" && strings.TrimSpace(fields.Datetime) != "" {
 			row[fields.Datetime] = dt
 		}
@@ -1090,7 +1176,7 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 		pageToken = resp.Data.PageToken
 	}
 
-	log.Info().Int("count", len(all)).Msg("fetched bitable records")
+	log.Debug().Int("count", len(all)).Msg("fetched bitable records")
 	if limit > 0 && len(all) > limit {
 		return all[:limit], nil
 	}
@@ -1125,6 +1211,19 @@ func decodeTargetRow(rec bitableRecord, fields TargetFields) (TargetRow, error) 
 		Extra:            bitableOptionalString(rec.Fields, fields.Extra),
 		DeviceSerial:     targetDevice,
 		DispatchedDevice: dispatchedDevice,
+	}
+
+	if start := bitableOptionalString(rec.Fields, fields.StartAt); start != "" {
+		row.StartAtRaw = start
+		if parsed, err := parseBitableTime(start); err == nil {
+			row.StartAt = &parsed
+		}
+	}
+	if end := bitableOptionalString(rec.Fields, fields.EndAt); end != "" {
+		row.EndAtRaw = end
+		if parsed, err := parseBitableTime(end); err == nil {
+			row.EndAt = &parsed
+		}
 	}
 
 	if dt := bitableOptionalString(rec.Fields, fields.Datetime); dt != "" {

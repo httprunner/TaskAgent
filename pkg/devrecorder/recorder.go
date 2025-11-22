@@ -10,18 +10,12 @@ import (
 // DeviceRecorder captures device + job state to an external store (e.g., Feishu bitable).
 type DeviceRecorder interface {
 	UpsertDevices(ctx context.Context, devices []pool.DeviceInfoUpdate) error
-	CreateJob(ctx context.Context, rec *pool.DeviceJobRecord) error
-	UpdateJob(ctx context.Context, jobID string, upd *pool.DeviceJobUpdate) error
 }
 
 // NoopRecorder is the default implementation when recording is disabled.
 type NoopRecorder struct{}
 
 func (NoopRecorder) UpsertDevices(ctx context.Context, devices []pool.DeviceInfoUpdate) error {
-	return nil
-}
-func (NoopRecorder) CreateJob(ctx context.Context, rec *pool.DeviceJobRecord) error { return nil }
-func (NoopRecorder) UpdateJob(ctx context.Context, jobID string, upd *pool.DeviceJobUpdate) error {
 	return nil
 }
 
