@@ -300,28 +300,28 @@ func (c *FeishuTaskClient) now() time.Time {
 
 // FeishuTask represents a pending capture job fetched from Feishu bitable.
 type FeishuTask struct {
-	TaskID            int64
-	Params            string
-	App               string
-	Scene             string
-	Status            string
-	OriginalStatus    string
-	Webhook           string
-	UserID            string
-	UserName          string
-	Extra             string
-	DeviceSerial      string
-	DispatchedDevice  string
-	StartAt           *time.Time
-	StartAtRaw        string
-	EndAt             *time.Time
-	EndAtRaw          string
-	Datetime          *time.Time
-	DatetimeRaw       string
-	DispatchedTime    *time.Time
-	DispatchedTimeRaw string
-	ElapsedSeconds    int64
-	TargetCount       int
+	TaskID           int64
+	Params           string
+	App              string
+	Scene            string
+	Status           string
+	OriginalStatus   string
+	Webhook          string
+	UserID           string
+	UserName         string
+	Extra            string
+	DeviceSerial     string
+	DispatchedDevice string
+	StartAt          *time.Time
+	StartAtRaw       string
+	EndAt            *time.Time
+	EndAtRaw         string
+	Datetime         *time.Time
+	DatetimeRaw      string
+	DispatchedAt     *time.Time
+	DispatchedAtRaw  string
+	ElapsedSeconds   int64
+	TargetCount      int
 
 	source *feishuTaskSource
 }
@@ -331,26 +331,26 @@ func toStorageTargetTask(task *FeishuTask) *storage.TargetTask {
 		return nil
 	}
 	return &storage.TargetTask{
-		TaskID:            task.TaskID,
-		Params:            task.Params,
-		App:               task.App,
-		Scene:             task.Scene,
-		StartAt:           task.StartAt,
-		StartAtRaw:        task.StartAtRaw,
-		EndAt:             task.EndAt,
-		EndAtRaw:          task.EndAtRaw,
-		Datetime:          task.Datetime,
-		DatetimeRaw:       task.DatetimeRaw,
-		Status:            task.Status,
-		Webhook:           task.Webhook,
-		UserID:            task.UserID,
-		UserName:          task.UserName,
-		Extra:             task.Extra,
-		DeviceSerial:      task.DeviceSerial,
-		DispatchedDevice:  task.DispatchedDevice,
-		DispatchedTime:    task.DispatchedTime,
-		DispatchedTimeRaw: task.DispatchedTimeRaw,
-		ElapsedSeconds:    task.ElapsedSeconds,
+		TaskID:           task.TaskID,
+		Params:           task.Params,
+		App:              task.App,
+		Scene:            task.Scene,
+		StartAt:          task.StartAt,
+		StartAtRaw:       task.StartAtRaw,
+		EndAt:            task.EndAt,
+		EndAtRaw:         task.EndAtRaw,
+		Datetime:         task.Datetime,
+		DatetimeRaw:      task.DatetimeRaw,
+		Status:           task.Status,
+		Webhook:          task.Webhook,
+		UserID:           task.UserID,
+		UserName:         task.UserName,
+		Extra:            task.Extra,
+		DeviceSerial:     task.DeviceSerial,
+		DispatchedDevice: task.DispatchedDevice,
+		DispatchedAt:     task.DispatchedAt,
+		DispatchedAtRaw:  task.DispatchedAtRaw,
+		ElapsedSeconds:   task.ElapsedSeconds,
 	}
 }
 
@@ -503,28 +503,28 @@ func fetchFeishuTasksWithFilter(ctx context.Context, client targetTableClient, b
 			continue
 		}
 		tasks = append(tasks, &FeishuTask{
-			TaskID:            row.TaskID,
-			Params:            params,
-			App:               row.App,
-			Scene:             row.Scene,
-			Status:            row.Status,
-			OriginalStatus:    row.Status,
-			Webhook:           row.Webhook,
-			UserID:            row.UserID,
-			UserName:          row.UserName,
-			Extra:             row.Extra,
-			DeviceSerial:      row.DeviceSerial,
-			DispatchedDevice:  row.DispatchedDevice,
-			StartAt:           row.StartAt,
-			StartAtRaw:        row.StartAtRaw,
-			EndAt:             row.EndAt,
-			EndAtRaw:          row.EndAtRaw,
-			Datetime:          row.Datetime,
-			DatetimeRaw:       row.DatetimeRaw,
-			DispatchedTime:    row.DispatchedTime,
-			DispatchedTimeRaw: row.DispatchedTimeRaw,
-			ElapsedSeconds:    row.ElapsedSeconds,
-			source:            source,
+			TaskID:           row.TaskID,
+			Params:           params,
+			App:              row.App,
+			Scene:            row.Scene,
+			Status:           row.Status,
+			OriginalStatus:   row.Status,
+			Webhook:          row.Webhook,
+			UserID:           row.UserID,
+			UserName:         row.UserName,
+			Extra:            row.Extra,
+			DeviceSerial:     row.DeviceSerial,
+			DispatchedDevice: row.DispatchedDevice,
+			StartAt:          row.StartAt,
+			StartAtRaw:       row.StartAtRaw,
+			EndAt:            row.EndAt,
+			EndAtRaw:         row.EndAtRaw,
+			Datetime:         row.Datetime,
+			DatetimeRaw:      row.DatetimeRaw,
+			DispatchedAt:     row.DispatchedAt,
+			DispatchedAtRaw:  row.DispatchedAtRaw,
+			ElapsedSeconds:   row.ElapsedSeconds,
+			source:           source,
 		})
 		if limit > 0 && len(tasks) >= limit {
 			break
@@ -732,7 +732,7 @@ func updateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 		if deviceSerial != "" && dispatchedField == "" {
 			log.Warn().Msg("feishu target table missing DispatchedDevice column; skip binding device serial")
 		}
-		dispatchedTimeField := strings.TrimSpace(source.table.Fields.DispatchedTime)
+		dispatchedTimeField := strings.TrimSpace(source.table.Fields.DispatchedAt)
 		elapsedField := strings.TrimSpace(source.table.Fields.ElapsedSeconds)
 		startField := strings.TrimSpace(source.table.Fields.StartAt)
 		endField := strings.TrimSpace(source.table.Fields.EndAt)
@@ -746,8 +746,8 @@ func updateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 			}
 			if dispatchedTimeField != "" && hasDispatchedAt {
 				fields[dispatchedTimeField] = dispatchedAtMillis
-				task.DispatchedTime = dispatchedAtValue
-				task.DispatchedTimeRaw = dispatchedAtRaw
+				task.DispatchedAt = dispatchedAtValue
+				task.DispatchedAtRaw = dispatchedAtRaw
 			}
 			if startField != "" && hasDispatchedAt {
 				fields[startField] = dispatchedAtMillis
@@ -810,13 +810,13 @@ func shouldSkipFeishuStatusOverride(currentStatus, desiredStatus string) bool {
 }
 
 func elapsedSecondsForTask(task *FeishuTask, completedAt time.Time) (int64, bool) {
-	if task == nil || task.DispatchedTime == nil || completedAt.IsZero() {
+	if task == nil || task.DispatchedAt == nil || completedAt.IsZero() {
 		return 0, false
 	}
-	if completedAt.Before(*task.DispatchedTime) {
+	if completedAt.Before(*task.DispatchedAt) {
 		return 0, true
 	}
-	secs := int64(completedAt.Sub(*task.DispatchedTime) / time.Second)
+	secs := int64(completedAt.Sub(*task.DispatchedAt) / time.Second)
 	if secs < 0 {
 		secs = 0
 	}

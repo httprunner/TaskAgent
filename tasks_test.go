@@ -293,7 +293,7 @@ func TestUpdateFeishuTaskStatusesAssignsDispatchedDevice(t *testing.T) {
 	}
 	statusField := feishusvc.DefaultTargetFields.Status
 	serialField := feishusvc.DefaultTargetFields.DispatchedDevice
-	dispatchedField := feishusvc.DefaultTargetFields.DispatchedTime
+	dispatchedField := feishusvc.DefaultTargetFields.DispatchedAt
 	update := client.updates[0]
 	if got := update[statusField]; got != "dispatched" {
 		t.Fatalf("expected status field=%s got=%v", statusField, got)
@@ -310,8 +310,8 @@ func TestUpdateFeishuTaskStatusesAssignsDispatchedDevice(t *testing.T) {
 	if !ok || gotMillis != expectedMillis {
 		t.Fatalf("expected dispatched time field=%s to be %d, got %v", dispatchedField, expectedMillis, gotAny)
 	}
-	if task.DispatchedTime == nil || !task.DispatchedTime.Equal(dispatchedAt) {
-		t.Fatalf("task dispatched time not recorded: %#v", task.DispatchedTime)
+	if task.DispatchedAt == nil || !task.DispatchedAt.Equal(dispatchedAt) {
+		t.Fatalf("task dispatched time not recorded: %#v", task.DispatchedAt)
 	}
 }
 
@@ -323,8 +323,8 @@ func TestUpdateFeishuTaskStatusesAssignsElapsedSeconds(t *testing.T) {
 	}
 	dispatchedAt := time.Date(2025, 11, 10, 9, 0, 0, 0, time.UTC)
 	task := &FeishuTask{
-		TaskID:         2,
-		DispatchedTime: &dispatchedAt,
+		TaskID:       2,
+		DispatchedAt: &dispatchedAt,
 		source: &feishuTaskSource{
 			client: client,
 			table:  table,

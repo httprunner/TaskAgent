@@ -49,7 +49,7 @@ var DefaultTargetFields = TargetFields{
 	Webhook:          "Webhook",          // Webhook 同步状态
 	DeviceSerial:     "DeviceSerial",     // 目标执行设备
 	DispatchedDevice: "DispatchedDevice", // 实际派发设备
-	DispatchedTime:   "DispatchedTime",   // 任务派发时间
+	DispatchedAt:     "DispatchedAt",     // 任务派发时间
 	StartAt:          "StartAt",          // 任务开始时间
 	EndAt:            "EndAt",            // 任务结束时间
 	ElapsedSeconds:   "ElapsedSeconds",   // 任务耗时（秒）

@@ -17,26 +17,26 @@ const (
 
 // TargetTask contains the columns mirrored into the local capture_targets table.
 type TargetTask struct {
-	TaskID            int64
-	Params            string
-	App               string
-	Scene             string
-	StartAt           *time.Time
-	StartAtRaw        string
-	EndAt             *time.Time
-	EndAtRaw          string
-	Datetime          *time.Time
-	DatetimeRaw       string
-	Status            string
-	Webhook           string
-	UserID            string
-	UserName          string
-	Extra             string
-	DeviceSerial      string
-	DispatchedDevice  string
-	DispatchedTime    *time.Time
-	DispatchedTimeRaw string
-	ElapsedSeconds    int64
+	TaskID           int64
+	Params           string
+	App              string
+	Scene            string
+	StartAt          *time.Time
+	StartAtRaw       string
+	EndAt            *time.Time
+	EndAtRaw         string
+	Datetime         *time.Time
+	DatetimeRaw      string
+	Status           string
+	Webhook          string
+	UserID           string
+	UserName         string
+	Extra            string
+	DeviceSerial     string
+	DispatchedDevice string
+	DispatchedAt     *time.Time
+	DispatchedAtRaw  string
+	ElapsedSeconds   int64
 }
 
 // TargetMirror keeps Feishu target rows synchronized inside SQLite.
@@ -108,7 +108,7 @@ func buildTargetColumnOrder(fields feishu.TargetFields) []string {
 		fields.Extra,
 		fields.DeviceSerial,
 		fields.DispatchedDevice,
-		fields.DispatchedTime,
+		fields.DispatchedAt,
 		fields.ElapsedSeconds,
 	}
 }
@@ -129,7 +129,7 @@ func ensureTargetSchema(db *sql.DB, table string, fields feishu.TargetFields, co
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.Extra)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.DeviceSerial)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.DispatchedDevice)),
-		fmt.Sprintf("%s TEXT", quoteIdent(fields.DispatchedTime)),
+		fmt.Sprintf("%s TEXT", quoteIdent(fields.DispatchedAt)),
 		fmt.Sprintf("%s INTEGER", quoteIdent(fields.ElapsedSeconds)),
 		fmt.Sprintf("%s TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP", quoteIdent(targetUpdatedAtColumn)),
 	}
@@ -241,7 +241,7 @@ func (m *TargetMirror) upsert(task *TargetTask) error {
 		nullableString(task.Extra),
 		nullableString(task.DeviceSerial),
 		nullableString(task.DispatchedDevice),
-		formatDatetime(task.DispatchedTimeRaw, task.DispatchedTime),
+		formatDatetime(task.DispatchedAtRaw, task.DispatchedAt),
 		elapsed,
 	)
 	if err != nil {
