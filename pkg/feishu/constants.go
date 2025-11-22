@@ -19,6 +19,8 @@ const (
 	StatusFailed = "failed"
 	// StatusDispatched marks a task row as dispatched.
 	StatusDispatched = "dispatched"
+	// StatusRunning marks a task row as currently executing.
+	StatusRunning = "running"
 	// WebhookPending marks a task that requires webhook synchronization.
 	WebhookPending = "pending"
 	// WebhookSuccess marks a task whose webhook synchronization succeeded.

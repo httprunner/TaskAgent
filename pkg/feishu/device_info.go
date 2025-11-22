@@ -259,8 +259,19 @@ func buildDeviceInfoPayload(rec DeviceRecordInput, fields DeviceFields) (map[str
 	addOptionalField(row, fields.Status, rec.Status)
 	addOptionalField(row, fields.LastError, rec.LastError)
 	addOptionalField(row, fields.Tags, rec.Tags)
-	addOptionalField(row, fields.RunningTask, rec.RunningTask)
-	addOptionalStringSlice(row, fields.PendingTasks, rec.PendingTasks)
+
+	// Always sync running/pending fields so bitable view reflects the latest state.
+	if runningCol := strings.TrimSpace(fields.RunningTask); runningCol != "" {
+		row[runningCol] = strings.TrimSpace(rec.RunningTask)
+	}
+	if pendingCol := strings.TrimSpace(fields.PendingTasks); pendingCol != "" {
+		if pending := filterNonEmpty(rec.PendingTasks); pending != nil {
+			row[pendingCol] = pending
+		} else {
+			// Write empty slice to clear stale pending tasks.
+			row[pendingCol] = []string{}
+		}
+	}
 	if rec.LastSeenAt != nil {
 		if strings.TrimSpace(fields.LastSeenAt) == "" {
 			return nil, fmt.Errorf("feishu: LastSeenAt field not configured")

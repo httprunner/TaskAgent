@@ -58,6 +58,17 @@ recordID, err := client.CreateTargetRecord(ctx, taskTableURL, feishu.TaskRecordI
 
 也可使用 `FetchTaskTable` 读取全部行，并通过 `UpdateTaskStatus`/`UpdateTaskStatuses` 批量更新状态。`TaskFields` 支持自定义列名（`override *TaskFields`）。
 
+**状态枚举**：
+
+| Status | 含义 | 触发位置 |
+| --- | --- | --- |
+| `pending` / `failed` | 等待重新派发 | `FetchAvailableTasks` 过滤入口 |
+| `dispatched` | 已成功领取但尚未执行 | `TaskManager.OnTasksDispatched` |
+| `running` | 设备已开始执行该 TaskID | `TaskLifecycle.OnTaskStarted`（由 DevicePoolAgent 统一触发） |
+| `success` / `failed` | 执行完成（成功/失败） | `TaskLifecycle.OnTaskResult` + `OnTasksCompleted` |
+
+内置的 `FeishuTaskClient` 已实现 `TaskStartNotifier` 与完成回调，无需业务层手动写回 `running`、`success/failed`。
+
 ## 采集结果记录表
 
 根据需求新增的结果表（表 ID `tblzoZuR6aminfye`）由以下字段组成：

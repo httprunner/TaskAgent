@@ -7,6 +7,7 @@ TaskAgent is a Go 1.24 module that keeps Android capture devices busy by polling
 - **Device pool orchestration** – `pool.DevicePoolAgent` refreshes connected devices, batches tasks, and invokes your `JobRunner` implementation with cancelable contexts.
 - **Provider & manager interfaces** – swap in custom `DeviceProvider` or `TaskManager` implementations while the defaults cover ADB devices and Feishu queues.
 - **Lean dependency stack** – relies on `httprunner/v5`'s `gadb`, `zerolog`, and the official Lark Open Platform SDK only when needed.
+- **Lifecycle callbacks** – `TaskLifecycle` emits `OnTaskStarted` (pending/dispatched → running) and `OnTaskResult` (running → success/failed) so Feishu status rows and device tables stay consistent without business code rewiring.
 
 ## Repository Layout
 - `pool.go` / `pool_test.go` – device scheduling loop, job lifecycle hooks, and unit coverage.
@@ -87,6 +88,26 @@ TaskAgent is a Go 1.24 module that keeps Android capture devices busy by polling
    ```
    If you configure `DEVICE_BITABLE_URL` / `DEVICE_TASK_BITABLE_URL`, the pool will upsert device heartbeats (Status/LastSeenAt) and create one row per dispatch (JobID `${serial}-YYMMDDHHMM`, AssignedTasks, Start/End, State, ErrorMessage). Leave the URLs empty to skip recording.
    `MyRunner` must satisfy `pool.JobRunner` so the agent can call `RunJob` per device batch; decode the Feishu payload from `req.Tasks[n].Payload`. Pass the `app` argument that matches the Feishu target-table `App` column so the built-in `FeishuTaskClient` filters and updates the correct rows (statuses transition through `dispatched`, `success`, and `failed`).
+
+## Task Lifecycle & Status Flow
+
+TaskAgent keeps Feishu task rows and device snapshots in sync via a four-step lifecycle:
+
+```
+pending / failed (Feishu filter)
+        ↓ (FetchAvailableTasks)
+dispatched (OnTasksDispatched)
+        ↓ (TaskLifecycle.OnTaskStarted)
+running  + device RunningTask/PendingTasks updated
+        ↓ (TaskLifecycle.OnTaskResult + OnTasksCompleted)
+success / failed
+```
+
+- `TaskLifecycle.OnTaskStarted` fires the moment a `JobRunner` begins a specific task; the default `FeishuTaskClient` implementation writes the `running` status, while the built-in recorder updates the device table so a TaskID never appears in both `RunningTask` and `PendingTasks`.
+- `TaskLifecycle.OnTaskResult` fires right after each task finishes. DevicePoolAgent sets `task.ResultStatus = success/failed` based on the error and later calls `TaskManager.OnTasksCompleted` so Feishu reflects the final state.
+- Device recorder hooks (`pkg/devrecorder`) continue to upsert device heartbeats (`idle/running/offline`) and pending queues even if you disable Feishu tables (simply point the URLs to empty strings).
+
+By centralizing these hooks in TaskAgent, embedded agents (such as fox search) no longer need to manage per-task status transitions themselves—plug in a `JobRunner`, and the lifecycle wiring happens automatically.
 
 ## Development & Testing
 - Format/lint: `go fmt ./...` and `go vet ./...` to keep style consistent.

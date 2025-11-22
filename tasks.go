@@ -129,6 +129,40 @@ func (c *FeishuTaskClient) OnTasksCompleted(ctx context.Context, deviceSerial st
 	return nil
 }
 
+// OnTaskStarted marks a single task as running once execution begins.
+func (c *FeishuTaskClient) OnTaskStarted(ctx context.Context, deviceSerial string, task *Task) error {
+	if c == nil || task == nil {
+		return nil
+	}
+	feishuTasks, err := extractFeishuTasks([]*Task{task})
+	if err != nil {
+		return err
+	}
+	if len(feishuTasks) == 0 {
+		return nil
+	}
+	return c.UpdateTaskStatuses(ctx, feishuTasks, feishu.StatusRunning)
+}
+
+// OnTaskResult updates task status immediately when a task finishes.
+func (c *FeishuTaskClient) OnTaskResult(ctx context.Context, deviceSerial string, task *Task, runErr error) error {
+	if c == nil || task == nil {
+		return nil
+	}
+	status := feishu.StatusSuccess
+	if runErr != nil {
+		status = feishu.StatusFailed
+	}
+	feishuTasks, err := extractFeishuTasks([]*Task{task})
+	if err != nil {
+		return err
+	}
+	if len(feishuTasks) == 0 {
+		return nil
+	}
+	return c.UpdateTaskStatuses(ctx, feishuTasks, status)
+}
+
 func (c *FeishuTaskClient) updateStatuses(ctx context.Context, tasks []*Task, status, deviceSerial string) ([]*FeishuTask, error) {
 	feishuTasks, err := extractFeishuTasks(tasks)
 	if err != nil {
@@ -322,6 +356,7 @@ type FeishuTask struct {
 	DispatchedAtRaw  string
 	ElapsedSeconds   int64
 	TargetCount      int
+	TaskRef          *Task `json:"-"`
 
 	source *feishuTaskSource
 }
@@ -830,6 +865,7 @@ func extractFeishuTasks(tasks []*Task) ([]*FeishuTask, error) {
 		if !ok || ft == nil {
 			return nil, errors.New("invalid feishu target task payload")
 		}
+		ft.TaskRef = task
 		result = append(result, ft)
 	}
 	return result, nil

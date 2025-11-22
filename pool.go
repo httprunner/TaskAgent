@@ -27,6 +27,12 @@ type Task struct {
 	ResultStatus string
 }
 
+// TaskLifecycle defines callbacks for task execution progress.
+type TaskLifecycle struct {
+	OnTaskStarted func(task *Task)
+	OnTaskResult  func(task *Task, err error)
+}
+
 // DeviceProvider returns the set of currently connected device serials.
 type DeviceProvider interface {
 	ListDevices(ctx context.Context) ([]string, error)
@@ -39,10 +45,21 @@ type TaskManager interface {
 	OnTasksCompleted(ctx context.Context, deviceSerial string, tasks []*Task, jobErr error) error
 }
 
+// TaskStartNotifier can be implemented by TaskManagers that need per-task start events.
+type TaskStartNotifier interface {
+	OnTaskStarted(ctx context.Context, deviceSerial string, task *Task) error
+}
+
+// TaskResultNotifier receives per-task completion events right after a task finishes.
+type TaskResultNotifier interface {
+	OnTaskResult(ctx context.Context, deviceSerial string, task *Task, runErr error) error
+}
+
 // JobRequest bundles the execution details for a device.
 type JobRequest struct {
 	DeviceSerial string
 	Tasks        []*Task
+	Lifecycle    *TaskLifecycle
 }
 
 // JobRunner executes tasks on a concrete device.
@@ -112,6 +129,7 @@ type deviceJob struct {
 	tasks        []*Task
 	cancel       context.CancelFunc
 	startAt      time.Time
+	lifecycle    *TaskLifecycle
 }
 
 type noopRecorder struct{}
@@ -437,8 +455,7 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 			continue
 		}
 		now := time.Now()
-		running := firstTaskID(assignment.tasks)
-		pending := remainingTaskIDs(assignment.tasks)
+		pending := extractTaskIDs(assignment.tasks)
 		if err := a.recorder.UpsertDevices(ctx, []DeviceInfoUpdate{{
 			DeviceSerial: dev.serial,
 			Status:       string(statusRunning),
@@ -448,7 +465,7 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 			ProviderUUID: dev.meta.providerUUID,
 			AgentVersion: a.cfg.AgentVersion,
 			LastSeenAt:   now,
-			RunningTask:  running,
+			RunningTask:  "",
 			PendingTasks: pending,
 		}}); err != nil {
 			log.Error().Err(err).Str("serial", dev.serial).Msg("device recorder update running state failed")
@@ -475,9 +492,6 @@ func (a *DevicePoolAgent) idleDevices() []*deviceState {
 }
 
 func (a *DevicePoolAgent) startDeviceJob(ctx context.Context, dev *deviceState, tasks []*Task) {
-	// Mark tasks as running in Feishu (best-effort, only when using FeishuTaskClient).
-	a.markTasksRunning(ctx, tasks)
-
 	jobCtx, cancel := context.WithCancel(ctx)
 	job := &deviceJob{
 		deviceSerial: dev.serial,
@@ -485,6 +499,7 @@ func (a *DevicePoolAgent) startDeviceJob(ctx context.Context, dev *deviceState, 
 		cancel:       cancel,
 		startAt:      time.Now(),
 	}
+	job.lifecycle = a.buildTaskLifecycle(jobCtx, dev, job)
 
 	a.deviceMu.Lock()
 	dev.status = statusRunning
@@ -493,6 +508,28 @@ func (a *DevicePoolAgent) startDeviceJob(ctx context.Context, dev *deviceState, 
 
 	a.backgroundGroup.Add(1)
 	go a.runDeviceJob(jobCtx, dev, job)
+}
+
+func (a *DevicePoolAgent) buildTaskLifecycle(ctx context.Context, dev *deviceState, job *deviceJob) *TaskLifecycle {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return &TaskLifecycle{
+		OnTaskStarted: func(task *Task) {
+			a.handleTaskStarted(ctx, dev, job, task)
+		},
+		OnTaskResult: func(task *Task, err error) {
+			if task == nil {
+				return
+			}
+			if err != nil {
+				task.ResultStatus = feishu.StatusFailed
+			} else {
+				task.ResultStatus = feishu.StatusSuccess
+			}
+			a.handleTaskResultEvent(ctx, job, task, err)
+		},
+	}
 }
 
 func (a *DevicePoolAgent) runDeviceJob(ctx context.Context, dev *deviceState, job *deviceJob) {
@@ -518,6 +555,7 @@ func (a *DevicePoolAgent) runDeviceJob(ctx context.Context, dev *deviceState, jo
 		err = a.jobRunner.RunJob(ctx, JobRequest{
 			DeviceSerial: job.deviceSerial,
 			Tasks:        job.tasks,
+			Lifecycle:    job.lifecycle,
 		})
 		if err == nil {
 			if attempt > 1 {
@@ -585,6 +623,74 @@ func (a *DevicePoolAgent) runDeviceJob(ctx context.Context, dev *deviceState, jo
 
 	if remove {
 		a.removeDevice(job.deviceSerial)
+	}
+}
+
+func (a *DevicePoolAgent) handleTaskStarted(ctx context.Context, dev *deviceState, job *deviceJob, task *Task) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if dev == nil || job == nil || task == nil {
+		return
+	}
+	now := time.Now()
+
+	a.deviceMu.Lock()
+	meta := dev.meta
+	running := firstTaskID(job.tasks)
+	if running == "" && strings.TrimSpace(task.ID) != "" {
+		running = strings.TrimSpace(task.ID)
+	}
+	pending := remainingTaskIDs(job.tasks)
+	a.deviceMu.Unlock()
+
+	if a.recorder != nil {
+		if err := a.recorder.UpsertDevices(ctx, []DeviceInfoUpdate{{
+			DeviceSerial: job.deviceSerial,
+			Status:       string(statusRunning),
+			OSType:       meta.osType,
+			OSVersion:    meta.osVersion,
+			IsRoot:       meta.isRoot,
+			ProviderUUID: meta.providerUUID,
+			AgentVersion: a.cfg.AgentVersion,
+			LastSeenAt:   now,
+			RunningTask:  running,
+			PendingTasks: pending,
+		}}); err != nil {
+			log.Error().
+				Err(err).
+				Str("serial", job.deviceSerial).
+				Str("running_task", running).
+				Strs("pending_tasks", pending).
+				Msg("device recorder update running task failed")
+		}
+	}
+	if notifier, ok := a.taskManager.(TaskStartNotifier); ok && notifier != nil {
+		if err := notifier.OnTaskStarted(ctx, job.deviceSerial, task); err != nil {
+			log.Warn().
+				Err(err).
+				Str("serial", job.deviceSerial).
+				Str("task_id", task.ID).
+				Msg("task manager handle task started failed")
+		}
+	}
+}
+
+func (a *DevicePoolAgent) handleTaskResultEvent(ctx context.Context, job *deviceJob, task *Task, runErr error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if job == nil || task == nil {
+		return
+	}
+	if notifier, ok := a.taskManager.(TaskResultNotifier); ok && notifier != nil {
+		if err := notifier.OnTaskResult(ctx, job.deviceSerial, task, runErr); err != nil {
+			log.Warn().
+				Err(err).
+				Str("serial", job.deviceSerial).
+				Str("task_id", task.ID).
+				Msg("task manager handle task result failed")
+		}
 	}
 }
 
@@ -698,25 +804,4 @@ func (a *DevicePoolAgent) removeDevice(serial string) {
 	defer a.deviceMu.Unlock()
 	delete(a.devices, serial)
 	log.Info().Str("serial", serial).Msg("device removed from pool")
-}
-
-// markTasksRunning updates task status to "running" when supported.
-func (a *DevicePoolAgent) markTasksRunning(ctx context.Context, tasks []*Task) {
-	if a == nil || a.taskManager == nil {
-		return
-	}
-	ftc, ok := a.taskManager.(*FeishuTaskClient)
-	if !ok || ftc == nil {
-		return
-	}
-	feishuTasks, err := extractFeishuTasks(tasks)
-	if err != nil || len(feishuTasks) == 0 {
-		return
-	}
-	// Only the first task is actively running; the rest remain "dispatched"
-	// until the device progresses to them.
-	running := feishuTasks[:1]
-	if err := ftc.UpdateTaskStatuses(ctx, running, "running"); err != nil {
-		log.Warn().Err(err).Msg("mark feishu tasks running failed")
-	}
 }
