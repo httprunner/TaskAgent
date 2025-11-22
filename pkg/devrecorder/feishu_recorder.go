@@ -15,7 +15,7 @@ import (
 type FeishuRecorder struct {
 	client     *feishu.Client
 	infoURL    string
-	infoFields feishu.DeviceInfoFields
+	infoFields feishu.DeviceFields
 	clock      func() time.Time
 }
 
@@ -32,13 +32,13 @@ func NewFeishuRecorder(infoURL string) (*FeishuRecorder, error) {
 	return &FeishuRecorder{
 		client:     cli,
 		infoURL:    infoURL,
-		infoFields: feishu.DeviceInfoFieldsFromEnv(),
+		infoFields: feishu.DeviceFieldsFromEnv(),
 	}, nil
 }
 
 // NewFromEnv builds a recorder using environment variables; falls back to Noop when not configured.
 func NewFromEnv() (DeviceRecorder, error) {
-	infoURL := strings.TrimSpace(os.Getenv(feishu.EnvDeviceInfoURL))
+	infoURL := strings.TrimSpace(os.Getenv(feishu.EnvDeviceBitableURL))
 	rec, err := NewFeishuRecorder(infoURL)
 	if err != nil {
 		return nil, err
@@ -55,7 +55,7 @@ func (r *FeishuRecorder) UpsertDevices(ctx context.Context, devices []pool.Devic
 	}
 	now := r.now()
 	for _, d := range devices {
-		rec := feishu.DeviceInfoRecordInput{
+		rec := feishu.DeviceRecordInput{
 			DeviceSerial: d.DeviceSerial,
 			OSType:       d.OSType,
 			OSVersion:    d.OSVersion,
@@ -72,7 +72,7 @@ func (r *FeishuRecorder) UpsertDevices(ctx context.Context, devices []pool.Devic
 		} else {
 			rec.LastSeenAt = &now
 		}
-		if err := r.client.UpsertDeviceInfo(ctx, r.infoURL, r.infoFields, rec); err != nil {
+		if err := r.client.UpsertDevice(ctx, r.infoURL, r.infoFields, rec); err != nil {
 			log.Error().Err(err).Str("serial", d.DeviceSerial).Str("status", d.Status).Msg("feishu recorder: upsert device failed")
 		}
 	}

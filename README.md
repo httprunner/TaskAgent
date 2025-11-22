@@ -19,7 +19,7 @@ TaskAgent is a Go 1.24 module that keeps Android capture devices busy by polling
 - Go 1.24 or newer (`go env GOVERSION` to verify).
 - A Feishu custom app with API access plus the following environment variables: `FEISHU_APP_ID`, `FEISHU_APP_SECRET`, optional `FEISHU_TENANT_KEY`, `FEISHU_BASE_URL`, and `FEISHU_LIVE_TEST` (toggles integration tests).
 - A Feishu task Bitable that stores pending tasks (surface its link via `TASK_BITABLE_URL` or inject it directly into `pool.Config.BitableURL`).
-- Optional observability tables: `DEVICE_INFO_BITABLE_URL` (设备信息表) and `DEVICE_TASK_BITABLE_URL` (设备任务表) for recording device heartbeat/dispatch snapshots. Leave empty to disable recording. Column names are customizable via `DEVICE_INFO_FIELD_*` / `DEVICE_TASK_FIELD_*`; defaults match the sample schemas below.
+- Optional observability tables: `DEVICE_BITABLE_URL` (设备信息表) and `DEVICE_TASK_BITABLE_URL` (设备任务表) for recording device heartbeat/dispatch snapshots. Leave empty to disable recording. Column names are customizable via `DEVICE_FIELD_*` / `DEVICE_TASK_FIELD_*`; defaults match the sample schemas below.
 - Result write throttling: Feishu结果表写入内置全局限速器，默认 1 RPS（可通过 `FEISHU_REPORT_RPS` 配置浮点值），避免多设备并发写表触发频控。
 - Access to the result Bitables you plan to push to, if any.
 - Android Debug Bridge (ADB) on the PATH when using the default provider.
@@ -85,7 +85,7 @@ TaskAgent is a Go 1.24 module that keeps Android capture devices busy by polling
        }
    }
    ```
-   If you configure `DEVICE_INFO_BITABLE_URL` / `DEVICE_TASK_BITABLE_URL`, the pool will upsert device heartbeats (Status/LastSeenAt) and create one row per dispatch (JobID `${serial}-YYMMDDHHMM`, AssignedTasks, Start/End, State, ErrorMessage). Leave the URLs empty to skip recording.
+   If you configure `DEVICE_BITABLE_URL` / `DEVICE_TASK_BITABLE_URL`, the pool will upsert device heartbeats (Status/LastSeenAt) and create one row per dispatch (JobID `${serial}-YYMMDDHHMM`, AssignedTasks, Start/End, State, ErrorMessage). Leave the URLs empty to skip recording.
    `MyRunner` must satisfy `pool.JobRunner` so the agent can call `RunJob` per device batch; decode the Feishu payload from `req.Tasks[n].Payload`. Pass the `app` argument that matches the Feishu target-table `App` column so the built-in `FeishuTaskClient` filters and updates the correct rows (statuses transition through `dispatched`, `success`, and `failed`).
 
 ## Development & Testing

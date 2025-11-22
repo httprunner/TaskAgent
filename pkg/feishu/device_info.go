@@ -12,24 +12,23 @@ import (
 
 // Environment override keys for device info table.
 const (
-	EnvDeviceInfoURL               = "DEVICE_INFO_BITABLE_URL"
-	EnvDeviceInfoFieldSerial       = "DEVICE_INFO_FIELD_SERIAL"
-	EnvDeviceInfoFieldOSType       = "DEVICE_INFO_FIELD_OSTYPE"
-	EnvDeviceInfoFieldOSVersion    = "DEVICE_INFO_FIELD_OSVERSION"
-	EnvDeviceInfoFieldIPLocation   = "DEVICE_INFO_FIELD_IP_LOCATION"
-	EnvDeviceInfoFieldIsRoot       = "DEVICE_INFO_FIELD_ISROOT"
-	EnvDeviceInfoFieldProviderUUID = "DEVICE_INFO_FIELD_PROVIDERUUID"
-	EnvDeviceInfoFieldAgentVersion = "DEVICE_INFO_FIELD_AGENT_VERSION"
-	EnvDeviceInfoFieldStatus       = "DEVICE_INFO_FIELD_STATUS"
-	EnvDeviceInfoFieldLastSeenAt   = "DEVICE_INFO_FIELD_LAST_SEEN_AT"
-	EnvDeviceInfoFieldLastError    = "DEVICE_INFO_FIELD_LAST_ERROR"
-	EnvDeviceInfoFieldTags         = "DEVICE_INFO_FIELD_TAGS"
-	EnvDeviceInfoFieldRunningTask  = "DEVICE_INFO_FIELD_RUNNING_TASK"
-	EnvDeviceInfoFieldPendingTasks = "DEVICE_INFO_FIELD_PENDING_TASKS"
+	EnvDeviceFieldSerial       = "DEVICE_FIELD_SERIAL"
+	EnvDeviceFieldOSType       = "DEVICE_FIELD_OSTYPE"
+	EnvDeviceFieldOSVersion    = "DEVICE_FIELD_OSVERSION"
+	EnvDeviceFieldIPLocation   = "DEVICE_FIELD_IP_LOCATION"
+	EnvDeviceFieldIsRoot       = "DEVICE_FIELD_ISROOT"
+	EnvDeviceFieldProviderUUID = "DEVICE_FIELD_PROVIDERUUID"
+	EnvDeviceFieldAgentVersion = "DEVICE_FIELD_AGENT_VERSION"
+	EnvDeviceFieldStatus       = "DEVICE_FIELD_STATUS"
+	EnvDeviceFieldLastSeenAt   = "DEVICE_FIELD_LAST_SEEN_AT"
+	EnvDeviceFieldLastError    = "DEVICE_FIELD_LAST_ERROR"
+	EnvDeviceFieldTags         = "DEVICE_FIELD_TAGS"
+	EnvDeviceFieldRunningTask  = "DEVICE_FIELD_RUNNING_TASK"
+	EnvDeviceFieldPendingTasks = "DEVICE_FIELD_PENDING_TASKS"
 )
 
-// DeviceInfoFields lists column names for the device inventory table.
-type DeviceInfoFields struct {
+// DeviceFields lists column names for the device inventory table.
+type DeviceFields struct {
 	DeviceSerial string
 	OSType       string
 	OSVersion    string
@@ -45,25 +44,8 @@ type DeviceInfoFields struct {
 	PendingTasks string
 }
 
-// DefaultDeviceInfoFields provides sensible defaults matching the design doc.
-var DefaultDeviceInfoFields = DeviceInfoFields{
-	DeviceSerial: "DeviceSerial",
-	OSType:       "OSType",
-	OSVersion:    "OSVersion",
-	IPLocation:   "IPLocation",
-	IsRoot:       "IsRoot",
-	ProviderUUID: "ProviderUUID",
-	AgentVersion: "AgentVersion",
-	Status:       "Status",
-	LastSeenAt:   "LastSeenAt",
-	LastError:    "LastError",
-	Tags:         "Tags",
-	RunningTask:  "RunningTask",
-	PendingTasks: "PendingTasks",
-}
-
-// DeviceInfoRecordInput describes the payload used to create or update a device row.
-type DeviceInfoRecordInput struct {
+// DeviceRecordInput describes the payload used to create or update a device row.
+type DeviceRecordInput struct {
 	DeviceSerial string
 	OSType       string
 	OSVersion    string
@@ -79,46 +61,46 @@ type DeviceInfoRecordInput struct {
 	PendingTasks []string
 }
 
-// DeviceInfoFieldsFromEnv builds fields with environment overrides.
-func DeviceInfoFieldsFromEnv() DeviceInfoFields {
-	f := DefaultDeviceInfoFields
-	if v := strings.TrimSpace(os.Getenv(EnvDeviceInfoFieldSerial)); v != "" {
+// DeviceFieldsFromEnv builds fields with environment overrides.
+func DeviceFieldsFromEnv() DeviceFields {
+	f := DefaultDeviceFields
+	if v := strings.TrimSpace(os.Getenv(EnvDeviceFieldSerial)); v != "" {
 		f.DeviceSerial = v
 	}
-	if v := strings.TrimSpace(os.Getenv(EnvDeviceInfoFieldOSType)); v != "" {
+	if v := strings.TrimSpace(os.Getenv(EnvDeviceFieldOSType)); v != "" {
 		f.OSType = v
 	}
-	if v := strings.TrimSpace(os.Getenv(EnvDeviceInfoFieldOSVersion)); v != "" {
+	if v := strings.TrimSpace(os.Getenv(EnvDeviceFieldOSVersion)); v != "" {
 		f.OSVersion = v
 	}
-	if v := strings.TrimSpace(os.Getenv(EnvDeviceInfoFieldIPLocation)); v != "" {
+	if v := strings.TrimSpace(os.Getenv(EnvDeviceFieldIPLocation)); v != "" {
 		f.IPLocation = v
 	}
-	if v := strings.TrimSpace(os.Getenv(EnvDeviceInfoFieldIsRoot)); v != "" {
+	if v := strings.TrimSpace(os.Getenv(EnvDeviceFieldIsRoot)); v != "" {
 		f.IsRoot = v
 	}
-	if v := strings.TrimSpace(os.Getenv(EnvDeviceInfoFieldProviderUUID)); v != "" {
+	if v := strings.TrimSpace(os.Getenv(EnvDeviceFieldProviderUUID)); v != "" {
 		f.ProviderUUID = v
 	}
-	if v := strings.TrimSpace(os.Getenv(EnvDeviceInfoFieldAgentVersion)); v != "" {
+	if v := strings.TrimSpace(os.Getenv(EnvDeviceFieldAgentVersion)); v != "" {
 		f.AgentVersion = v
 	}
-	if v := strings.TrimSpace(os.Getenv(EnvDeviceInfoFieldStatus)); v != "" {
+	if v := strings.TrimSpace(os.Getenv(EnvDeviceFieldStatus)); v != "" {
 		f.Status = v
 	}
-	if v := strings.TrimSpace(os.Getenv(EnvDeviceInfoFieldLastSeenAt)); v != "" {
+	if v := strings.TrimSpace(os.Getenv(EnvDeviceFieldLastSeenAt)); v != "" {
 		f.LastSeenAt = v
 	}
-	if v := strings.TrimSpace(os.Getenv(EnvDeviceInfoFieldLastError)); v != "" {
+	if v := strings.TrimSpace(os.Getenv(EnvDeviceFieldLastError)); v != "" {
 		f.LastError = v
 	}
-	if v := strings.TrimSpace(os.Getenv(EnvDeviceInfoFieldTags)); v != "" {
+	if v := strings.TrimSpace(os.Getenv(EnvDeviceFieldTags)); v != "" {
 		f.Tags = v
 	}
-	if v := strings.TrimSpace(os.Getenv(EnvDeviceInfoFieldRunningTask)); v != "" {
+	if v := strings.TrimSpace(os.Getenv(EnvDeviceFieldRunningTask)); v != "" {
 		f.RunningTask = v
 	}
-	if v := strings.TrimSpace(os.Getenv(EnvDeviceInfoFieldPendingTasks)); v != "" {
+	if v := strings.TrimSpace(os.Getenv(EnvDeviceFieldPendingTasks)); v != "" {
 		f.PendingTasks = v
 	}
 	return f
@@ -127,8 +109,8 @@ func DeviceInfoFieldsFromEnv() DeviceInfoFields {
 // DeviceInfoTable caches decoded rows for quick lookup.
 type DeviceInfoTable struct {
 	Ref    BitableRef
-	Fields DeviceInfoFields
-	Rows   []DeviceInfoRecordInput
+	Fields DeviceFields
+	Rows   []DeviceRecordInput
 	index  map[string]string // DeviceSerial -> RecordID
 }
 
@@ -143,8 +125,8 @@ func (t *DeviceInfoTable) RecordIDBySerial(serial string) string {
 	return t.index[strings.TrimSpace(serial)]
 }
 
-// FetchDeviceInfoTable downloads the device info table.
-func (c *Client) FetchDeviceInfoTable(ctx context.Context, rawURL string, override *DeviceInfoFields) (*DeviceInfoTable, error) {
+// FetchDeviceTable downloads the device info table.
+func (c *Client) FetchDeviceTable(ctx context.Context, rawURL string, override *DeviceFields) (*DeviceInfoTable, error) {
 	if c == nil {
 		return nil, errors.New("feishu: client is nil")
 	}
@@ -155,7 +137,7 @@ func (c *Client) FetchDeviceInfoTable(ctx context.Context, rawURL string, overri
 	if err := c.ensureBitableAppToken(ctx, &ref); err != nil {
 		return nil, err
 	}
-	fields := DefaultDeviceInfoFields
+	fields := DefaultDeviceFields
 	if override != nil {
 		fields = fields.merge(*override)
 	}
@@ -166,7 +148,7 @@ func (c *Client) FetchDeviceInfoTable(ctx context.Context, rawURL string, overri
 	table := &DeviceInfoTable{
 		Ref:    ref,
 		Fields: fields,
-		Rows:   make([]DeviceInfoRecordInput, 0, len(records)),
+		Rows:   make([]DeviceRecordInput, 0, len(records)),
 		index:  make(map[string]string, len(records)),
 	}
 	for _, rec := range records {
@@ -174,7 +156,7 @@ func (c *Client) FetchDeviceInfoTable(ctx context.Context, rawURL string, overri
 		if serial == "" {
 			continue
 		}
-		row := DeviceInfoRecordInput{
+		row := DeviceRecordInput{
 			DeviceSerial: serial,
 			OSType:       toString(rec.Fields[fields.OSType]),
 			OSVersion:    toString(rec.Fields[fields.OSVersion]),
@@ -210,15 +192,15 @@ func (c *Client) FetchDeviceInfoTable(ctx context.Context, rawURL string, overri
 	return table, nil
 }
 
-// UpsertDeviceInfo creates or updates a device row keyed by DeviceSerial.
-func (c *Client) UpsertDeviceInfo(ctx context.Context, rawURL string, fields DeviceInfoFields, rec DeviceInfoRecordInput) error {
+// UpsertDevice creates or updates a device row keyed by DeviceSerial.
+func (c *Client) UpsertDevice(ctx context.Context, rawURL string, fields DeviceFields, rec DeviceRecordInput) error {
 	if c == nil {
 		return errors.New("feishu: client is nil")
 	}
 	if strings.TrimSpace(rawURL) == "" {
 		return errors.New("feishu: device info table url is empty")
 	}
-	table, err := c.FetchDeviceInfoTable(ctx, rawURL, &fields)
+	table, err := c.FetchDeviceTable(ctx, rawURL, &fields)
 	if err != nil {
 		return err
 	}
@@ -234,7 +216,7 @@ func (c *Client) UpsertDeviceInfo(ctx context.Context, rawURL string, fields Dev
 	return c.updateBitableRecord(ctx, table.Ref, recordID, payload)
 }
 
-func (fields DeviceInfoFields) merge(override DeviceInfoFields) DeviceInfoFields {
+func (fields DeviceFields) merge(override DeviceFields) DeviceFields {
 	result := fields
 	if strings.TrimSpace(override.DeviceSerial) != "" {
 		result.DeviceSerial = override.DeviceSerial
@@ -278,7 +260,7 @@ func (fields DeviceInfoFields) merge(override DeviceInfoFields) DeviceInfoFields
 	return result
 }
 
-func buildDeviceInfoPayload(rec DeviceInfoRecordInput, fields DeviceInfoFields) (map[string]any, error) {
+func buildDeviceInfoPayload(rec DeviceRecordInput, fields DeviceFields) (map[string]any, error) {
 	row := make(map[string]any)
 	addOptionalField(row, fields.DeviceSerial, rec.DeviceSerial)
 	addOptionalField(row, fields.OSType, rec.OSType)

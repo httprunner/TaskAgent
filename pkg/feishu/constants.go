@@ -8,6 +8,8 @@ const (
 	EnvTaskBitableURL = "TASK_BITABLE_URL"
 	// EnvResultBitableURL indicates where to push Feishu result rows.
 	EnvResultBitableURL = "RESULT_BITABLE_URL"
+	// EnvDeviceBitableURL indicates where to pull/push Feishu device status rows.
+	EnvDeviceBitableURL = "DEVICE_BITABLE_URL"
 
 	// StatusPending marks a task row as pending execution.
 	StatusPending = "pending"
@@ -85,4 +87,21 @@ var DefaultResultFields = ResultFields{
 	TaskID:         "TaskID",         // 任务 ID（关联 TaskFields）
 	DeviceSerial:   "DeviceSerial",   // 设备序列号
 	Extra:          "Extra",          // 额外信息
+}
+
+// DefaultDeviceFields provides sensible defaults matching the design doc.
+var DefaultDeviceFields = DeviceFields{
+	DeviceSerial: "DeviceSerial",
+	OSType:       "OSType",
+	OSVersion:    "OSVersion",
+	IPLocation:   "IPLocation",
+	IsRoot:       "IsRoot",
+	ProviderUUID: "ProviderUUID",
+	AgentVersion: "AgentVersion",
+	Status:       "Status",
+	LastSeenAt:   "LastSeenAt",
+	LastError:    "LastError",
+	Tags:         "Tags",
+	RunningTask:  "RunningTask",
+	PendingTasks: "PendingTasks",
 }

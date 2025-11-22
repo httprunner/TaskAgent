@@ -16,9 +16,9 @@
 | `FEISHU_TENANT_KEY` | 企业自建应用租户 key，可选 |
 | `FEISHU_BASE_URL` | 自定义开放平台域名，默认 `https://open.feishu.cn` |
 | `FEISHU_LIVE_TEST` | 置为 `1` 可启用真实 API 测试（需可访问的 Bitable） |
-| `DEVICE_INFO_BITABLE_URL` | 设备信息表链接，可选；为空时不写入设备画像 |
+| `DEVICE_BITABLE_URL` | 设备信息表链接，可选；为空时不写入设备画像 |
 | `DEVICE_TASK_BITABLE_URL` | 设备任务表链接，可选；为空时不记录派发/完成 |
-| `DEVICE_INFO_FIELD_*` | 覆盖设备信息表列名（如 `DEVICE_INFO_FIELD_SERIAL`、`DEVICE_INFO_FIELD_STATUS` 等） |
+| `DEVICE_FIELD_*` | 覆盖设备信息表列名（如 `DEVICE_FIELD_SERIAL`、`DEVICE_FIELD_STATUS` 等） |
 | `DEVICE_TASK_FIELD_*` | 覆盖设备任务表列名（如 `DEVICE_TASK_FIELD_JOBID` 等） |
 | `FEISHU_REPORT_RPS` | 结果表写入限速（浮点型，默认 1.0，单位：条/秒），多设备并发时可避免触发频控 |
 
@@ -32,7 +32,7 @@
 - **结果表限速**：全局串行限速，默认 1 RPS，可通过 `FEISHU_REPORT_RPS` 调整。
 - **目标表字段**：使用 `TASK_FIELD_*` 前缀（例如：`TASK_FIELD_PARAMS`）
 - **剧单表字段**：使用 `DRAMA_FIELD_*` 前缀（例如：`DRAMA_FIELD_NAME`、`DRAMA_FIELD_DURATION`）
-- **设备信息表字段**：使用 `DEVICE_INFO_FIELD_*` 前缀（默认：DeviceSerial/OSType/OSVersion/IPLocation/IsRoot/ProviderUUID/AgentVersion/Status/LastSeenAt/LastError/Tags）
+- **设备信息表字段**：使用 `DEVICE_FIELD_*` 前缀（默认：DeviceSerial/OSType/OSVersion/IPLocation/IsRoot/ProviderUUID/AgentVersion/Status/LastSeenAt/LastError/Tags）
 
 如果未设置环境变量，将使用上述示例中的默认字段名称。
 
@@ -129,7 +129,7 @@ FEISHU_LIVE_TEST=1 go test ./feishu -run Live
 `DeviceInfoFields`/`DeviceInfoRecordInput` 对应设备画像表：
 
 - 默认列：`DeviceSerial`（唯一）、`OSType`、`OSVersion`、`LocationCity`、`IsRoot`、`ProviderUUID`、`AgentVersion`、`Status`、`LastSeenAt`、`LastError`、`Tags`。
-- 典型写入：`client.UpsertDeviceInfo(ctx, DEVICE_INFO_BITABLE_URL, fields, record)`；`DeviceSerial` 为键，同步更新 `Status/LastSeenAt/AgentVersion` 等。
+- 典型写入：`client.UpsertDeviceInfo(ctx, DEVICE_BITABLE_URL, fields, record)`；`DeviceSerial` 为键，同步更新 `Status/LastSeenAt/AgentVersion` 等。
 
 `DeviceTaskFields`/`DeviceTaskRecordInput` 对应设备任务表：
 
