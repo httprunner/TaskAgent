@@ -17,6 +17,7 @@ import (
 	lark "github.com/larksuite/oapi-sdk-go/v3"
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 	larkauth "github.com/larksuite/oapi-sdk-go/v3/service/auth/v3"
+	"golang.org/x/sync/singleflight"
 )
 
 func init() {
@@ -45,6 +46,10 @@ type Client struct {
 	tokenMu       sync.Mutex
 	tenantToken   string
 	tokenExpireAt time.Time
+
+	appTokenMu    sync.RWMutex
+	appTokenCache map[string]string
+	appTokenGroup singleflight.Group
 }
 
 // NewClientFromEnv constructs a Client using environment variables.

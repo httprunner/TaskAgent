@@ -478,27 +478,72 @@ func (c *Client) ensureBitableAppToken(ctx context.Context, ref *BitableRef) (er
 		}
 	}()
 
+	if c == nil {
+		return errors.New("feishu: client is nil")
+	}
 	if ref == nil {
 		return errors.New("feishu: bitable reference is nil")
 	}
 	if strings.TrimSpace(ref.AppToken) != "" {
 		return nil
 	}
-	if strings.TrimSpace(ref.WikiToken) == "" {
+	wikiToken := strings.TrimSpace(ref.WikiToken)
+	if wikiToken == "" {
 		return errors.New("feishu: bitable app token not found in url")
 	}
-	node, err := c.fetchWikiNode(ctx, ref.WikiToken)
+
+	if cached, ok := c.loadCachedAppToken(wikiToken); ok {
+		ref.AppToken = cached
+		return nil
+	}
+
+	val, err, _ := c.appTokenGroup.Do(wikiToken, func() (interface{}, error) {
+		node, err := c.fetchWikiNode(ctx, wikiToken)
+		if err != nil {
+			return "", err
+		}
+		if node.ObjToken == "" {
+			return "", errors.New("feishu: wiki node response missing obj_token")
+		}
+		if node.ObjType != "bitable" {
+			return "", fmt.Errorf("feishu: wiki node type %q is not bitable", node.ObjType)
+		}
+		return node.ObjToken, nil
+	})
 	if err != nil {
 		return err
 	}
-	if node.ObjToken == "" {
+
+	appToken, _ := val.(string)
+	if strings.TrimSpace(appToken) == "" {
 		return errors.New("feishu: wiki node response missing obj_token")
 	}
-	if node.ObjType != "bitable" {
-		return fmt.Errorf("feishu: wiki node type %q is not bitable", node.ObjType)
-	}
-	ref.AppToken = node.ObjToken
+
+	c.storeAppTokenCache(wikiToken, appToken)
+	ref.AppToken = appToken
 	return nil
+}
+
+func (c *Client) loadCachedAppToken(wikiToken string) (string, bool) {
+	if c == nil || strings.TrimSpace(wikiToken) == "" {
+		return "", false
+	}
+	c.appTokenMu.RLock()
+	defer c.appTokenMu.RUnlock()
+	token, ok := c.appTokenCache[wikiToken]
+	return token, ok
+}
+
+func (c *Client) storeAppTokenCache(wikiToken, appToken string) {
+	if c == nil || strings.TrimSpace(wikiToken) == "" || strings.TrimSpace(appToken) == "" {
+		return
+	}
+	c.appTokenMu.Lock()
+	defer c.appTokenMu.Unlock()
+	if c.appTokenCache == nil {
+		c.appTokenCache = make(map[string]string)
+	}
+	c.appTokenCache[wikiToken] = appToken
 }
 
 // FetchBitableRows downloads raw records from a Feishu bitable so callers can read any column.
@@ -1135,6 +1180,16 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 		limit = opts.Limit
 	}
 
+	start := time.Now()
+	page := 0
+	log.Debug().
+		Str("table_id", ref.TableID).
+		Str("view_id", viewID).
+		Bool("has_filter", opts != nil && strings.TrimSpace(opts.Filter) != "").
+		Int("page_size", pageSize).
+		Int("limit", limit).
+		Msg("start listing bitable records")
+
 	for {
 		values.Del("page_token")
 		if pageToken != "" {
@@ -1144,12 +1199,6 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 		if enc := values.Encode(); enc != "" {
 			path = path + "?" + enc
 		}
-
-		log.Debug().
-			Int("page_size", pageSize).
-			Int("limit", limit).
-			Str("table_id", ref.TableID).
-			Msg("listing bitable records")
 		_, raw, err := c.doJSONRequest(ctx, http.MethodGet, path, nil)
 		if err != nil {
 			return nil, err
@@ -1170,9 +1219,11 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 		if resp.Code != 0 {
 			return nil, fmt.Errorf("feishu: list bitable records failed code=%d msg=%s", resp.Code, resp.Msg)
 		}
+
+		page++
 		all = append(all, resp.Data.Items...)
 		if limit > 0 && len(all) >= limit {
-			return all[:limit], nil
+			break
 		}
 		if !resp.Data.HasMore || strings.TrimSpace(resp.Data.PageToken) == "" {
 			break
@@ -1180,10 +1231,20 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 		pageToken = resp.Data.PageToken
 	}
 
-	log.Debug().Int("count", len(all)).Msg("fetched bitable records")
+	truncated := false
 	if limit > 0 && len(all) > limit {
-		return all[:limit], nil
+		all = all[:limit]
+		truncated = true
 	}
+
+	log.Debug().
+		Str("table_id", ref.TableID).
+		Int("pages", page).
+		Int("count", len(all)).
+		Bool("truncated", truncated).
+		Dur("elapsed", time.Since(start)).
+		Msg("fetched bitable records")
+
 	return all, nil
 }
 
