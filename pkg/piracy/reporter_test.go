@@ -3,36 +3,33 @@ package piracy
 import "testing"
 
 func TestBuildParamsFilter(t *testing.T) {
-	filter := buildParamsFilter([]string{"DramaA", "DramaB"}, "Params")
-	expected := "OR(CurrentValue.[Params]=\"DramaA\", CurrentValue.[Params]=\"DramaB\")"
-	if filter != expected {
-		t.Fatalf("unexpected filter %s", filter)
+	filter := BuildParamsFilter([]string{"DramaA", "DramaB"}, "Params")
+	if filter == nil {
+		t.Fatalf("expected filter")
 	}
-
-	single := buildParamsFilter([]string{"DramaC"}, "Custom Field")
-	expectedSingle := "CurrentValue.[Custom Field]=\"DramaC\""
-	if single != expectedSingle {
-		t.Fatalf("unexpected single filter %s", single)
+	if filter.Conjunction == nil || *filter.Conjunction != "and" {
+		t.Fatalf("unexpected conjunction %+v", filter.Conjunction)
 	}
-
-	existing := buildParamsFilter([]string{"DramaD"}, "CurrentValue.[Other]")
-	expectedExisting := "CurrentValue.[Other]=\"DramaD\""
-	if existing != expectedExisting {
-		t.Fatalf("unexpected existing filter %s", existing)
+	if len(filter.Children) != 1 {
+		t.Fatalf("expected single child group, got %d", len(filter.Children))
+	}
+	child := filter.Children[0]
+	if child.Conjunction == nil || *child.Conjunction != "or" {
+		t.Fatalf("unexpected child conjunction %+v", child.Conjunction)
+	}
+	if len(child.Conditions) != 2 {
+		t.Fatalf("expected 2 conditions, got %d", len(child.Conditions))
 	}
 }
 
-func TestCombineFilters(t *testing.T) {
-	if got := combineFilters("", ""); got != "" {
-		t.Fatalf("expected empty, got %s", got)
+func TestCombineFiltersAND(t *testing.T) {
+	left := EqFilter("Params", "DramaA")
+	right := EqFilter("UserID", "123")
+	merged := CombineFiltersAND(left, right)
+	if merged == nil {
+		t.Fatalf("expected merged filter")
 	}
-	if got := combineFilters("A", ""); got != "A" {
-		t.Fatalf("expected base, got %s", got)
-	}
-	if got := combineFilters("", "B"); got != "B" {
-		t.Fatalf("expected addition, got %s", got)
-	}
-	if got := combineFilters("A", "B"); got != "AND(A, B)" {
-		t.Fatalf("unexpected combined filter %s", got)
+	if len(merged.Conditions) != 2 {
+		t.Fatalf("expected 2 conditions, got %d", len(merged.Conditions))
 	}
 }

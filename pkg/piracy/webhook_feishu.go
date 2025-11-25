@@ -47,7 +47,7 @@ type feishuSummarySource struct {
 }
 
 func (s *feishuSummarySource) FetchDrama(ctx context.Context, params string) (*dramaInfo, error) {
-	filter := buildParamsFilter([]string{params}, s.fields.Drama.DramaName)
+	filter := BuildParamsFilter([]string{params}, s.fields.Drama.DramaName)
 	rows, err := fetchRows(ctx, s.client, TableConfig{URL: s.dramaTable, Filter: filter, Limit: 1})
 	if err != nil {
 		return nil, err
@@ -91,41 +91,24 @@ func (s *feishuSummarySource) rowToDrama(row Row, fallbackName string) *dramaInf
 	return info
 }
 
-func (s *feishuSummarySource) buildRecordFilter(query recordQuery) string {
-	clauses := make([]string, 0, 5)
-	if trimmed := strings.TrimSpace(query.ExtraFilter); trimmed != "" {
-		clauses = append(clauses, trimmed)
+func (s *feishuSummarySource) buildRecordFilter(query recordQuery) *feishu.FilterInfo {
+	filters := make([]*feishu.FilterInfo, 0, 5)
+	if query.ExtraFilter != nil {
+		filters = append(filters, query.ExtraFilter)
 	}
-	if strings.TrimSpace(query.App) != "" {
-		clauses = append(clauses, eqFilter(s.fields.Result.App, query.App))
+	if trimmed := strings.TrimSpace(query.App); trimmed != "" {
+		filters = append(filters, EqFilter(s.fields.Result.App, trimmed))
 	}
-	if strings.TrimSpace(query.Params) != "" {
-		clauses = append(clauses, buildParamsFilter([]string{query.Params}, s.fields.Result.Params))
+	if trimmed := strings.TrimSpace(query.Params); trimmed != "" {
+		filters = append(filters, BuildParamsFilter([]string{trimmed}, s.fields.Result.Params))
 	}
-	if strings.TrimSpace(query.UserID) != "" {
-		clauses = append(clauses, eqFilter(s.fields.Result.UserID, query.UserID))
+	if trimmed := strings.TrimSpace(query.UserID); trimmed != "" {
+		filters = append(filters, EqFilter(s.fields.Result.UserID, trimmed))
 	}
-	if strings.TrimSpace(query.UserName) != "" {
-		clauses = append(clauses, eqFilter(s.fields.Result.UserName, query.UserName))
+	if trimmed := strings.TrimSpace(query.UserName); trimmed != "" {
+		filters = append(filters, EqFilter(s.fields.Result.UserName, trimmed))
 	}
-	return combineFilterClauses(clauses)
-}
-
-func combineFilterClauses(clauses []string) string {
-	if len(clauses) == 0 {
-		return ""
-	}
-	filter := clauses[0]
-	for i := 1; i < len(clauses); i++ {
-		filter = combineFilters(filter, clauses[i])
-	}
-	return filter
-}
-
-func eqFilter(fieldName, value string) string {
-	fieldExpr := formatFieldExpression(fieldName)
-	escaped := strings.ReplaceAll(value, "\"", "\\\"")
-	return fmt.Sprintf("%s=\"%s\"", fieldExpr, escaped)
+	return CombineFiltersAND(filters...)
 }
 
 func cloneFields(fields map[string]any) map[string]any {

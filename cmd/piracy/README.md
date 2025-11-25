@@ -15,8 +15,8 @@ The command relies on the same environment variables described below and adds a 
 
 ```bash
 go run ./cmd/piracy detect \
-  --result-filter 'AND(CurrentValue.[Params]="少女嗨翻系统")' \
-  --drama-filter '<drama filter>' \
+  --result-filter '{"conjunction":"and","conditions":[{"field_name":"Params","operator":"is","value":["少女嗨翻系统"]}]}' \
+  --drama-filter '<drama filter json>' \
   --output-csv suspicious.csv
 ```
 

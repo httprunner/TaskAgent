@@ -80,7 +80,7 @@ import "github.com/httprunner/TaskAgent/pkg/piracy"
 opts := piracy.Options{
     ResultTable: piracy.TableConfig{
         URL:    "https://example.feishu.cn/base/xxx",
-        Filter: `CurrentValue.[Params]="短剧名称"`,
+        Filter: `{"conjunction":"and","conditions":[{"field_name":"Params","operator":"is","value":["短剧名称"]}]}`,
     },
     DramaTable: piracy.TableConfig{
         URL: "https://example.feishu.cn/base/yyy",
@@ -154,7 +154,7 @@ Key environment knobs for this workflow:
 
 ```bash
 # Detection only
-piracy detect --result-filter 'AND(CurrentValue.[Params]="短剧名称")'
+piracy detect --result-filter '{"conjunction":"and","conditions":[{"field_name":"Params","operator":"is","value":["短剧名称"]}]}'
 
 # Detection and reporting
 piracy report --app com.smile.gifmaker --params "短剧A,短剧B"

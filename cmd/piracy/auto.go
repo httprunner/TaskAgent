@@ -21,11 +21,20 @@ func newAutoCmd() *cobra.Command {
 		Use:   "auto",
 		Short: "Run detection and reporting for all dramas",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resultFilter, err := piracy.ParseFilterJSON(flagResultFilter)
+			if err != nil {
+				return fmt.Errorf("invalid result-filter: %w", err)
+			}
+			dramaFilter, err := piracy.ParseFilterJSON(flagDramaFilter)
+			if err != nil {
+				return fmt.Errorf("invalid drama-filter: %w", err)
+			}
+
 			opts := piracy.AutoOptions{
 				App:          flagApp,
 				OutputCSV:    flagOutput,
-				ResultFilter: flagResultFilter,
-				DramaFilter:  flagDramaFilter,
+				ResultFilter: resultFilter,
+				DramaFilter:  dramaFilter,
 				Concurrency:  flagConcurrency,
 			}
 
@@ -47,8 +56,8 @@ func newAutoCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&flagApp, "app", "", "App package name (e.g., com.smile.gifmaker)")
 	cmd.Flags().StringVar(&flagOutput, "output", "", "Output CSV file path (defaults to ./piracy_auto_<timestamp>.csv)")
-	cmd.Flags().StringVar(&flagResultFilter, "result-filter", "", "Optional Feishu filter applied to the result table")
-	cmd.Flags().StringVar(&flagDramaFilter, "drama-filter", "", "Optional Feishu filter applied to the drama table")
+	cmd.Flags().StringVar(&flagResultFilter, "result-filter", "", "Optional FilterInfo JSON applied to the result table")
+	cmd.Flags().StringVar(&flagDramaFilter, "drama-filter", "", "Optional FilterInfo JSON applied to the drama table")
 	cmd.Flags().IntVar(&flagConcurrency, "concurrency", 10, "Number of dramas processed in parallel (default 10)")
 
 	if err := cmd.MarkFlagRequired("app"); err != nil {

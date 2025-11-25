@@ -37,16 +37,16 @@ func (s *sqliteResultSource) FetchRows(ctx context.Context, cfg Config, params [
 	if s == nil || len(params) == 0 {
 		return nil, nil
 	}
-	paramCol := normalizeColumnName(cfg.ParamsField)
+	paramCol := strings.TrimSpace(cfg.ParamsField)
 	if paramCol == "" {
 		paramCol = feishu.DefaultResultFields.Params
 	}
-	userIDCol := normalizeColumnName(cfg.UserIDField)
+	userIDCol := strings.TrimSpace(cfg.UserIDField)
 	if userIDCol == "" {
 		userIDCol = feishu.DefaultResultFields.UserID
 	}
-	userNameCol := normalizeColumnName(feishu.DefaultResultFields.UserName)
-	durationCol := normalizeColumnName(cfg.DurationField)
+	userNameCol := strings.TrimSpace(feishu.DefaultResultFields.UserName)
+	durationCol := strings.TrimSpace(cfg.DurationField)
 	if durationCol == "" {
 		durationCol = feishu.DefaultResultFields.ItemDuration
 	}

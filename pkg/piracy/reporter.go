@@ -94,7 +94,7 @@ func (pr *Reporter) ReportPiracyForParams(ctx context.Context, app string, param
 		return nil
 	}
 
-	report, err := pr.DetectWithFilters(ctx, paramsList, "", "")
+	report, err := pr.DetectWithFilters(ctx, paramsList, nil, nil)
 	if err != nil {
 		return fmt.Errorf("piracy detection failed: %w", err)
 	}
@@ -112,36 +112,36 @@ func (pr *Reporter) ReportPiracyForParams(ctx context.Context, app string, param
 
 // DetectMatchesForParams returns detection report for the provided params without writing to tables.
 func (pr *Reporter) DetectMatchesForParams(ctx context.Context, paramsList []string) (*Report, error) {
-	return pr.DetectWithFilters(ctx, paramsList, "", "")
+	return pr.DetectWithFilters(ctx, paramsList, nil, nil)
 }
 
 // DetectWithFilters returns detection report for the provided params with additional table filters.
-func (pr *Reporter) DetectWithFilters(ctx context.Context, paramsList []string, resultExtraFilter, dramaExtraFilter string) (*Report, error) {
+func (pr *Reporter) DetectWithFilters(ctx context.Context, paramsList []string, resultExtraFilter, dramaExtraFilter *feishu.FilterInfo) (*Report, error) {
 	return pr.detectWithFiltersInternal(ctx, paramsList, resultExtraFilter, dramaExtraFilter, nil)
 }
 
 // DetectWithFiltersThreshold runs piracy detection with an explicit threshold override.
-func (pr *Reporter) DetectWithFiltersThreshold(ctx context.Context, paramsList []string, resultExtraFilter, dramaExtraFilter string, threshold float64) (*Report, error) {
+func (pr *Reporter) DetectWithFiltersThreshold(ctx context.Context, paramsList []string, resultExtraFilter, dramaExtraFilter *feishu.FilterInfo, threshold float64) (*Report, error) {
 	override := &Config{}
 	override.Threshold = threshold
 	return pr.detectWithFiltersInternal(ctx, paramsList, resultExtraFilter, dramaExtraFilter, override)
 }
 
-func (pr *Reporter) detectWithFiltersInternal(ctx context.Context, paramsList []string, resultExtraFilter, dramaExtraFilter string, cfgOverride *Config) (*Report, error) {
+func (pr *Reporter) detectWithFiltersInternal(ctx context.Context, paramsList []string, resultExtraFilter, dramaExtraFilter *feishu.FilterInfo, cfgOverride *Config) (*Report, error) {
 	if len(paramsList) == 0 {
 		return &Report{Threshold: pr.threshold}, nil
 	}
 
-	paramsFilter := buildParamsFilter(paramsList, pr.config.ParamsField)
-	dramaFilter := buildParamsFilter(paramsList, pr.config.DramaNameField)
+	paramsFilter := BuildParamsFilter(paramsList, pr.config.ParamsField)
+	dramaFilter := BuildParamsFilter(paramsList, pr.config.DramaNameField)
 
-	finalResultFilter := combineFilters(resultExtraFilter, paramsFilter)
-	finalDramaFilter := combineFilters(dramaExtraFilter, dramaFilter)
+	finalResultFilter := CombineFiltersAND(resultExtraFilter, paramsFilter)
+	finalDramaFilter := CombineFiltersAND(dramaExtraFilter, dramaFilter)
 
 	log.Info().
 		Int("params_count", len(paramsList)).
-		Str("result_filter", finalResultFilter).
-		Str("drama_filter", finalDramaFilter).
+		Str("result_filter", FilterToJSON(finalResultFilter)).
+		Str("drama_filter", FilterToJSON(finalDramaFilter)).
 		Msg("Running piracy detection for params")
 
 	ops := Options{
@@ -243,59 +243,4 @@ func (pr *Reporter) ReportMatches(ctx context.Context, app string, matches []Mat
 		Int("record_count", len(recordIDs)).
 		Msg("Successfully wrote piracy report records to task table")
 	return nil
-}
-
-func buildParamsFilter(paramsList []string, fieldName string) string {
-	formattedValues := make([]string, 0, len(paramsList))
-	for _, raw := range paramsList {
-		s := strings.TrimSpace(raw)
-		if s == "" {
-			continue
-		}
-		escaped := strings.ReplaceAll(s, "\"", "\\\"")
-		formattedValues = append(formattedValues, fmt.Sprintf("\"%s\"", escaped))
-	}
-	if len(formattedValues) == 0 {
-		return ""
-	}
-
-	fieldExpr := formatFieldExpression(fieldName)
-	if len(formattedValues) == 1 {
-		return fmt.Sprintf("%s=%s", fieldExpr, formattedValues[0])
-	}
-
-	conditions := make([]string, 0, len(formattedValues))
-	for _, val := range formattedValues {
-		conditions = append(conditions, fmt.Sprintf("%s=%s", fieldExpr, val))
-	}
-	return fmt.Sprintf("OR(%s)", strings.Join(conditions, ", "))
-}
-
-func formatFieldExpression(fieldName string) string {
-	f := strings.TrimSpace(fieldName)
-	if f == "" {
-		f = "Params"
-	}
-	if strings.HasPrefix(f, "CurrentValue.") {
-		return f
-	}
-	if strings.HasPrefix(f, "[") && strings.HasSuffix(f, "]") {
-		return fmt.Sprintf("CurrentValue.%s", f)
-	}
-	return fmt.Sprintf("CurrentValue.[%s]", f)
-}
-
-func combineFilters(base, addition string) string {
-	base = strings.TrimSpace(base)
-	addition = strings.TrimSpace(addition)
-	switch {
-	case base == "" && addition == "":
-		return ""
-	case base == "":
-		return addition
-	case addition == "":
-		return base
-	default:
-		return fmt.Sprintf("AND(%s, %s)", base, addition)
-	}
 }

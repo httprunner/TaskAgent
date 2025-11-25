@@ -43,8 +43,8 @@ type WebhookOptions struct {
 	// RecordLimit caps the number of capture records returned in the payload.
 	RecordLimit int
 
-	// ResultFilter is an optional Feishu filter expression appended to the auto-generated filters.
-	ResultFilter string
+	// ResultFilter is an optional Feishu FilterInfo appended to the auto-generated filters.
+	ResultFilter *feishu.FilterInfo
 
 	// Optional overrides per source.
 	DramaTableURL  string
@@ -109,7 +109,7 @@ func SendSummaryWebhook(ctx context.Context, opts WebhookOptions) (map[string]an
 		UserID:      strings.TrimSpace(opts.UserID),
 		UserName:    strings.TrimSpace(opts.UserName),
 		Limit:       limit,
-		ExtraFilter: strings.TrimSpace(opts.ResultFilter),
+		ExtraFilter: opts.ResultFilter,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("fetch capture records failed: %w", err)
@@ -307,7 +307,7 @@ type recordQuery struct {
 	UserID      string
 	UserName    string
 	Limit       int
-	ExtraFilter string
+	ExtraFilter *feishu.FilterInfo
 }
 
 // summaryDataSource fetches drama metadata and capture records from a backend.

@@ -126,7 +126,7 @@ func fetchRows(ctx context.Context, client *feishu.Client, cfg TableConfig) ([]R
 	if cfg.ViewID != "" {
 		queryOpts.ViewID = cfg.ViewID
 	}
-	if cfg.Filter != "" {
+	if cfg.Filter != nil {
 		queryOpts.Filter = cfg.Filter
 	}
 	if cfg.Limit > 0 {

@@ -2,6 +2,7 @@ package pool
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -480,14 +481,14 @@ func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient,
 	if !includeDatetime {
 		purpose = "without_datetime"
 	}
-	filter := buildFeishuFilterExpression(fields, app, dayStart, dayEnd, statuses, includeDatetime)
+	filter := buildFeishuFilterInfo(fields, app, dayStart, dayEnd, statuses, includeDatetime)
 	log.Debug().
 		Str("app", app).
 		Str("purpose", purpose).
 		Bool("include_datetime", includeDatetime).
 		Strs("statuses", statuses).
 		Int("fetch_limit", fetchLimit).
-		Str("filter", filter).
+		Str("filter", formatFilterForLog(filter)).
 		Msg("fetching feishu tasks from bitable")
 	subset, err := fetchFeishuTasksWithFilter(ctx, client, bitableURL, filter, fetchLimit)
 	if err != nil {
@@ -517,9 +518,9 @@ func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient,
 	return subset, nil
 }
 
-func fetchFeishuTasksWithFilter(ctx context.Context, client targetTableClient, bitableURL, filter string, limit int) ([]*FeishuTask, error) {
+func fetchFeishuTasksWithFilter(ctx context.Context, client targetTableClient, bitableURL string, filter *feishu.FilterInfo, limit int) ([]*FeishuTask, error) {
 	opts := &feishu.TaskQueryOptions{
-		Filter: strings.TrimSpace(filter),
+		Filter: filter,
 		Limit:  limit,
 	}
 	table, err := client.FetchTaskTableWithOptions(ctx, bitableURL, nil, opts)
@@ -566,6 +567,66 @@ func fetchFeishuTasksWithFilter(ctx context.Context, client targetTableClient, b
 		}
 	}
 	return tasks, nil
+}
+
+func buildFeishuFilterInfo(fields feishu.TaskFields, app string, start, end time.Time, statuses []string, includeDatetime bool) *feishu.FilterInfo {
+	filter := feishu.NewFilterInfo("and")
+	if field := strings.TrimSpace(fields.App); field != "" && strings.TrimSpace(app) != "" {
+		filter.Conditions = append(filter.Conditions, feishu.NewCondition(field, "is", strings.TrimSpace(app)))
+	}
+	if includeDatetime {
+		if field := strings.TrimSpace(fields.Datetime); field != "" {
+			filter.Conditions = append(filter.Conditions, feishu.NewCondition(field, "is", "Today"))
+		}
+	}
+	if statusChild := buildFeishuStatusGroup(fields, statuses); statusChild != nil {
+		filter.Children = append(filter.Children, statusChild)
+	}
+	if len(filter.Conditions) == 0 && len(filter.Children) == 0 {
+		return nil
+	}
+	return filter
+}
+
+func buildFeishuStatusGroup(fields feishu.TaskFields, statuses []string) *feishu.ChildrenFilter {
+	field := strings.TrimSpace(fields.Status)
+	if field == "" || len(statuses) == 0 {
+		return nil
+	}
+	conds := make([]*feishu.Condition, 0, len(statuses)+1)
+	seen := make(map[string]struct{})
+	blankAdded := false
+	for _, status := range statuses {
+		trimmed := strings.TrimSpace(status)
+		if trimmed == "" {
+			if !blankAdded {
+				conds = append(conds, feishu.NewCondition(field, "isEmpty"))
+				conds = append(conds, feishu.NewCondition(field, "is", ""))
+				blankAdded = true
+			}
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		conds = append(conds, feishu.NewCondition(field, "is", trimmed))
+		seen[trimmed] = struct{}{}
+	}
+	if len(conds) == 0 {
+		return nil
+	}
+	return feishu.NewChildrenFilter("or", conds...)
+}
+
+func formatFilterForLog(filter *feishu.FilterInfo) string {
+	if filter == nil {
+		return ""
+	}
+	raw, err := json.Marshal(filter)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
 }
 
 func filterFeishuTasksByDate(tasks []*FeishuTask, start, end, now time.Time) []*FeishuTask {
@@ -643,74 +704,6 @@ func sortFeishuTasksByStatusPriority(tasks []*FeishuTask, statuses []string) {
 		}
 		return pi < pj
 	})
-}
-
-func buildFeishuFilterExpression(fields feishu.TaskFields, app string, start, end time.Time, statuses []string, includeDatetime bool) string {
-	var clauses []string
-
-	if field := strings.TrimSpace(fields.App); field != "" && strings.TrimSpace(app) != "" {
-		clauses = append(clauses, fmt.Sprintf("%s = \"%s\"", bitableFieldRef(field), escapeBitableFilterValue(app)))
-	}
-	if includeDatetime && !start.IsZero() && !end.IsZero() {
-		if field := strings.TrimSpace(fields.Datetime); field != "" {
-			startStr := start.Format(feishuTaskFilterLayout)
-			endStr := end.Format(feishuTaskFilterLayout)
-			clauses = append(clauses,
-				fmt.Sprintf("%s >= \"%s\"", bitableFieldRef(field), startStr),
-				fmt.Sprintf("%s < \"%s\"", bitableFieldRef(field), endStr),
-			)
-		}
-	}
-	if statusClause := buildFeishuStatusClause(fields, statuses); statusClause != "" {
-		clauses = append(clauses, statusClause)
-	}
-
-	switch len(clauses) {
-	case 0:
-		return ""
-	case 1:
-		return clauses[0]
-	default:
-		return fmt.Sprintf("AND(%s)", strings.Join(clauses, ", "))
-	}
-}
-
-func buildFeishuStatusClause(fields feishu.TaskFields, statuses []string) string {
-	field := strings.TrimSpace(fields.Status)
-	if field == "" || len(statuses) == 0 {
-		return ""
-	}
-	ref := bitableFieldRef(field)
-	clauses := make([]string, 0, len(statuses)+1)
-	seen := make(map[string]struct{})
-	for _, status := range statuses {
-		trimmed := strings.TrimSpace(status)
-		if trimmed == "" {
-			blankClause := fmt.Sprintf("ISBLANK(%s)", ref)
-			if _, ok := seen[blankClause]; !ok {
-				clauses = append(clauses, blankClause)
-				seen[blankClause] = struct{}{}
-			}
-			eqBlank := fmt.Sprintf("%s = \"\"", ref)
-			if _, ok := seen[eqBlank]; !ok {
-				clauses = append(clauses, eqBlank)
-				seen[eqBlank] = struct{}{}
-			}
-			continue
-		}
-		clause := fmt.Sprintf("%s = \"%s\"", ref, escapeBitableFilterValue(trimmed))
-		if _, ok := seen[clause]; !ok {
-			clauses = append(clauses, clause)
-			seen[clause] = struct{}{}
-		}
-	}
-	if len(clauses) == 0 {
-		return ""
-	}
-	if len(clauses) == 1 {
-		return clauses[0]
-	}
-	return fmt.Sprintf("OR(%s)", strings.Join(clauses, ", "))
 }
 
 type taskStatusMeta struct {
@@ -869,14 +862,6 @@ func extractFeishuTasks(tasks []*Task) ([]*FeishuTask, error) {
 		result = append(result, ft)
 	}
 	return result, nil
-}
-
-func bitableFieldRef(name string) string {
-	return fmt.Sprintf("CurrentValue.[%s]", name)
-}
-
-func escapeBitableFilterValue(value string) string {
-	return strings.ReplaceAll(value, "\"", "\\\"")
 }
 
 func appendUniqueFeishuTasks(dst []*FeishuTask, src []*FeishuTask, limit int, seen map[int64]struct{}) []*FeishuTask {

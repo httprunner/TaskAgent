@@ -203,7 +203,7 @@ type TaskTable struct {
 // TaskQueryOptions allows configuring additional filters when fetching task tables.
 type TaskQueryOptions struct {
 	ViewID string
-	Filter string
+	Filter *FilterInfo
 	Limit  int
 }
 
@@ -1159,47 +1159,63 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 		pageSize = maxBitablePageSize
 	}
 
-	basePath := fmt.Sprintf("/open-apis/bitable/v1/apps/%s/tables/%s/records", url.PathEscape(ref.AppToken), url.PathEscape(ref.TableID))
+	basePath := fmt.Sprintf("/open-apis/bitable/v1/apps/%s/tables/%s/records/search", url.PathEscape(ref.AppToken), url.PathEscape(ref.TableID))
 	values := url.Values{}
 	values.Set("page_size", strconv.Itoa(pageSize))
-	viewID := ref.ViewID
+
+	limit := 0
+	if opts != nil && opts.Limit > 0 {
+		limit = opts.Limit
+		if limit > 0 && limit < pageSize {
+			values.Set("page_size", strconv.Itoa(limit))
+		}
+	}
+
+	viewID := strings.TrimSpace(ref.ViewID)
 	if opts != nil && strings.TrimSpace(opts.ViewID) != "" {
 		viewID = strings.TrimSpace(opts.ViewID)
 	}
-	if viewID != "" {
-		values.Set("view_id", viewID)
+
+	var filterInfo *FilterInfo
+	if opts != nil && opts.Filter != nil {
+		filterInfo = CloneFilter(opts.Filter)
 	}
-	if opts != nil && strings.TrimSpace(opts.Filter) != "" {
-		values.Set("filter", strings.TrimSpace(opts.Filter))
+
+	var body map[string]any
+	if viewID != "" || filterInfo != nil {
+		body = make(map[string]any)
+		if viewID != "" {
+			body["view_id"] = viewID
+		}
+		if filterInfo != nil {
+			body["filter"] = filterInfo
+		}
 	}
 
 	all := make([]bitableRecord, 0, pageSize)
 	pageToken := ""
-	limit := 0
-	if opts != nil && opts.Limit > 0 {
-		limit = opts.Limit
-	}
 
 	start := time.Now()
 	page := 0
 	log.Debug().
 		Str("table_id", ref.TableID).
 		Str("view_id", viewID).
-		Bool("has_filter", opts != nil && strings.TrimSpace(opts.Filter) != "").
+		Bool("has_filter", filterInfo != nil).
 		Int("page_size", pageSize).
 		Int("limit", limit).
 		Msg("start listing bitable records")
 
 	for {
-		values.Del("page_token")
 		if pageToken != "" {
 			values.Set("page_token", pageToken)
+		} else {
+			values.Del("page_token")
 		}
 		path := basePath
 		if enc := values.Encode(); enc != "" {
 			path = path + "?" + enc
 		}
-		_, raw, err := c.doJSONRequest(ctx, http.MethodGet, path, nil)
+		_, raw, err := c.doJSONRequest(ctx, http.MethodPost, path, body)
 		if err != nil {
 			return nil, err
 		}
@@ -1214,10 +1230,10 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 			} `json:"data"`
 		}
 		if err := json.Unmarshal(raw, &resp); err != nil {
-			return nil, fmt.Errorf("feishu: decode bitable records: %w", err)
+			return nil, fmt.Errorf("feishu: decode bitable search response: %w", err)
 		}
 		if resp.Code != 0 {
-			return nil, fmt.Errorf("feishu: list bitable records failed code=%d msg=%s", resp.Code, resp.Msg)
+			return nil, fmt.Errorf("feishu: search bitable records failed code=%d msg=%s", resp.Code, resp.Msg)
 		}
 
 		page++
@@ -1433,6 +1449,18 @@ func toString(value any) string {
 			}
 		}
 		return ""
+	case map[string]any:
+		if raw, ok := v["text"]; ok {
+			if str := toString(raw); str != "" {
+				return str
+			}
+		}
+		if raw, ok := v["value"]; ok {
+			if str := toString(raw); str != "" {
+				return str
+			}
+		}
+		return ""
 	default:
 		return ""
 	}
@@ -1566,8 +1594,11 @@ func (c *Client) getBitableRecord(ctx context.Context, ref BitableRef, recordID 
 	if strings.TrimSpace(ref.AppToken) == "" {
 		return bitableRecord{}, errors.New("feishu: bitable app token is empty")
 	}
-	path := fmt.Sprintf("/open-apis/bitable/v1/apps/%s/tables/%s/records/%s", url.PathEscape(ref.AppToken), url.PathEscape(ref.TableID), url.PathEscape(recordID))
-	_, raw, err := c.doJSONRequest(ctx, http.MethodGet, path, nil)
+	path := fmt.Sprintf("/open-apis/bitable/v1/apps/%s/tables/%s/records/batch_get", url.PathEscape(ref.AppToken), url.PathEscape(ref.TableID))
+	payload := map[string]any{
+		"record_ids": []string{recordID},
+	}
+	_, raw, err := c.doJSONRequest(ctx, http.MethodPost, path, payload)
 	if err != nil {
 		return bitableRecord{}, err
 	}
@@ -1575,7 +1606,9 @@ func (c *Client) getBitableRecord(ctx context.Context, ref BitableRef, recordID 
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 		Data struct {
-			Record bitableRecord `json:"record"`
+			Records   []bitableRecord `json:"records"`
+			Absent    []string        `json:"absent_record_ids"`
+			Forbidden []string        `json:"forbidden_record_ids"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
@@ -1584,7 +1617,12 @@ func (c *Client) getBitableRecord(ctx context.Context, ref BitableRef, recordID 
 	if resp.Code != 0 {
 		return bitableRecord{}, fmt.Errorf("feishu: get record failed code=%d msg=%s", resp.Code, resp.Msg)
 	}
-	return resp.Data.Record, nil
+	for _, rec := range resp.Data.Records {
+		if rec.RecordID == recordID {
+			return rec, nil
+		}
+	}
+	return bitableRecord{}, fmt.Errorf("feishu: record %s not found", recordID)
 }
 
 type wikiNodeInfo struct {

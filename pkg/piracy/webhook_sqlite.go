@@ -210,25 +210,18 @@ func (s *sqliteSummarySource) FetchRecords(ctx context.Context, query recordQuer
 func quoteIdentifier(name string) string {
 	trimmed := strings.TrimSpace(name)
 	trimmed = strings.ReplaceAll(trimmed, "\"", "")
+	if trimmed == "" {
+		return "\"\""
+	}
 	return fmt.Sprintf("\"%s\"", trimmed)
 }
 
 func (s *sqliteSummarySource) column(name string) string {
-	return quoteIdentifier(normalizeColumnName(name))
-}
-
-func normalizeColumnName(name string) string {
-	trimmed := strings.TrimSpace(name)
-	trimmed = strings.TrimPrefix(trimmed, "CurrentValue.")
-	trimmed = strings.Trim(trimmed, "[]")
-	if trimmed == "" {
-		return name
-	}
-	return trimmed
+	return quoteIdentifier(strings.TrimSpace(name))
 }
 
 func addStringField(fields map[string]any, key, value string) {
-	name := normalizeColumnName(key)
+	name := strings.TrimSpace(key)
 	if strings.TrimSpace(name) == "" {
 		return
 	}

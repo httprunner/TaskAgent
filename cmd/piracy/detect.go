@@ -73,14 +73,23 @@ Examples:
 				return fmt.Errorf("original drama table url is required ($DRAMA_BITABLE_URL)")
 			}
 
+			resultFilter, err := piracy.ParseFilterJSON(flagResultFilter)
+			if err != nil {
+				return fmt.Errorf("invalid result-filter: %w", err)
+			}
+			dramaFilter, err := piracy.ParseFilterJSON(flagDramaFilter)
+			if err != nil {
+				return fmt.Errorf("invalid drama-filter: %w", err)
+			}
+
 			opts := piracy.Options{
 				ResultTable: piracy.TableConfig{
 					URL:    resultURL,
-					Filter: flagResultFilter,
+					Filter: resultFilter,
 				},
 				DramaTable: piracy.TableConfig{
 					URL:    dramaURL,
-					Filter: flagDramaFilter,
+					Filter: dramaFilter,
 				},
 				// Config fields will be read from environment variables
 			}
@@ -104,9 +113,9 @@ Examples:
 	}
 
 	// Feishu mode flags
-	cmd.Flags().StringVar(&flagResultFilter, "result-filter", "", "Feishu filter for result rows")
+	cmd.Flags().StringVar(&flagResultFilter, "result-filter", "", "Feishu FilterInfo JSON for result rows")
 	cmd.Flags().StringVar(&flagTargetFilter, "target-filter", "", "Feishu filter for target rows")
-	cmd.Flags().StringVar(&flagDramaFilter, "drama-filter", "", "Feishu filter for original drama rows")
+	cmd.Flags().StringVar(&flagDramaFilter, "drama-filter", "", "Feishu FilterInfo JSON for drama rows")
 
 	// File mode flags
 	cmd.Flags().BoolVar(&flagUseFiles, "use-files", false, "Use local files instead of Feishu tables")

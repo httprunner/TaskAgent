@@ -164,7 +164,7 @@ func (w *WebhookWorker) processOnce(ctx context.Context) error {
 
 func (w *WebhookWorker) fetchWebhookCandidates(ctx context.Context) (*feishu.TaskTable, error) {
 	opts := &feishu.TaskQueryOptions{
-		Filter: w.buildFilterExpression(),
+		Filter: w.buildFilterInfo(),
 		Limit:  w.batchLimit,
 	}
 	table, err := w.client.FetchTaskTableWithOptions(ctx, w.bitableURL, nil, opts)
@@ -174,27 +174,24 @@ func (w *WebhookWorker) fetchWebhookCandidates(ctx context.Context) (*feishu.Tas
 	return table, nil
 }
 
-func (w *WebhookWorker) buildFilterExpression() string {
+func (w *WebhookWorker) buildFilterInfo() *feishu.FilterInfo {
 	fields := feishu.DefaultTaskFields
-	var clauses []string
+	filter := feishu.NewFilterInfo("and")
 	if appRef := strings.TrimSpace(fields.App); appRef != "" && strings.TrimSpace(w.app) != "" {
-		clauses = append(clauses, fmt.Sprintf("%s = \"%s\"", bitableFieldRef(appRef), escapeBitableFilterValue(w.app)))
+		filter.Conditions = append(filter.Conditions, feishu.NewCondition(appRef, "is", strings.TrimSpace(w.app)))
 	}
 	if statusRef := strings.TrimSpace(fields.Status); statusRef != "" {
-		clauses = append(clauses, fmt.Sprintf("%s = \"%s\"", bitableFieldRef(statusRef), feishu.StatusSuccess))
+		filter.Conditions = append(filter.Conditions, feishu.NewCondition(statusRef, "is", feishu.StatusSuccess))
 	}
 	if webhookRef := strings.TrimSpace(fields.Webhook); webhookRef != "" {
-		ref := bitableFieldRef(webhookRef)
-		clauses = append(clauses, fmt.Sprintf("OR(%s = \"%s\", %s = \"%s\")", ref, feishu.WebhookPending, ref, feishu.WebhookFailed))
+		pending := feishu.NewCondition(webhookRef, "is", feishu.WebhookPending)
+		failed := feishu.NewCondition(webhookRef, "is", feishu.WebhookFailed)
+		filter.Children = append(filter.Children, feishu.NewChildrenFilter("or", pending, failed))
 	}
-	switch len(clauses) {
-	case 0:
-		return ""
-	case 1:
-		return clauses[0]
-	default:
-		return fmt.Sprintf("AND(%s)", strings.Join(clauses, ", "))
+	if EmptyFilter(filter) {
+		return nil
 	}
+	return filter
 }
 
 func (w *WebhookWorker) resolveApp(taskApp string) string {
@@ -241,16 +238,4 @@ func (w *WebhookWorker) updateWebhookState(ctx context.Context, table *feishu.Ta
 		return errors.New(strings.Join(errs, "; "))
 	}
 	return nil
-}
-
-func bitableFieldRef(name string) string {
-	trimmed := strings.TrimSpace(name)
-	if trimmed == "" {
-		return ""
-	}
-	return fmt.Sprintf("CurrentValue.[%s]", trimmed)
-}
-
-func escapeBitableFilterValue(value string) string {
-	return strings.ReplaceAll(value, "\"", "\\\"")
 }

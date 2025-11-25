@@ -3,7 +3,6 @@ package pool
 import (
 	"context"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -207,7 +206,7 @@ type filterAwareTargetClient struct {
 
 func (f *filterAwareTargetClient) FetchTaskTableWithOptions(ctx context.Context, rawURL string, override *feishusvc.TaskFields, opts *feishusvc.TaskQueryOptions) (*feishusvc.TaskTable, error) {
 	rows := f.fallbackRows
-	if strings.Contains(opts.Filter, "[Datetime]") {
+	if filterHasField(opts.Filter, feishusvc.DefaultTaskFields.Datetime) {
 		rows = f.withDatetimeRows
 	}
 	clone := make([]feishusvc.TaskRow, len(rows))
@@ -224,6 +223,25 @@ func (f *filterAwareTargetClient) UpdateTaskStatus(ctx context.Context, table *f
 
 func (f *filterAwareTargetClient) UpdateTaskFields(ctx context.Context, table *feishusvc.TaskTable, taskID int64, fields map[string]any) error {
 	return nil
+}
+
+func filterHasField(filter *feishusvc.FilterInfo, field string) bool {
+	if filter == nil {
+		return false
+	}
+	for _, cond := range filter.Conditions {
+		if cond != nil && cond.FieldName != nil && *cond.FieldName == field {
+			return true
+		}
+	}
+	for _, child := range filter.Children {
+		for _, cond := range child.Conditions {
+			if cond != nil && cond.FieldName != nil && *cond.FieldName == field {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func collectTaskIDs(tasks []*FeishuTask) []int64 {

@@ -20,8 +20,8 @@ import (
 type AutoOptions struct {
 	App          string
 	OutputCSV    string
-	ResultFilter string
-	DramaFilter  string
+	ResultFilter *feishu.FilterInfo
+	DramaFilter  *feishu.FilterInfo
 	Concurrency  int
 }
 
@@ -105,14 +105,14 @@ func RunAuto(ctx context.Context, opts AutoOptions) (*AutoSummary, error) {
 			}
 			defer func() { <-sem }()
 
-			paramFilter := buildParamsFilter([]string{name}, cfg.ParamsField)
-			resultFilter := combineFilters(opts.ResultFilter, paramFilter)
+			paramFilter := BuildParamsFilter([]string{name}, cfg.ParamsField)
+			resultFilter := CombineFiltersAND(opts.ResultFilter, paramFilter)
 
 			log.Info().
 				Int("index", idx+1).
 				Int("total", len(dramas)).
 				Str("drama", name).
-				Str("result_filter", resultFilter).
+				Str("result_filter", FilterToJSON(resultFilter)).
 				Msg("Running auto detection for drama")
 
 			resultRows, err := fetchRows(ctx, client, TableConfig{

@@ -25,14 +25,14 @@ type Config struct {
 type TableConfig struct {
 	URL    string
 	ViewID string
-	Filter string
+	Filter *feishu.FilterInfo
 	Limit  int
 }
 
 // Options defines the input options for piracy detection.
 type Options struct {
 	ResultTable TableConfig
-	TaskTable TableConfig
+	TaskTable   TableConfig
 	DramaTable  TableConfig // New table for original drama information
 	Config      Config
 }
@@ -58,7 +58,7 @@ type Drama struct {
 type Report struct {
 	Matches       []Match
 	ResultRows    int
-	TaskRows    int
+	TaskRows      int
 	MissingParams []string // Params in result without corresponding target
 	Threshold     float64
 }

@@ -43,7 +43,7 @@ go test ./cmd/piracy
 ```bash
 # Build and run piracy detection
 go run ./cmd/piracy detect \
-  --result-filter 'AND(CurrentValue.[Params]="keyword")' \
+  --result-filter '{"conjunction":"and","conditions":[{"field_name":"Params","operator":"is","value":["keyword"]}]}' \
   --drama-filter "<filter>" \
   --output-csv result.csv
 ```
