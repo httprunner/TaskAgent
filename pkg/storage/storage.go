@@ -19,35 +19,88 @@ import (
 
 const (
 	envDisableJSONL   = "TRACKING_STORAGE_DISABLE_JSONL"
-	envEnableSQLite   = "TRACKING_STORAGE_ENABLE_SQLITE"
 	envEnableFeishu   = "RESULT_STORAGE_ENABLE_FEISHU"
 	envTrackingDBPath = "TRACKING_STORAGE_DB_PATH"
 	defaultDBDirName  = ".eval"
 	defaultDBFileName = "records.sqlite"
+	resultTableName   = "capture_results"
+	reportedColumn    = "reported"
+	reportedAtColumn  = "reported_at"
+	reportErrorColumn = "report_error"
 )
+
+var captureResultColumns = []string{
+	"Params",
+	"DeviceSerial",
+	"App",
+	"Scene",
+	"ItemID",
+	"ItemCaption",
+	"ItemCDNURL",
+	"ItemURL",
+	"ItemDuration",
+	"UserName",
+	"UserID",
+	"UserAuthEntity",
+	"Tags",
+	"TaskID",
+	"Datetime",
+	"LikeCount",
+	"ViewCount",
+	"AnchorPoint",
+	"CommentCount",
+	"CollectCount",
+	"ForwardCount",
+	"ShareCount",
+	"PayMode",
+	"Collection",
+	"Episode",
+	"PublishTime",
+	"Extra",
+}
+
+func resolveResultTableName() string {
+	if val := strings.TrimSpace(os.Getenv("RESULT_SQLITE_TABLE")); val != "" {
+		return val
+	}
+	return resultTableName
+}
 
 // Config controls enabled sinks.
 type Config struct {
 	JSONLPath    string
-	EnableSQLite bool
 	EnableFeishu bool
 }
 
 // Record captures the SQLite schema payload.
 type Record struct {
-	Params       string
-	DeviceSerial string
-	App          string
-	ItemID       string
-	VideoID      string
-	ItemCaption  string
-	ItemDuration *float64
-	UserName     string
-	UserID       string
-	Tags         string
-	TaskID       int64
-	Datetime     int64
-	Extra        interface{}
+	Params         string
+	DeviceSerial   string
+	App            string
+	Scene          string
+	ItemID         string
+	ItemCaption    string
+	ItemCDNURL     string
+	ItemURL        string
+	ItemDuration   *float64
+	UserName       string
+	UserID         string
+	UserAuthEntity string
+	Tags           string
+	TaskID         int64
+	Datetime       int64
+	LikeCount      int64
+	ViewCount      int
+	AnchorPoint    string
+	CommentCount   int64
+	CollectCount   int64
+	ForwardCount   int64
+	ShareCount     int64
+	PayMode        string
+	Collection     string
+	Episode        string
+	PublishTime    string
+	Extra          interface{}
 }
 
 // ResultRecord holds payloads for each sink.
@@ -66,13 +119,14 @@ type Sink interface {
 
 // Manager fan-outs records to configured sinks.
 type Manager struct {
-	sinks []Sink
-	name  string
+	sinks    []Sink
+	name     string
+	reporter *resultReporter
 }
 
 // NewManager builds a storage manager based on cfg.
 func NewManager(cfg Config) (*Manager, error) {
-	sinks, err := buildSinks(cfg)
+	sinks, feishuStorage, err := buildSinks(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -83,35 +137,46 @@ func NewManager(cfg Config) (*Manager, error) {
 	for _, s := range sinks {
 		names = append(names, s.Name())
 	}
-	return &Manager{sinks: sinks, name: strings.Join(names, ",")}, nil
+	manager := &Manager{sinks: sinks, name: strings.Join(names, ",")}
+	if feishuStorage != nil {
+		reporter, err := newResultReporter(feishuStorage)
+		if err != nil {
+			for _, sink := range sinks {
+				sink.Close()
+			}
+			return nil, err
+		}
+		manager.reporter = reporter
+		names = append(names, "feishu-reporter")
+		manager.name = strings.Join(names, ",")
+	}
+	return manager, nil
 }
 
-func buildSinks(cfg Config) ([]Sink, error) {
+func buildSinks(cfg Config) ([]Sink, *feishu.ResultStorage, error) {
 	sinks := make([]Sink, 0, 3)
+	enableFeishu := shouldEnableFeishu(cfg)
 	if shouldEnableJSONL(cfg) {
 		jsonl, err := newJSONLWriter(cfg.JSONLPath)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		sinks = append(sinks, jsonl)
 	}
-	if shouldEnableSQLite(cfg) {
-		sqliteSink, err := newSQLiteWriter()
-		if err != nil {
-			return nil, err
-		}
-		sinks = append(sinks, sqliteSink)
+	sqliteSink, err := newSQLiteWriter()
+	if err != nil {
+		return nil, nil, err
 	}
-	if shouldEnableFeishu(cfg) {
-		feishuSink, err := newFeishuWriter()
+	sinks = append(sinks, sqliteSink)
+	var feishuStorage *feishu.ResultStorage
+	if enableFeishu {
+		var err error
+		feishuStorage, err = newFeishuStorage()
 		if err != nil {
-			return nil, err
-		}
-		if feishuSink != nil {
-			sinks = append(sinks, feishuSink)
+			return nil, nil, err
 		}
 	}
-	return sinks, nil
+	return sinks, feishuStorage, nil
 }
 
 func shouldEnableJSONL(cfg Config) bool {
@@ -122,14 +187,6 @@ func shouldEnableJSONL(cfg Config) bool {
 		return false
 	}
 	return true
-}
-
-func shouldEnableSQLite(cfg Config) bool {
-	if cfg.EnableSQLite {
-		return true
-	}
-	val := strings.TrimSpace(os.Getenv(envEnableSQLite))
-	return strings.EqualFold(val, "1") || strings.EqualFold(val, "true")
 }
 
 func shouldEnableFeishu(cfg Config) bool {
@@ -182,9 +239,7 @@ func newSQLiteWriter() (Sink, error) {
 		db.Close()
 		return nil, err
 	}
-	stmt, err := db.Prepare(`INSERT INTO capture_results
-		(Params, DeviceSerial, App, ItemID, VideoID, ItemCaption, ItemDuration, UserName, UserID, Tags, TaskID, Datetime, Extra)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	stmt, err := db.Prepare(buildResultInsertStatement())
 	if err != nil {
 		db.Close()
 		return nil, pkgerrors.Wrap(err, "storage: prepare sqlite insert failed")
@@ -192,15 +247,20 @@ func newSQLiteWriter() (Sink, error) {
 	return &sqliteWriter{db: db, stmt: stmt, path: dbPath}, nil
 }
 
-func newFeishuWriter() (Sink, error) {
+func buildResultInsertStatement() string {
+	table := resolveResultTableName()
+	columns := strings.Join(captureResultColumns, ", ")
+	placeholders := strings.Repeat("?,", len(captureResultColumns))
+	placeholders = strings.TrimRight(placeholders, ",")
+	return fmt.Sprintf(`INSERT INTO %s (%s) VALUES (%s)`, table, columns, placeholders)
+}
+
+func newFeishuStorage() (*feishu.ResultStorage, error) {
 	storage, err := feishu.NewResultStorageFromEnv()
 	if err != nil {
 		return nil, err
 	}
-	if storage == nil {
-		return nil, nil
-	}
-	return &feishuWriter{storage: storage}, nil
+	return storage, nil
 }
 
 func (m *Manager) Write(ctx context.Context, record ResultRecord) error {
@@ -218,6 +278,11 @@ func (m *Manager) Close() error {
 	for _, sink := range m.sinks {
 		if err := sink.Close(); err != nil {
 			errs = append(errs, pkgerrors.Wrap(err, fmt.Sprintf("%s close failed", sink.Name())))
+		}
+	}
+	if m.reporter != nil {
+		if err := m.reporter.Close(); err != nil {
+			errs = append(errs, pkgerrors.Wrap(err, "feishu reporter close failed"))
 		}
 	}
 	return errors.Join(errs...)
@@ -303,21 +368,36 @@ func buildJSONLRow(record ResultRecord) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{
-		"Params":       record.DBRecord.Params,
-		"DeviceSerial": record.DBRecord.DeviceSerial,
-		"App":          record.DBRecord.App,
-		"ItemID":       record.DBRecord.ItemID,
-		"VideoID":      record.DBRecord.VideoID,
-		"ItemCaption":  record.DBRecord.ItemCaption,
-		"ItemDuration": itemDuration,
-		"UserName":     record.DBRecord.UserName,
-		"UserID":       record.DBRecord.UserID,
-		"Tags":         record.DBRecord.Tags,
-		"TaskID":       record.DBRecord.TaskID,
-		"Datetime":     record.DBRecord.Datetime,
-		"Extra":        payload,
-	}, nil
+	row := map[string]any{
+		"Scene":          record.DBRecord.Scene,
+		"Params":         record.DBRecord.Params,
+		"DeviceSerial":   record.DBRecord.DeviceSerial,
+		"App":            record.DBRecord.App,
+		"ItemID":         record.DBRecord.ItemID,
+		"ItemCaption":    record.DBRecord.ItemCaption,
+		"ItemCDNURL":     record.DBRecord.ItemCDNURL,
+		"ItemURL":        record.DBRecord.ItemURL,
+		"ItemDuration":   itemDuration,
+		"UserName":       record.DBRecord.UserName,
+		"UserID":         record.DBRecord.UserID,
+		"UserAuthEntity": record.DBRecord.UserAuthEntity,
+		"Tags":           record.DBRecord.Tags,
+		"TaskID":         record.DBRecord.TaskID,
+		"Datetime":       record.DBRecord.Datetime,
+		"LikeCount":      record.DBRecord.LikeCount,
+		"ViewCount":      record.DBRecord.ViewCount,
+		"AnchorPoint":    record.DBRecord.AnchorPoint,
+		"CommentCount":   record.DBRecord.CommentCount,
+		"CollectCount":   record.DBRecord.CollectCount,
+		"ForwardCount":   record.DBRecord.ForwardCount,
+		"ShareCount":     record.DBRecord.ShareCount,
+		"PayMode":        record.DBRecord.PayMode,
+		"Collection":     record.DBRecord.Collection,
+		"Episode":        record.DBRecord.Episode,
+		"PublishTime":    record.DBRecord.PublishTime,
+		"Extra":          payload,
+	}
+	return row, nil
 }
 
 type sqliteWriter struct {
@@ -341,15 +421,29 @@ func (s *sqliteWriter) Write(ctx context.Context, record ResultRecord) error {
 		record.DBRecord.Params,
 		record.DBRecord.DeviceSerial,
 		record.DBRecord.App,
+		record.DBRecord.Scene,
 		record.DBRecord.ItemID,
-		record.DBRecord.VideoID,
 		record.DBRecord.ItemCaption,
+		record.DBRecord.ItemCDNURL,
+		record.DBRecord.ItemURL,
 		record.DBRecord.ItemDuration,
 		record.DBRecord.UserName,
 		record.DBRecord.UserID,
+		record.DBRecord.UserAuthEntity,
 		record.DBRecord.Tags,
 		record.DBRecord.TaskID,
 		record.DBRecord.Datetime,
+		record.DBRecord.LikeCount,
+		record.DBRecord.ViewCount,
+		record.DBRecord.AnchorPoint,
+		record.DBRecord.CommentCount,
+		record.DBRecord.CollectCount,
+		record.DBRecord.ForwardCount,
+		record.DBRecord.ShareCount,
+		record.DBRecord.PayMode,
+		record.DBRecord.Collection,
+		record.DBRecord.Episode,
+		record.DBRecord.PublishTime,
 		payload,
 	)
 	if err != nil {
@@ -431,31 +525,75 @@ func configureSQLite(db *sql.DB) error {
 }
 
 func prepareSchema(db *sql.DB) error {
-	createTable := `CREATE TABLE IF NOT EXISTS capture_results (
+	table := resolveResultTableName()
+	createTable := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			Params TEXT,
 			DeviceSerial TEXT NOT NULL,
 			App TEXT NOT NULL,
+			Scene TEXT,
 			ItemID TEXT,
-			VideoID TEXT,
 			ItemCaption TEXT,
+			ItemCDNURL TEXT,
+			ItemURL TEXT,
 			ItemDuration REAL,
 			UserName TEXT,
 			UserID TEXT,
+			UserAuthEntity TEXT,
 			Tags TEXT,
 			TaskID INTEGER,
 			Datetime INTEGER,
-			Extra TEXT NOT NULL
-		);`
+			LikeCount INTEGER,
+			ViewCount INTEGER,
+			AnchorPoint TEXT,
+			CommentCount INTEGER,
+			CollectCount INTEGER,
+			ForwardCount INTEGER,
+			ShareCount INTEGER,
+			PayMode TEXT,
+			Collection TEXT,
+			Episode TEXT,
+			PublishTime TEXT,
+			Extra TEXT NOT NULL,
+			%s INTEGER NOT NULL DEFAULT 0,
+			%s INTEGER,
+			%s TEXT
+		);`, table, reportedColumn, reportedAtColumn, reportErrorColumn)
 	if _, err := db.Exec(createTable); err != nil {
 		return pkgerrors.Wrap(err, "storage: init sqlite schema failed")
 	}
-	if err := ensureSQLiteColumn(db, "capture_results", "ItemDuration", "REAL"); err != nil {
-		return err
+	for _, col := range []struct {
+		name string
+		typ  string
+	}{
+		{"Scene", "TEXT"},
+		{"ItemCDNURL", "TEXT"},
+		{"ItemURL", "TEXT"},
+		{"ItemDuration", "REAL"},
+		{"UserAuthEntity", "TEXT"},
+		{"LikeCount", "INTEGER"},
+		{"ViewCount", "INTEGER"},
+		{"AnchorPoint", "TEXT"},
+		{"CommentCount", "INTEGER"},
+		{"CollectCount", "INTEGER"},
+		{"ForwardCount", "INTEGER"},
+		{"ShareCount", "INTEGER"},
+		{"PayMode", "TEXT"},
+		{"Collection", "TEXT"},
+		{"Episode", "TEXT"},
+		{"PublishTime", "TEXT"},
+		{reportedColumn, "INTEGER NOT NULL DEFAULT 0"},
+		{reportedAtColumn, "INTEGER"},
+		{reportErrorColumn, "TEXT"},
+	} {
+		if err := ensureSQLiteColumn(db, table, col.name, col.typ); err != nil {
+			return err
+		}
 	}
 	indexes := []string{
-		`CREATE INDEX IF NOT EXISTS idx_capture_results_params_datetime ON capture_results(Params, Datetime DESC);`,
-		`CREATE INDEX IF NOT EXISTS idx_capture_results_itemid ON capture_results(ItemID);`,
+		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%s_params_datetime ON %s(Params, Datetime DESC);`, table, table),
+		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%s_itemid ON %s(ItemID);`, table, table),
+		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%s_reported ON %s(%s);`, table, table, reportedColumn),
 	}
 	for _, stmt := range indexes {
 		if _, err := db.Exec(stmt); err != nil {
@@ -518,26 +656,4 @@ func formatExtra(extra interface{}) (string, error) {
 		}
 		return string(b), nil
 	}
-}
-
-type feishuWriter struct {
-	storage *feishu.ResultStorage
-}
-
-func (f *feishuWriter) Write(ctx context.Context, record ResultRecord) error {
-	if f == nil || f.storage == nil || record.FeishuInput == nil {
-		return nil
-	}
-	return f.storage.Write(ctx, *record.FeishuInput)
-}
-
-func (f *feishuWriter) Close() error {
-	return nil
-}
-
-func (f *feishuWriter) Name() string {
-	if f == nil || f.storage == nil {
-		return "feishu"
-	}
-	return f.storage.TableURL()
 }

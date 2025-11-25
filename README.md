@@ -126,4 +126,5 @@ By centralizing these hooks in TaskAgent, embedded agents (such as fox search) n
 ## Documentation & Support
 - Contributor guide: see `AGENTS.md` for coding standards, testing expectations, and security notes.
 - Feishu integration: `feishu/README.md` details schema expectations, sample payloads, and troubleshooting steps.
+- Search result storage: `docs/RESULT_STORAGE.md` explains the SQLite-first workflow, async Feishu reporter knobs, and piracy detection data source.
 - Issues & ideas: open a GitHub issue with logs (scrub secrets) and the command/output you ran (`go test`, `go build`, etc.).

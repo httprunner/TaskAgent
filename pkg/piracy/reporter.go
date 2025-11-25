@@ -17,6 +17,7 @@ type Reporter struct {
 	taskTableURL   string // Task table where piracy reports are written
 	threshold      float64
 	config         Config
+	sqliteSource   *sqliteResultSource
 }
 
 // NewReporter creates a new piracy reporter
@@ -43,13 +44,19 @@ func NewReporter() *Reporter {
 		log.Warn().Msg("Task table URL not configured, piracy detection will be skipped")
 	}
 
-	return &Reporter{
+	reporter := &Reporter{
 		resultTableURL: resultTableURL,
 		dramaTableURL:  dramaTableURL,
 		taskTableURL:   taskTableURL,
 		threshold:      threshold,
 		config:         cfg,
 	}
+	if sqliteSrc, err := newSQLiteResultSource(); err != nil {
+		log.Warn().Err(err).Msg("piracy reporter: sqlite result source disabled")
+	} else {
+		reporter.sqliteSource = sqliteSrc
+	}
+	return reporter
 }
 
 // IsConfigured returns true if all required table URLs are configured
@@ -159,6 +166,23 @@ func (pr *Reporter) detectWithFiltersInternal(ctx context.Context, paramsList []
 	}
 
 	ops.Config.ApplyDefaults()
+
+	if pr.sqliteSource != nil {
+		sqliteRows, err := pr.sqliteSource.FetchRows(ctx, ops.Config, paramsList)
+		if err != nil {
+			log.Warn().Err(err).Msg("piracy reporter: sqlite fetch failed, fallback to Feishu")
+		} else if len(sqliteRows) > 0 {
+			client, err := feishu.NewClientFromEnv()
+			if err != nil {
+				return nil, err
+			}
+			dramaRows, err := fetchRows(ctx, client, ops.DramaTable)
+			if err != nil {
+				return nil, err
+			}
+			return analyzeRows(sqliteRows, dramaRows, ops.Config), nil
+		}
+	}
 
 	report, err := Detect(ctx, ops)
 	if err != nil {

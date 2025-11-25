@@ -47,11 +47,15 @@ names.
 | Variable | Default | Purpose / Usage |
 | --- | --- | --- |
 | `TRACKING_STORAGE_DISABLE_JSONL` | unset | When set (any non-empty value), disables JSONL file output for capture records. |
-| `TRACKING_STORAGE_ENABLE_SQLITE` | unset (`false`) | Forces the SQLite sink on even if not configured via code. Recognizes `1`/`true`. |
 | `RESULT_STORAGE_ENABLE_FEISHU` | unset (`false`) | Forces the Feishu result-table sink on (requires Feishu credentials + `RESULT_BITABLE_URL`). |
 | `TRACKING_STORAGE_DB_PATH` | `$HOME/.eval/records.sqlite` | Custom path for the tracking SQLite database. Used by `pkg/storage` and webhook summaries (SQLite source). |
 | `DRAMA_SQLITE_TABLE` | `drama_catalog` | Table name for drama metadata inside the local SQLite DB (webhook summaries, if Source=sqlite). |
 | `RESULT_SQLITE_TABLE` | `capture_results` | Table name for capture records inside the local SQLite DB (webhook summaries, if Source=sqlite). |
+| `RESULT_REPORT_POLL_INTERVAL` | `5s` | Frequency for the async Feishu reporter to scan SQLite for unreported rows. Accepts Go duration strings (`500ms`, `5s`, etc.). |
+| `RESULT_REPORT_BATCH` | `30` | Maximum number of pending rows uploaded to Feishu per reporter tick. |
+| `RESULT_REPORT_HTTP_TIMEOUT` | `30s` | Per-record Feishu upload timeout used by the async reporter. Increase when the bitable API experiences high latency. |
+
+The `capture_results` table mirrors the Feishu结果表 schema and adds bookkeeping columns (`reported`, `reported_at`, `report_error`) so the async reporter can resume failed uploads safely.
 
 ## Testing & Tooling Toggles
 
