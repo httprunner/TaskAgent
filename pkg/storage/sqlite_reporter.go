@@ -88,10 +88,20 @@ func (r *resultReporter) flushOnce() {
 		log.Error().Err(err).Msg("result reporter fetch pending rows failed")
 		return
 	}
+	log.Info().
+		Int("pending_rows", len(rows)).
+		Dur("timeout", timeout).
+		Msg("result reporter flush fetched pending sqlite rows")
 	for _, row := range rows {
 		if ctx.Err() != nil {
 			return
 		}
+		log.Trace().
+			Int64("row_id", row.ID).
+			Str("app", trimNull(row.App)).
+			Str("scene", trimNull(row.Scene)).
+			Str("params", trimNull(row.Params)).
+			Msg("result reporter dispatching capture row to feishu")
 		if err := r.dispatchRow(row); err != nil {
 			log.Error().Err(err).Int64("row_id", row.ID).Msg("result reporter dispatch row failed")
 			if markErr := r.markFailure(row.ID, err); markErr != nil {
@@ -103,6 +113,9 @@ func (r *resultReporter) flushOnce() {
 			log.Error().Err(err).Int64("row_id", row.ID).Msg("result reporter mark success failed")
 			continue
 		}
+		log.Trace().
+			Int64("row_id", row.ID).
+			Msg("result reporter marked capture row reported")
 	}
 }
 

@@ -55,8 +55,13 @@ func (r *FeishuRecorder) UpsertDevices(ctx context.Context, devices []pool.Devic
 	}
 	now := r.now()
 	for _, d := range devices {
+		serial := strings.TrimSpace(d.DeviceSerial)
+		if serial == "" {
+			log.Warn().Str("status", d.Status).Msg("feishu recorder: skip device without serial")
+			continue
+		}
 		rec := feishu.DeviceRecordInput{
-			DeviceSerial: d.DeviceSerial,
+			DeviceSerial: serial,
 			OSType:       d.OSType,
 			OSVersion:    d.OSVersion,
 			IsRoot:       d.IsRoot,

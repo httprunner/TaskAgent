@@ -152,7 +152,7 @@ func (c *Client) FetchDeviceTable(ctx context.Context, rawURL string, override *
 		index:  make(map[string]string, len(records)),
 	}
 	for _, rec := range records {
-		serial := toString(rec.Fields[fields.DeviceSerial])
+		serial := strings.TrimSpace(toString(rec.Fields[fields.DeviceSerial]))
 		if serial == "" {
 			continue
 		}
@@ -195,12 +195,52 @@ func (c *Client) UpsertDevice(ctx context.Context, rawURL string, fields DeviceF
 	if err != nil {
 		return err
 	}
-	recordID := table.RecordIDBySerial(strings.TrimSpace(rec.DeviceSerial))
+	serial := strings.TrimSpace(rec.DeviceSerial)
+	recordID := table.RecordIDBySerial(serial)
 	if recordID == "" {
-		_, err = c.createBitableRecord(ctx, table.Ref, payload)
-		return err
+		recordID, err = c.lookupDeviceRecordID(ctx, table.Ref, table.Fields, serial)
+		if err != nil {
+			return err
+		}
+		if recordID == "" {
+			_, err = c.createBitableRecord(ctx, table.Ref, payload)
+			return err
+		}
 	}
 	return c.updateBitableRecord(ctx, table.Ref, recordID, payload)
+}
+
+func (c *Client) lookupDeviceRecordID(ctx context.Context, ref BitableRef, fields DeviceFields, serial string) (string, error) {
+	serial = strings.TrimSpace(serial)
+	if serial == "" {
+		return "", nil
+	}
+	filter := NewFilterInfo("and")
+	condition := NewCondition(fields.DeviceSerial, "is", serial)
+	if condition == nil {
+		return "", fmt.Errorf("feishu: device serial field not configured")
+	}
+	filter.Conditions = append(filter.Conditions, condition)
+	opts := &TaskQueryOptions{Limit: 1, Filter: filter}
+	refs := []BitableRef{ref}
+	if strings.TrimSpace(ref.ViewID) != "" {
+		refNoView := ref
+		refNoView.ViewID = ""
+		refs = append(refs, refNoView)
+	}
+	for _, candidate := range refs {
+		records, err := c.listBitableRecords(ctx, candidate, 1, opts)
+		if err != nil {
+			return "", err
+		}
+		for _, rec := range records {
+			val := strings.TrimSpace(toString(rec.Fields[fields.DeviceSerial]))
+			if strings.EqualFold(val, serial) {
+				return rec.RecordID, nil
+			}
+		}
+	}
+	return "", nil
 }
 
 func (fields DeviceFields) merge(override DeviceFields) DeviceFields {
