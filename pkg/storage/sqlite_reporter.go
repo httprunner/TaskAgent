@@ -176,8 +176,7 @@ func (r *resultReporter) markSuccess(id int64) error {
 	defer cancel()
 	stmt := fmt.Sprintf(`UPDATE %s SET %s=1, %s=?, %s=NULL WHERE id=?`,
 		quoteIdent(r.table), quoteIdent(reportedColumn), quoteIdent(reportedAtColumn), quoteIdent(reportErrorColumn))
-	_, err := r.db.ExecContext(ctx, stmt, time.Now().UnixMilli(), id)
-	return pkgerrors.Wrap(err, "storage: mark capture row reported")
+	return pkgerrors.Wrap(execWithRetry(ctx, r.db, stmt, time.Now().UnixMilli(), id), "storage: mark capture row reported")
 }
 
 func (r *resultReporter) markFailure(id int64, err error) error {
@@ -185,8 +184,7 @@ func (r *resultReporter) markFailure(id int64, err error) error {
 	defer cancel()
 	stmt := fmt.Sprintf(`UPDATE %s SET %s=-1, %s=?, %s=? WHERE id=?`,
 		quoteIdent(r.table), quoteIdent(reportedColumn), quoteIdent(reportedAtColumn), quoteIdent(reportErrorColumn))
-	_, execErr := r.db.ExecContext(ctx, stmt, time.Now().UnixMilli(), truncateError(err), id)
-	return pkgerrors.Wrap(execErr, "storage: mark capture row failed")
+	return pkgerrors.Wrap(execWithRetry(ctx, r.db, stmt, time.Now().UnixMilli(), truncateError(err), id), "storage: mark capture row failed")
 }
 
 func (r *resultReporter) Close() error {
@@ -331,4 +329,32 @@ func parseReportTimeout() time.Duration {
 		return dur
 	}
 	return 30 * time.Second
+}
+
+func execWithRetry(ctx context.Context, db *sql.DB, stmt string, args ...any) error {
+	const maxAttempts = 3
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		_, err := db.ExecContext(ctx, stmt, args...)
+		if err == nil {
+			return nil
+		}
+		if !isSQLiteBusy(err) || attempt == maxAttempts-1 {
+			return err
+		}
+		backoff := time.Duration(attempt+1) * 200 * time.Millisecond
+		select {
+		case <-time.After(backoff):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+func isSQLiteBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "database is locked") || strings.Contains(msg, "sqlite_busy")
 }
