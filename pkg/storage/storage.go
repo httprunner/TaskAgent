@@ -252,7 +252,9 @@ func buildResultInsertStatement() string {
 	columns := strings.Join(captureResultColumns, ", ")
 	placeholders := strings.Repeat("?,", len(captureResultColumns))
 	placeholders = strings.TrimRight(placeholders, ",")
-	return fmt.Sprintf(`INSERT INTO %s (%s) VALUES (%s)`, table, columns, placeholders)
+	// Use OR IGNORE so a unique index can safely deduplicate concurrent writes
+	// without surfacing SQLITE_CONSTRAINT errors to callers.
+	return fmt.Sprintf(`INSERT OR IGNORE INTO %s (%s) VALUES (%s)`, table, columns, placeholders)
 }
 
 func newFeishuStorage() (*feishu.ResultStorage, error) {
@@ -594,11 +596,32 @@ func prepareSchema(db *sql.DB) error {
 		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%s_params_datetime ON %s(Params, Datetime DESC);`, table, table),
 		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%s_itemid ON %s(ItemID);`, table, table),
 		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%s_reported ON %s(%s);`, table, table, reportedColumn),
+		// enforce per-device/app/query/task uniqueness to avoid duplicate rows when
+		// multiple agents flush the same capture concurrently
+		fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS idx_%s_dedup ON %s(DeviceSerial, App, Params, TaskID, ItemID);`, table, table),
+	}
+
+	// Cleanup historical duplicates so the unique index creation will not fail.
+	if err := dedupeCaptureResults(db, table); err != nil {
+		return err
 	}
 	for _, stmt := range indexes {
 		if _, err := db.Exec(stmt); err != nil {
 			return pkgerrors.Wrap(err, "storage: init sqlite indexes failed")
 		}
+	}
+	return nil
+}
+
+// dedupeCaptureResults removes duplicate rows (keeping the earliest rowid) for
+// the composite key used by the unique index. This allows the index creation to
+// succeed even if older builds inserted duplicates.
+func dedupeCaptureResults(db *sql.DB, table string) error {
+	stmt := fmt.Sprintf(`DELETE FROM %s WHERE rowid NOT IN (
+		SELECT MIN(rowid) FROM %s GROUP BY DeviceSerial, App, Params, TaskID, ItemID
+	);`, quoteIdent(table), quoteIdent(table))
+	if _, err := db.Exec(stmt); err != nil {
+		return pkgerrors.Wrap(err, "storage: dedupe capture_results failed")
 	}
 	return nil
 }
