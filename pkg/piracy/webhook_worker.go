@@ -113,6 +113,9 @@ func (w *WebhookWorker) processOnce(ctx context.Context) error {
 	var errs []string
 
 	for _, row := range table.Rows {
+		if !eligibleForWebhook(row) {
+			continue
+		}
 		params := strings.TrimSpace(row.Params)
 		if params == "" || row.TaskID == 0 {
 			continue
@@ -155,6 +158,15 @@ func (w *WebhookWorker) processOnce(ctx context.Context) error {
 		return errors.New(strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+func eligibleForWebhook(row feishu.TaskRow) bool {
+	status := strings.ToLower(strings.TrimSpace(row.Status))
+	webhook := strings.ToLower(strings.TrimSpace(row.Webhook))
+	if status != feishu.StatusSuccess {
+		return false
+	}
+	return webhook == feishu.WebhookPending || webhook == feishu.WebhookFailed
 }
 
 func (w *WebhookWorker) fetchWebhookCandidates(ctx context.Context) (*feishu.TaskTable, error) {
