@@ -118,6 +118,21 @@ success / failed
 
 By centralizing these hooks in TaskAgent, embedded agents (such as fox search) no longer need to manage per-task status transitions themselves—plug in a `JobRunner`, and the lifecycle wiring happens automatically.
 
+## Feishu Task Pull Priority
+
+`FeishuTaskClient.FetchAvailableTasks` / `fetchTodayPendingFeishuTasks` 会按如下优先级逐段拉取，**每段只补足当前剩余缺口（limit-len(result)），凑满即停**，并忽略 `Scene` 为空的任务：
+
+1) Scene=个人页搜索，Status=pending，带 Datetime（Today）
+2) Scene=个人页搜索，Status=pending，未带 Datetime
+3) Scene=个人页搜索，Status=failed，带 Datetime（Today）
+4) Scene=个人页搜索，Status=failed，未带 Datetime
+5) Scene=综合页搜索，Status=pending，带 Datetime（Today）
+6) Scene=综合页搜索，Status=pending，未带 Datetime
+7) Scene=综合页搜索，Status=failed，带 Datetime（Today）
+8) Scene=综合页搜索，Status=pending，未带 Datetime
+
+这样可以确保“当天任务”先被分配，同一优先级不足时才用下一段补齐。
+
 ## Development & Testing
 - Format/lint: `go fmt ./...` and `go vet ./...` to keep style consistent.
 - Unit tests: `go test ./...` covers pool orchestration and Feishu helpers via mocks.

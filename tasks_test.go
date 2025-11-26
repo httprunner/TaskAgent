@@ -2,7 +2,7 @@ package pool
 
 import (
 	"context"
-	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,7 +68,7 @@ func TestFetchFeishuTasksWithStrategyFiltersInvalidTasks(t *testing.T) {
 		},
 	}
 
-	tasks, err := fetchFeishuTasksWithStrategy(ctx, client, "https://example.com/bitable/abc", feishusvc.DefaultTaskFields, "com.app", dayStart, dayEnd, now, []string{""}, 5, true)
+	tasks, err := fetchFeishuTasksWithStrategy(ctx, client, "https://example.com/bitable/abc", feishusvc.DefaultTaskFields, "com.app", dayStart, dayEnd, now, []string{""}, 5, true, "")
 	if err != nil {
 		t.Fatalf("fetchFeishuTasksWithStrategy returned error: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestFetchFeishuTasksWithStrategyFallbackFiltersFutureTasks(t *testing.T) {
 		},
 	}
 
-	tasks, err := fetchFeishuTasksWithStrategy(ctx, client, "https://example.com/bitable/def", feishusvc.DefaultTaskFields, "com.app", dayStart, dayEnd, now, []string{""}, 2, false)
+	tasks, err := fetchFeishuTasksWithStrategy(ctx, client, "https://example.com/bitable/def", feishusvc.DefaultTaskFields, "com.app", dayStart, dayEnd, now, []string{""}, 2, false, "")
 	if err != nil {
 		t.Fatalf("fetchFeishuTasksWithStrategy fallback returned error: %v", err)
 	}
@@ -140,75 +140,53 @@ func timePtr(t time.Time) *time.Time {
 	return &v
 }
 
-func TestFetchTodayPendingFeishuTasksFillsWithFallback(t *testing.T) {
+func TestFetchTodayPendingFeishuTasksSceneStatusPriorityStopsAfterLimit(t *testing.T) {
 	ctx := context.Background()
 	loc := time.FixedZone("UTC+8", 8*3600)
 	now := time.Date(2025, 11, 9, 10, 0, 0, 0, loc)
-	client := &filterAwareTargetClient{
-		withDatetimeRows: []feishusvc.TaskRow{
-			{TaskID: 1, Params: "A", App: "com.app", Datetime: timePtr(time.Date(2025, 11, 9, 8, 0, 0, 0, loc))},
-			{TaskID: 2, Params: "B", App: "com.app", Datetime: timePtr(time.Date(2025, 11, 9, 9, 0, 0, 0, loc))},
-		},
-		fallbackRows: []feishusvc.TaskRow{
-			{TaskID: 2, Params: "B-duplicate", App: "com.app"},
-			{TaskID: 3, Params: "C", App: "com.app"},
-			{TaskID: 4, Params: "D", App: "com.app"},
-			{TaskID: 5, Params: "E", App: "com.app"},
-			{TaskID: 6, Params: "F", App: "com.app"},
+
+	client := &sceneStatusTargetClient{
+		rows: map[string][]feishusvc.TaskRow{
+			"个人页搜索|pending|with": {
+				{TaskID: 11, Params: "A", App: "com.app", Scene: "个人页搜索"},
+				{TaskID: 12, Params: "B", App: "com.app", Scene: "个人页搜索"},
+			},
+			"个人页搜索|pending|without": {
+				{TaskID: 13, Params: "C", App: "com.app", Scene: "个人页搜索"},
+			},
+			"个人页搜索|failed|with": {
+				{TaskID: 14, Params: "D", App: "com.app", Scene: "个人页搜索"},
+			},
+			"综合页搜索|pending|with": {
+				{TaskID: 21, Params: "E", App: "com.app", Scene: "综合页搜索"},
+			},
 		},
 	}
-	tasks, err := fetchTodayPendingFeishuTasks(ctx, client, "https://example.com/bitable/foo", "com.app", 5, now)
+
+	tasks, err := fetchTodayPendingFeishuTasks(ctx, client, "https://example.com/bitable/foo", "com.app", 3, now)
 	if err != nil {
 		t.Fatalf("fetchTodayPendingFeishuTasks returned error: %v", err)
 	}
-	ids := collectTaskIDs(tasks)
-	expected := []int64{1, 2, 3, 4, 5}
-	if !equalIDs(ids, expected) {
-		t.Fatalf("unexpected task ids: got %v, want %v", ids, expected)
+	got := collectTaskIDs(tasks)
+	want := []int64{11, 12, 13}
+	if !equalIDs(got, want) {
+		t.Fatalf("unexpected ids: got %v, want %v", got, want)
 	}
 }
 
-func TestFetchTodayPendingFeishuTasksSkipsFallbackWhenSufficient(t *testing.T) {
-	ctx := context.Background()
-	loc := time.FixedZone("UTC+8", 8*3600)
-	now := time.Date(2025, 11, 9, 10, 0, 0, 0, loc)
-	withDatetime := make([]feishusvc.TaskRow, 0, 6)
-	for i := 0; i < 6; i++ {
-		hour := 4 + i
-		withDatetime = append(withDatetime, feishusvc.TaskRow{
-			TaskID:   int64(10 + i),
-			Params:   fmt.Sprintf("task-%d", 10+i),
-			App:      "com.app",
-			Datetime: timePtr(time.Date(2025, 11, 9, hour, 0, 0, 0, loc)),
-		})
-	}
-	client := &filterAwareTargetClient{
-		withDatetimeRows: withDatetime,
-		fallbackRows: []feishusvc.TaskRow{
-			{TaskID: 99, Params: "Z", App: "com.app"},
-		},
-	}
-	tasks, err := fetchTodayPendingFeishuTasks(ctx, client, "https://example.com/bitable/bar", "com.app", 5, now)
-	if err != nil {
-		t.Fatalf("fetchTodayPendingFeishuTasks returned error: %v", err)
-	}
-	ids := collectTaskIDs(tasks)
-	expected := []int64{10, 11, 12, 13, 14}
-	if !equalIDs(ids, expected) {
-		t.Fatalf("unexpected ids: got %v, want %v", ids, expected)
-	}
+type sceneStatusTargetClient struct {
+	rows map[string][]feishusvc.TaskRow
 }
 
-type filterAwareTargetClient struct {
-	withDatetimeRows []feishusvc.TaskRow
-	fallbackRows     []feishusvc.TaskRow
-}
-
-func (f *filterAwareTargetClient) FetchTaskTableWithOptions(ctx context.Context, rawURL string, override *feishusvc.TaskFields, opts *feishusvc.TaskQueryOptions) (*feishusvc.TaskTable, error) {
-	rows := f.fallbackRows
-	if filterHasField(opts.Filter, feishusvc.DefaultTaskFields.Datetime) {
-		rows = f.withDatetimeRows
+func (c *sceneStatusTargetClient) FetchTaskTableWithOptions(ctx context.Context, rawURL string, override *feishusvc.TaskFields, opts *feishusvc.TaskQueryOptions) (*feishusvc.TaskTable, error) {
+	scene := extractConditionValue(opts.Filter, feishusvc.DefaultTaskFields.Scene)
+	status := extractConditionValue(opts.Filter, feishusvc.DefaultTaskFields.Status)
+	dt := "without"
+	if filterHasDatetime(opts.Filter, feishusvc.DefaultTaskFields.Datetime) {
+		dt = "with"
 	}
+	key := strings.TrimSpace(scene) + "|" + strings.TrimSpace(status) + "|" + dt
+	rows := c.rows[key]
 	clone := make([]feishusvc.TaskRow, len(rows))
 	copy(clone, rows)
 	return &feishusvc.TaskTable{
@@ -217,15 +195,40 @@ func (f *filterAwareTargetClient) FetchTaskTableWithOptions(ctx context.Context,
 	}, nil
 }
 
-func (f *filterAwareTargetClient) UpdateTaskStatus(ctx context.Context, table *feishusvc.TaskTable, taskID int64, newStatus string) error {
+func (c *sceneStatusTargetClient) UpdateTaskStatus(ctx context.Context, table *feishusvc.TaskTable, taskID int64, newStatus string) error {
 	return nil
 }
 
-func (f *filterAwareTargetClient) UpdateTaskFields(ctx context.Context, table *feishusvc.TaskTable, taskID int64, fields map[string]any) error {
+func (c *sceneStatusTargetClient) UpdateTaskFields(ctx context.Context, table *feishusvc.TaskTable, taskID int64, fields map[string]any) error {
 	return nil
 }
 
-func filterHasField(filter *feishusvc.FilterInfo, field string) bool {
+func extractConditionValue(filter *feishusvc.FilterInfo, field string) string {
+	if filter == nil {
+		return ""
+	}
+	for _, cond := range filter.Conditions {
+		if cond == nil || cond.FieldName == nil || *cond.FieldName != field {
+			continue
+		}
+		if len(cond.Value) > 0 {
+			return cond.Value[0]
+		}
+	}
+	for _, child := range filter.Children {
+		for _, cond := range child.Conditions {
+			if cond == nil || cond.FieldName == nil || *cond.FieldName != field {
+				continue
+			}
+			if len(cond.Value) > 0 {
+				return cond.Value[0]
+			}
+		}
+	}
+	return ""
+}
+
+func filterHasDatetime(filter *feishusvc.FilterInfo, field string) bool {
 	if filter == nil {
 		return false
 	}
