@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -149,11 +150,29 @@ func TestSendSummaryWebhookSQLite(t *testing.T) {
 	if record["ItemID"] != "vid123" {
 		t.Fatalf("unexpected ItemID %#v", record["ItemID"])
 	}
-	if extraMap, ok := record["Extra"].(map[string]any); !ok || extraMap["quality"] != "hd" {
+	switch extraVal := record["Extra"].(type) {
+	case map[string]any:
+		if extraVal["quality"] != "hd" {
+			t.Fatalf("extra field mismatch: %#v", record["Extra"])
+		}
+	case string:
+		if extraVal != `{"quality":"hd"}` {
+			t.Fatalf("extra field mismatch: %#v", record["Extra"])
+		}
+	default:
 		t.Fatalf("extra field mismatch: %#v", record["Extra"])
 	}
-	if ts, ok := record["Datetime"].(int64); !ok || ts != now.UnixMilli() {
-		t.Fatalf("datetime field mismatch: %#v", record["Datetime"])
+	switch ts := record["Datetime"].(type) {
+	case int64:
+		if ts != now.UnixMilli() {
+			t.Fatalf("datetime field mismatch: %#v", record["Datetime"])
+		}
+	case string:
+		if ts != strconv.FormatInt(now.UnixMilli(), 10) {
+			t.Fatalf("datetime field mismatch: %#v", record["Datetime"])
+		}
+	default:
+		t.Fatalf("datetime field type mismatch: %T %#v", record["Datetime"], record["Datetime"])
 	}
 	if posted["RightsProtectionScenario"] != "付费&免费都登记" {
 		t.Fatalf("flattened payload missing drama field: %#v", posted)

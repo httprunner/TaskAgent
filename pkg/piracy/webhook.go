@@ -180,11 +180,14 @@ func flattenDramaFields(raw map[string]any, schema feishu.DramaFields) map[strin
 	fieldMap := structFieldMap(schema)
 	payload := make(map[string]any, len(fieldMap))
 	for engName, rawKey := range fieldMap {
+		// Feishu bitable fields often arrive as rich-text arrays or numeric
+		// values. Downstream webhooks expect plain strings, so normalize the
+		// value to a string to avoid validation errors.
 		if raw != nil {
-			payload[engName] = raw[rawKey]
-		} else {
-			payload[engName] = nil
+			payload[engName] = getString(raw, rawKey)
+			continue
 		}
+		payload[engName] = nil
 	}
 	return payload
 }
@@ -192,15 +195,27 @@ func flattenDramaFields(raw map[string]any, schema feishu.DramaFields) map[strin
 func flattenRecordFields(records []CaptureRecordPayload, schema feishu.ResultFields) []map[string]any {
 	fieldMap := structFieldMap(schema)
 	result := make([]map[string]any, 0, len(records))
+	rawItemKey := fieldMap["ItemID"]
+	seenItem := make(map[string]struct{}, len(records))
 	for _, rec := range records {
+		if rawItemKey != "" {
+			itemID := strings.TrimSpace(getString(rec.Fields, rawItemKey))
+			if itemID != "" {
+				if _, exists := seenItem[itemID]; exists {
+					continue
+				}
+				seenItem[itemID] = struct{}{}
+			}
+		}
 		entry := make(map[string]any, len(fieldMap)+1)
 		entry["_record_id"] = rec.RecordID
 		for engName, rawKey := range fieldMap {
-			if val, ok := rec.Fields[rawKey]; ok {
-				entry[engName] = val
-			} else {
+			if _, ok := rec.Fields[rawKey]; !ok {
 				entry[engName] = nil
+				continue
 			}
+			// Downstream webhook schema expects strings for all capture fields, including Extra.
+			entry[engName] = getString(rec.Fields, rawKey)
 		}
 		result = append(result, entry)
 	}

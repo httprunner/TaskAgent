@@ -128,6 +128,9 @@ func (w *WebhookWorker) processOnce(ctx context.Context) error {
 				Str("params", params).
 				Msg("webhook delivery failed")
 			failedIDs = append(failedIDs, row.TaskID)
+			if err := w.updateWebhookState(ctx, table, []int64{row.TaskID}, feishu.WebhookFailed); err != nil {
+				errs = append(errs, err.Error())
+			}
 		} else {
 			log.Info().
 				Int64("task_id", row.TaskID).
@@ -135,17 +138,9 @@ func (w *WebhookWorker) processOnce(ctx context.Context) error {
 				Str("app", app).
 				Msg("webhook delivered")
 			successIDs = append(successIDs, row.TaskID)
-		}
-	}
-
-	if len(successIDs) > 0 {
-		if err := w.updateWebhookState(ctx, table, successIDs, feishu.WebhookSuccess); err != nil {
-			errs = append(errs, err.Error())
-		}
-	}
-	if len(failedIDs) > 0 {
-		if err := w.updateWebhookState(ctx, table, failedIDs, feishu.WebhookFailed); err != nil {
-			errs = append(errs, err.Error())
+			if err := w.updateWebhookState(ctx, table, []int64{row.TaskID}, feishu.WebhookSuccess); err != nil {
+				errs = append(errs, err.Error())
+			}
 		}
 	}
 
