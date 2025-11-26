@@ -599,9 +599,6 @@ func prepareSchema(db *sql.DB) error {
 		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%s_params_datetime ON %s(Params, Datetime DESC);`, table, table),
 		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%s_itemid ON %s(ItemID);`, table, table),
 		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS idx_%s_reported ON %s(%s);`, table, table, reportedColumn),
-		// enforce per-device/app/query/task uniqueness to avoid duplicate rows when
-		// multiple agents flush the same capture concurrently
-		fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS idx_%s_dedup ON %s(DeviceSerial, App, Params, TaskID, ItemID);`, table, table),
 	}
 
 	// Cleanup historical duplicates so the unique index creation will not fail.
@@ -613,6 +610,10 @@ func prepareSchema(db *sql.DB) error {
 			return pkgerrors.Wrap(err, "storage: init sqlite indexes failed")
 		}
 	}
+
+	if err := ensureTaskAppItemUniqueIndex(db, table); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -621,12 +622,81 @@ func prepareSchema(db *sql.DB) error {
 // succeed even if older builds inserted duplicates.
 func dedupeCaptureResults(db *sql.DB, table string) error {
 	stmt := fmt.Sprintf(`DELETE FROM %s WHERE rowid NOT IN (
-		SELECT MIN(rowid) FROM %s GROUP BY DeviceSerial, App, Params, TaskID, ItemID
+		SELECT MIN(rowid) FROM %s GROUP BY TaskID, App, ItemID
 	);`, quoteIdent(table), quoteIdent(table))
 	if _, err := db.Exec(stmt); err != nil {
 		return pkgerrors.Wrap(err, "storage: dedupe capture_results failed")
 	}
 	return nil
+}
+
+// ensureTaskAppItemUniqueIndex guarantees the desired unique index exists even
+// if an older build created idx_*_dedup with different columns. It drops the
+// stale index when the column set mismatches, then recreates the correct one.
+func ensureTaskAppItemUniqueIndex(db *sql.DB, table string) error {
+	indexName := fmt.Sprintf("idx_%s_dedup", table)
+	columns, err := inspectIndexColumns(db, indexName)
+	if err != nil {
+		return err
+	}
+	desired := []string{"TaskID", "App", "ItemID"}
+	if slicesEqualFold(columns, desired) {
+		return nil // already correct
+	}
+	if len(columns) > 0 { // exists but wrong definition
+		dropStmt := fmt.Sprintf("DROP INDEX IF EXISTS %s;", quoteIdent(indexName))
+		if _, err := db.Exec(dropStmt); err != nil {
+			return pkgerrors.Wrap(err, "storage: drop stale dedup index failed")
+		}
+	}
+	createStmt := fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS %s ON %s(TaskID, App, ItemID);`, quoteIdent(indexName), quoteIdent(table))
+	if _, err := db.Exec(createStmt); err != nil {
+		return pkgerrors.Wrap(err, "storage: create task/app/item unique index failed")
+	}
+	return nil
+}
+
+// inspectIndexColumns returns the column list (in order) for the given index
+// name, or nil if the index does not exist.
+func inspectIndexColumns(db *sql.DB, indexName string) ([]string, error) {
+	if strings.TrimSpace(indexName) == "" {
+		return nil, nil
+	}
+	query := fmt.Sprintf("PRAGMA index_info(%s);", quoteIdent(indexName))
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, pkgerrors.Wrap(err, "storage: inspect index info failed")
+	}
+	defer rows.Close()
+	var cols []string
+	for rows.Next() {
+		var (
+			seqno int
+			cid   int
+			name  string
+		)
+		if err := rows.Scan(&seqno, &cid, &name); err != nil {
+			return nil, pkgerrors.Wrap(err, "storage: scan index info failed")
+		}
+		cols = append(cols, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, pkgerrors.Wrap(err, "storage: iterate index info failed")
+	}
+	return cols, nil
+}
+
+// slicesEqualFold compares two string slices case-insensitively and order-sensitively.
+func slicesEqualFold(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !strings.EqualFold(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func ensureSQLiteColumn(db *sql.DB, table, column, columnType string) error {
