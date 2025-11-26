@@ -515,7 +515,8 @@ func configureSQLite(db *sql.DB) error {
 		"PRAGMA journal_mode=WAL;",
 		"PRAGMA synchronous=NORMAL;",
 		"PRAGMA temp_store=MEMORY;",
-		"PRAGMA busy_timeout=5000;",
+		// 5s 过短，Feishu 网络抖动或上报堆积时易触发 SQLITE_BUSY，延长至 60s。
+		"PRAGMA busy_timeout=60000;",
 	}
 	for _, pragma := range pragmas {
 		if _, err := db.Exec(pragma); err != nil {
@@ -523,6 +524,8 @@ func configureSQLite(db *sql.DB) error {
 		}
 	}
 	db.SetMaxOpenConns(1)
+	// 限制空闲连接，避免旧连接持锁。
+	db.SetMaxIdleConns(1)
 	return nil
 }
 
