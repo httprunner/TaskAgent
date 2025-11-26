@@ -20,6 +20,16 @@ const (
 	envResultReportPollInterval = "RESULT_REPORT_POLL_INTERVAL"
 	envResultReportBatchSize    = "RESULT_REPORT_BATCH"
 	envResultReportHTTPTimeout  = "RESULT_REPORT_HTTP_TIMEOUT"
+
+	reportStatusFailed   = -1
+	reportStatusPending  = 0
+	reportStatusSuccess  = 1
+	reportStatusInflight = 2
+
+	// minClaimTTL defines the minimum amount of time a claimed row must stay
+	// in the inflight state before it can be re-queued. This keeps the reporter
+	// crash-tolerant without letting stuck rows accumulate indefinitely.
+	minClaimTTL = 30 * time.Second
 )
 
 type resultReporter struct {
@@ -120,14 +130,51 @@ func (r *resultReporter) flushOnce() {
 }
 
 func (r *resultReporter) fetchPending(ctx context.Context) ([]pendingResultRow, error) {
+	// 1) requeue stale inflight rows (e.g. reporter crashed previously)
+	if err := r.requeueStaleInflight(ctx); err != nil {
+		log.Error().Err(err).Msg("result reporter requeue stale inflight rows failed")
+	}
+
+	// 2) claim a batch of pending rows so concurrent reporters don't double-send
+	claimedAt := time.Now().UnixMilli()
+	rows, err := r.claimPending(ctx, claimedAt)
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// claimPending atomically marks up to batchSize pending rows as inflight and
+// returns their full payloads. Using a single transaction prevents multiple
+// reporters from fetching and dispatching the same rows concurrently.
+func (r *resultReporter) claimPending(ctx context.Context, claimedAt int64) ([]pendingResultRow, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, pkgerrors.Wrap(err, "storage: begin tx for claiming rows failed")
+	}
+
+	claimStmt := fmt.Sprintf(`UPDATE %s SET %s=?, %s=? WHERE id IN (
+		SELECT id FROM %s WHERE %s IN (%d, %d) ORDER BY id ASC LIMIT ?
+	);`,
+		quoteIdent(r.table), quoteIdent(reportedColumn), quoteIdent(reportedAtColumn),
+		quoteIdent(r.table), quoteIdent(reportedColumn), reportStatusPending, reportStatusFailed)
+	if _, err := tx.ExecContext(ctx, claimStmt, reportStatusInflight, claimedAt, r.batchSize); err != nil {
+		tx.Rollback()
+		return nil, pkgerrors.Wrap(err, "storage: claim pending capture rows failed")
+	}
+
 	query := fmt.Sprintf(`SELECT id, Datetime, DeviceSerial, App, Scene, Params, ItemID, ItemCaption,
 		ItemCDNURL, ItemURL, ItemDuration, UserName, UserID, UserAuthEntity, Tags, TaskID,
 		Extra, LikeCount, ViewCount, AnchorPoint, CommentCount, CollectCount, ForwardCount,
 		ShareCount, PayMode, Collection, Episode, PublishTime
-		FROM %s WHERE %s IN (0, -1) ORDER BY id ASC LIMIT ?`, quoteIdent(r.table), quoteIdent(reportedColumn))
-	rows, err := r.db.QueryContext(ctx, query, r.batchSize)
+		FROM %s WHERE %s=? AND %s=? ORDER BY id ASC`, quoteIdent(r.table), quoteIdent(reportedColumn), quoteIdent(reportedAtColumn))
+	rows, err := tx.QueryContext(ctx, query, reportStatusInflight, claimedAt)
 	if err != nil {
-		return nil, pkgerrors.Wrap(err, "storage: query pending capture rows failed")
+		tx.Rollback()
+		return nil, pkgerrors.Wrap(err, "storage: query claimed capture rows failed")
 	}
 	defer rows.Close()
 
@@ -164,14 +211,41 @@ func (r *resultReporter) fetchPending(ctx context.Context) ([]pendingResultRow, 
 			&row.Episode,
 			&row.PublishTime,
 		); err != nil {
-			return nil, pkgerrors.Wrap(err, "storage: scan pending capture row failed")
+			rows.Close()
+			tx.Rollback()
+			return nil, pkgerrors.Wrap(err, "storage: scan claimed capture row failed")
 		}
 		results = append(results, row)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, pkgerrors.Wrap(err, "storage: iterate pending capture rows failed")
+		tx.Rollback()
+		return nil, pkgerrors.Wrap(err, "storage: iterate claimed capture rows failed")
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, pkgerrors.Wrap(err, "storage: commit claim transaction failed")
 	}
 	return results, nil
+}
+
+// requeueStaleInflight resets rows that were claimed but never finished
+// (e.g. reporter crashed) back to pending so they can be retried.
+func (r *resultReporter) requeueStaleInflight(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// derive a TTL based on poll interval to keep it responsive but safe
+	ttl := 3 * r.pollInterval
+	if ttl < minClaimTTL {
+		ttl = minClaimTTL
+	}
+	cutoff := time.Now().Add(-ttl).UnixMilli()
+	stmt := fmt.Sprintf(`UPDATE %s SET %s=%d WHERE %s=%d AND %s<?`,
+		quoteIdent(r.table), quoteIdent(reportedColumn), reportStatusPending,
+		quoteIdent(reportedColumn), reportStatusInflight, quoteIdent(reportedAtColumn))
+	if _, err := r.db.ExecContext(ctx, stmt, cutoff); err != nil {
+		return pkgerrors.Wrap(err, "storage: requeue stale inflight rows failed")
+	}
+	return nil
 }
 
 func (r *resultReporter) dispatchRow(row pendingResultRow) error {
