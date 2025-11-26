@@ -611,7 +611,7 @@ func prepareSchema(db *sql.DB) error {
 		}
 	}
 
-	if err := ensureTaskAppItemUniqueIndex(db, table); err != nil {
+	if err := ensureDeviceTaskItemUniqueIndex(db, table); err != nil {
 		return err
 	}
 	return nil
@@ -622,7 +622,7 @@ func prepareSchema(db *sql.DB) error {
 // succeed even if older builds inserted duplicates.
 func dedupeCaptureResults(db *sql.DB, table string) error {
 	stmt := fmt.Sprintf(`DELETE FROM %s WHERE rowid NOT IN (
-		SELECT MIN(rowid) FROM %s GROUP BY TaskID, App, ItemID
+		SELECT MIN(rowid) FROM %s GROUP BY DeviceSerial, TaskID, ItemID
 	);`, quoteIdent(table), quoteIdent(table))
 	if _, err := db.Exec(stmt); err != nil {
 		return pkgerrors.Wrap(err, "storage: dedupe capture_results failed")
@@ -630,16 +630,16 @@ func dedupeCaptureResults(db *sql.DB, table string) error {
 	return nil
 }
 
-// ensureTaskAppItemUniqueIndex guarantees the desired unique index exists even
-// if an older build created idx_*_dedup with different columns. It drops the
-// stale index when the column set mismatches, then recreates the correct one.
-func ensureTaskAppItemUniqueIndex(db *sql.DB, table string) error {
+// ensureDeviceTaskItemUniqueIndex guarantees the desired unique index exists
+// even if an older build created idx_*_dedup with different columns. It drops
+// the stale index when the column set mismatches, then recreates the correct one.
+func ensureDeviceTaskItemUniqueIndex(db *sql.DB, table string) error {
 	indexName := fmt.Sprintf("idx_%s_dedup", table)
 	columns, err := inspectIndexColumns(db, indexName)
 	if err != nil {
 		return err
 	}
-	desired := []string{"TaskID", "App", "ItemID"}
+	desired := []string{"DeviceSerial", "TaskID", "ItemID"}
 	if slicesEqualFold(columns, desired) {
 		return nil // already correct
 	}
@@ -649,7 +649,7 @@ func ensureTaskAppItemUniqueIndex(db *sql.DB, table string) error {
 			return pkgerrors.Wrap(err, "storage: drop stale dedup index failed")
 		}
 	}
-	createStmt := fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS %s ON %s(TaskID, App, ItemID);`, quoteIdent(indexName), quoteIdent(table))
+	createStmt := fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS %s ON %s(DeviceSerial, TaskID, ItemID);`, quoteIdent(indexName), quoteIdent(table))
 	if _, err := db.Exec(createStmt); err != nil {
 		return pkgerrors.Wrap(err, "storage: create task/app/item unique index failed")
 	}
