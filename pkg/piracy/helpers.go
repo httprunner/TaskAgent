@@ -52,6 +52,21 @@ func extractTextArray(arr []interface{}) string {
 	return strings.Join(parts, " ")
 }
 
+// FilterReportByRatio keeps only matches whose ratio >= threshold (0-1).
+func FilterReportByRatio(report *Report, threshold float64) *Report {
+	if report == nil || threshold <= 0 {
+		return report
+	}
+	filtered := make([]Match, 0, len(report.Matches))
+	for _, m := range report.Matches {
+		if m.Ratio >= threshold {
+			filtered = append(filtered, m)
+		}
+	}
+	report.Matches = filtered
+	return report
+}
+
 // getFloat reads a field value as float64 if possible.
 func getFloat(fields map[string]any, name string) (float64, bool) {
 	if fields == nil || strings.TrimSpace(name) == "" {

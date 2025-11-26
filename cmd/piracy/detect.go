@@ -19,7 +19,7 @@ func newDetectCmd() *cobra.Command {
 		flagDramaFilter  string
 		flagOutputCSV    string
 		flagSQLitePath   string
-		flagApp          string
+		flagThreshold    float64
 		flagParams       string
 		flagReport       bool
 	)
@@ -42,6 +42,9 @@ Example:
 			cfg.ApplyDefaults()
 
 			reporter := piracy.NewReporter()
+			if globalTask := strings.TrimSpace(cmd.Flag("task-url").Value.String()); globalTask != "" {
+				reporter.OverrideTaskTableURL(globalTask)
+			}
 			if reporter.DramaTableURL() == "" {
 				return fmt.Errorf("original drama table url is required ($DRAMA_BITABLE_URL)")
 			}
@@ -49,10 +52,12 @@ Example:
 				return fmt.Errorf("task status table url is required ($TASK_BITABLE_URL)")
 			}
 
+			app := strings.TrimSpace(cmd.Flag("app").Value.String())
+
 			params := getParams(flagParams)
 
 			if len(params) == 0 {
-				if strings.TrimSpace(flagApp) == "" {
+				if app == "" {
 					return fmt.Errorf("--app is required to fetch params from task table")
 				}
 
@@ -61,7 +66,7 @@ Example:
 					return err
 				}
 
-				params, err = piracy.FetchParamsFromTaskTable(cmd.Context(), client, reporter.TaskTableURL(), flagApp, "综合页搜索", "success")
+				params, err = piracy.FetchParamsFromTaskTable(cmd.Context(), client, reporter.TaskTableURL(), app, "综合页搜索", "success")
 				if err != nil {
 					return err
 				}
@@ -89,9 +94,14 @@ Example:
 				if reporter.TaskTableURL() == "" {
 					return fmt.Errorf("task status table url is required ($TASK_BITABLE_URL)")
 				}
-				if strings.TrimSpace(flagApp) == "" {
+				if app == "" {
 					return fmt.Errorf("--app is required when --report is set")
 				}
+			}
+
+			threshold := reporter.Threshold()
+			if flagThreshold > 0 {
+				threshold = flagThreshold
 			}
 
 			log.Info().
@@ -99,13 +109,14 @@ Example:
 				Str("sqlite_path", dbPath).
 				Str("drama_table", reporter.DramaTableURL()).
 				Str("task_table", reporter.TaskTableURL()).
-				Float64("threshold", reporter.Threshold()).
+				Float64("threshold", threshold).
 				Msg("starting piracy detection from sqlite results")
-
-			report, err := reporter.DetectWithFilters(cmd.Context(), params, resultFilter, dramaFilter)
+			report, err := reporter.DetectWithFiltersThreshold(cmd.Context(),
+				params, resultFilter, dramaFilter, threshold)
 			if err != nil {
 				return err
 			}
+			report = piracy.FilterReportByRatio(report, threshold)
 
 			printReport(report)
 			if flagOutputCSV != "" {
@@ -118,7 +129,7 @@ Example:
 				return nil
 			}
 
-			return reporter.ReportMatches(cmd.Context(), flagApp, report.Matches)
+			return reporter.ReportMatches(cmd.Context(), app, report.Matches)
 		},
 	}
 
@@ -129,8 +140,8 @@ Example:
 
 	// SQLite mode flags
 	cmd.Flags().StringVar(&flagSQLitePath, "sqlite", "", "Path to sqlite result database; enables sqlite mode when set")
-	cmd.Flags().StringVar(&flagApp, "app", "", "App package name for filtering task table params (required with --report or when no --params)")
-	cmd.Flags().BoolVar(&flagReport, "report", false, "Write suspicious combos to task status table (requires --app)")
+	cmd.Flags().Float64Var(&flagThreshold, "threshold", 0, "覆盖阈值（小数，0.5 表示 50%）；默认读取 THRESHOLD 或配置")
+	cmd.Flags().BoolVar(&flagReport, "report", false, "Write suspicious combos to task status table")
 
 	// Common flags
 	cmd.Flags().StringVar(&flagOutputCSV, "output-csv", "", "Optional output CSV file path")

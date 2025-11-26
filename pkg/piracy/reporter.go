@@ -82,6 +82,16 @@ func (pr *Reporter) DramaTableURL() string { return pr.dramaTableURL }
 // TaskTableURL exposes the configured task status table URL.
 func (pr *Reporter) TaskTableURL() string { return pr.taskTableURL }
 
+// OverrideTaskTableURL replaces the task table URL (e.g., CLI flag override).
+func (pr *Reporter) OverrideTaskTableURL(url string) {
+	if pr == nil {
+		return
+	}
+	if trimmed := strings.TrimSpace(url); trimmed != "" {
+		pr.taskTableURL = trimmed
+	}
+}
+
 // Threshold returns the configured detection threshold.
 func (pr *Reporter) Threshold() float64 { return pr.threshold }
 

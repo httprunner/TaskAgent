@@ -24,7 +24,8 @@ go run ./cmd/piracy detect \
 go run ./cmd/piracy detect \
   --sqlite /path/to/capture.sqlite \
   --app com.smile.gifmaker \
-  --report
+  --report \
+  --threshold 0.5  # 若不指定，使用环境 THRESHOLD 或默认值
 ```
 
 #### 示例 3：指定少量剧名做单点验证（不依赖任务表）
@@ -40,7 +41,8 @@ go run ./cmd/piracy detect \
   --sqlite /path/to/capture.sqlite \
   --params "剧A,剧B" \
   --report \
-  --app com.smile.gifmaker
+  --app com.smile.gifmaker \
+  --threshold 0.7  # 覆盖阈值
 ```
 
 常用参数：
@@ -50,6 +52,27 @@ go run ./cmd/piracy detect \
 - `--result-filter` / `--drama-filter`：对结果表 / 剧单表附加 Feishu FilterInfo JSON
 - `--output-csv`：导出 CSV 路径
 - `--report`：写回任务状态表
+- `--threshold`：覆盖阈值（小数，0 表示使用环境 THRESHOLD 或默认 0.5）
+
+### webhook-worker（重试 webhook 汇总）
+- 功能：轮询任务状态表中挂起/失败的 webhook 汇总任务，重新发送到 SUMMARY_WEBHOOK_URL。
+- 默认数据来源：`TASK_BITABLE_URL`（可用 `--task-url` 覆盖），`SUMMARY_WEBHOOK_URL`（可用 `--webhook-url` 覆盖）。
+- 可选过滤：`--app`（默认取 BUNDLE_ID 环境变量）。
+- 调度参数：`--poll-interval`（默认 30s），`--batch-limit`（默认 20 条/次）。
+
+示例：
+```bash
+# 读取环境变量 + 采用默认配置
+go run ./cmd/piracy webhook-worker
+
+# 命令行传参
+go run ./cmd/piracy webhook-worker \
+  --task-url "https://bytedance.larkoffice.com/wiki/..." \
+  --webhook-url "https://example.com/webhook" \
+  --app com.smile.gifmaker \
+  --poll-interval 1m \
+  --batch-limit 50
+```
 
 ## Environment configuration
 

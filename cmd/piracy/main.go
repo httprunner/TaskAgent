@@ -12,13 +12,19 @@ import (
 var rootCmd = &cobra.Command{
 	Use:   "piracy",
 	Short: "Piracy detection helpers",
-	Long: `piracy 提供短剧盗版检测与（可选）上报的 CLI，统一加载环境并输出结构化日志。`,
+	Long:  `piracy 提供短剧盗版检测与（可选）上报的 CLI，统一加载环境并输出结构化日志。`,
 }
+
+var (
+	rootApp     string
+	rootTaskURL string
+)
 
 func init() {
 	output := zerolog.ConsoleWriter{Out: os.Stderr}
 	log.Logger = zerolog.New(output).With().Timestamp().Logger()
-
+	rootCmd.PersistentFlags().StringVar(&rootApp, "app", "", "App 包名覆盖 BUNDLE_ID")
+	rootCmd.PersistentFlags().StringVar(&rootTaskURL, "task-url", "", "任务状态表 URL 覆盖 TASK_BITABLE_URL")
 	rootCmd.AddCommand(newDetectCmd(), newWebhookCmd())
 	_ = internal.Ensure()
 }
