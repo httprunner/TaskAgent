@@ -19,6 +19,10 @@ func getString(fields map[string]any, name string) string {
 			return strings.TrimSpace(string(v))
 		case json.Number:
 			return strings.TrimSpace(v.String())
+		case []interface{}:
+			if text := extractTextArray(v); text != "" {
+				return text
+			}
 		default:
 			if b, err := json.Marshal(v); err == nil {
 				return strings.TrimSpace(string(b))
@@ -27,6 +31,25 @@ func getString(fields map[string]any, name string) string {
 		}
 	}
 	return ""
+}
+
+// extractTextArray flattens Feishu rich-text array values into a plain string.
+func extractTextArray(arr []interface{}) string {
+	if len(arr) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(arr))
+	for _, item := range arr {
+		if m, ok := item.(map[string]any); ok {
+			if txt, ok := m["text"].(string); ok {
+				trimmed := strings.TrimSpace(txt)
+				if trimmed != "" {
+					parts = append(parts, trimmed)
+				}
+			}
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // getFloat reads a field value as float64 if possible.

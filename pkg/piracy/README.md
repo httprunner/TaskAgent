@@ -1,26 +1,28 @@
-# Piracy Detection Package
+# 盗版检测包（pkg/piracy）
 
-This package provides comprehensive piracy detection and reporting functionality for drama content monitoring. It combines the core detection engine with high-level reporting capabilities.
+提供短剧盗版检测与（可选）上报的核心能力：
+- **检测引擎**：比对采集结果（Feishu/SQLite）与剧单总时长，找出超阈值可疑组合
+- **上报封装**：将可疑结果写回飞书任务状态表，或生成 webhook/CSV 汇总
 
-## Overview
+## 能力概览
+- 核心检测：`Detect` / `DetectCommon` / `analyzeRows`
+- Reporter：`NewReporter` 读取环境配置，封装检测 + 写表
+- 数据源支持：
+  - Feishu Bitable（结果表、剧单表）
+  - 本地 SQLite（采集结果、剧单镜像）
+- Webhook 汇总：`SendSummaryWebhook` 支持 Feishu / SQLite 混合取数
 
-The `pkg/piracy` package merges the functionality of two packages:
-- **Core Detection Engine**: Analyzes video data to identify potential piracy by comparing user video durations against original drama durations
-- **Reporter**: High-level wrapper that performs detection and automatically reports findings to task tables
+## 主要特性
+- 自动检测：聚合 `(Params, UserID)` 时长，对比剧单全剧时长
+- 阈值可配：默认 0.5（50%），环境变量 `THRESHOLD` 或代码传参覆盖
+- 飞书集成：结果表/剧单表/任务状态表字段均可通过环境覆盖
+- 灵活取数：支持 Feishu/SQLite 双源，SQLite 优先（如本地镜像）
+- 批量处理：`auto` 场景可遍历全剧单
+- 汇总输出：支持 CSV、Webhook（含采集记录与剧单元数据）
 
-## Features
+## 架构要点
 
-- **Automated Piracy Detection**: Compares aggregated video durations against original drama durations
-- **Configurable Thresholds**: Default 50% threshold (configurable via environment or code)
-- **Feishu Integration**: Seamless integration with Feishu bitable for data sources and reporting
-- **Flexible Field Mapping**: Configurable field names for different table schemas
-- **Batch Processing**: Process multiple drama parameters in a single operation
-- **Comprehensive Reporting**: Detailed reports with suspicious combinations, ratios, and statistics
-- **Webhook Summaries**: Query Feishu or SQLite, aggregate drama metadata + capture records, and forward the payload to custom webhook endpoints
-
-## Architecture
-
-### Core Types
+### 核心类型
 
 ```go
 // Config - Configuration for piracy detection
@@ -53,25 +55,23 @@ type Report struct {
 }
 ```
 
-### Main Components
+### 组件分层
 
-1. **Detection Engine** (`detect.go`):
-   - `Detect(ctx, opts) (*Report, error)` - Main detection function
-   - `analyzeRows(resultRows, dramaRows, cfg) *Report` - Core analysis logic
-   - `ApplyDefaults()` - Configuration management
+1. 检测引擎（`detect.go`）
+   - `Detect`：Feishu 取数 + 分析
+   - `DetectCommon` / `analyzeRows`：核心聚合与比对
+   - `ApplyDefaults`：字段/阈值默认配置
 
-2. **Reporter** (`reporter.go`):
-   - `NewReporter() *Reporter` - Creates reporter from environment
-   - `ReportPiracyForParams(ctx, app, paramsList) error` - Main reporting function
-   - `IsConfigured() bool` - Configuration validation
+2. Reporter（`reporter.go`）
+   - `NewReporter`：环境变量驱动的 Reporter
+   - `DetectWithFilters` / `ReportMatches`：检测 + 条件写表
 
-3. **Utilities** (`helpers.go`):
-   - `getString(fields, name) string` - Safe field extraction
-   - `getFloat(fields, name) (float64, bool)` - Numeric field extraction
+3. 工具（`helpers.go` 等）
+   - 字段解析、Filter 组合、SQLite 取数 (`sqlite_source.go` / `task_params.go`)
 
-## Usage
+## 使用示例
 
-### Basic Detection
+### 单次检测（Feishu 结果表 + 剧单表）
 
 ```go
 import "github.com/httprunner/TaskAgent/pkg/piracy"
@@ -103,7 +103,7 @@ for _, match := range report.Matches {
 }
 ```
 
-### Using the Reporter
+### 通过 Reporter 进行检测并上报
 
 ```go
 // Create reporter (reads config from environment)
@@ -121,7 +121,7 @@ if err != nil {
 
 ```
 
-### Sending Webhook Summaries
+### 发送 Webhook 汇总
 
 `SendSummaryWebhook` aggregates drama metadata together with capture records (from either Feishu Bitables or the local tracking SQLite database) and POSTs a normalized JSON payload to a webhook URL. The payload flattens every column described by `feishu.DramaFields` at the top level and adds a `records` slice where each element contains the columns defined by `feishu.ResultFields`.
 
@@ -185,7 +185,7 @@ RESULT_FIELD_PARAMS=Params
 RESULT_FIELD_USERID=UserID
 RESULT_FIELD_DURATION=ItemDuration
 DRAMA_FIELD_NAME=短剧名称
-DRAMA_FIELD_DURATION=TotalDuration
+DRAMA_FIELD_DURATION=全剧时长（秒）
 THRESHOLD=0.5
 # Webhook summary specific overrides
 RESULT_FIELD_APP=App

@@ -23,6 +23,7 @@ type AutoOptions struct {
 	ResultFilter *feishu.FilterInfo
 	DramaFilter  *feishu.FilterInfo
 	Concurrency  int
+	Report       bool
 }
 
 // AutoSummary captures the aggregated outcome of an auto run.
@@ -38,13 +39,17 @@ type AutoSummary struct {
 
 // RunAuto executes the end-to-end piracy detection and reporting workflow.
 func RunAuto(ctx context.Context, opts AutoOptions) (*AutoSummary, error) {
-	if strings.TrimSpace(opts.App) == "" {
-		return nil, errors.New("app is required")
-	}
-
 	reporter := NewReporter()
-	if !reporter.IsConfigured() {
-		return nil, errors.New("reporter not configured. Please set RESULT_BITABLE_URL, DRAMA_BITABLE_URL, TASK_BITABLE_URL")
+	if strings.TrimSpace(reporter.DramaTableURL()) == "" {
+		return nil, errors.New("drama table url is required ($DRAMA_BITABLE_URL)")
+	}
+	if opts.Report {
+		if strings.TrimSpace(opts.App) == "" {
+			return nil, errors.New("app is required when report=true")
+		}
+		if reporter.TaskTableURL() == "" {
+			return nil, errors.New("task table url is required ($TASK_BITABLE_URL) when report=true")
+		}
 	}
 
 	cfg := reporter.Config()
@@ -147,12 +152,14 @@ func RunAuto(ctx context.Context, opts AutoOptions) (*AutoSummary, error) {
 				return
 			}
 
-			if err := reporter.ReportMatches(ctx, opts.App, report.Matches); err != nil {
-				errOnce.Do(func() {
-					runErr = fmt.Errorf("failed to report matches for %s: %w", name, err)
-					cancel()
-				})
-				return
+			if opts.Report {
+				if err := reporter.ReportMatches(ctx, opts.App, report.Matches); err != nil {
+					errOnce.Do(func() {
+						runErr = fmt.Errorf("failed to report matches for %s: %w", name, err)
+						cancel()
+					})
+					return
+				}
 			}
 
 			matchesMu.Lock()

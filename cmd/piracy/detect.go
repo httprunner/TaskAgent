@@ -16,61 +16,64 @@ import (
 func newDetectCmd() *cobra.Command {
 	var (
 		flagResultFilter string
-		flagTargetFilter string
 		flagDramaFilter  string
 		flagOutputCSV    string
-		flagDataFile     string
-		flagDramaFile    string
-		flagFilterRate   float64
-		flagUseFiles     bool
+		flagSQLitePath   string
+		flagApp          string
+		flagParams       string
+		flagReport       bool
 	)
 
 	cmd := &cobra.Command{
 		Use:   "detect",
-		Short: "Detect possible piracy from Feishu tables or local files",
-		Long: `Detect possible piracy by comparing video data with drama information.
+		Short: "Detect piracy using sqlite results + Feishu drama table",
+		Long: `Detect possible piracy by comparing captured video data in sqlite
+with original drama durations stored in a Feishu bitable. The command reads
+Params can come from the Feishu 任务状态表 (固定 Scene=综合页搜索，Status=success，按 App 过滤) 或
+be provided directly via the --params flag. The command fetches matching dramas,
+looks up capture results from sqlite, evaluates ratios, optionally dumps a CSV,
+and can optionally write suspicious combos back to the 任务状态表。
 
-Mode 1: Feishu Tables (default)
-  Uses Feishu bitable as data source. Requires RESULT_BITABLE_URL and DRAMA_BITABLE_URL.
-
-Mode 2: Local Files (--use-files)
-  Uses local JSONL and CSV files as data source. Requires --data-file and --drama-file.
-
-Examples:
-  # Feishu mode (default)
-  piracy detect
-
-  # Local file mode
-  piracy detect --use-files --data-file records.jsonl --drama-file dramas.csv`,
+Example:
+  piracy detect --sqlite /path/to/capture.sqlite --app com.smile.gifmaker`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Check if using local file mode
-			if flagUseFiles {
-				// Validate required file parameters
-				if flagDataFile == "" {
-					return fmt.Errorf("--data-file is required for file mode")
-				}
-				if flagDramaFile == "" {
-					return fmt.Errorf("--drama-file is required for file mode")
-				}
+			dbPath := strings.TrimSpace(flagSQLitePath)
+			cfg := piracy.Config{}
+			cfg.ApplyDefaults()
 
-				log.Info().
-					Str("data_file", flagDataFile).
-					Str("drama_file", flagDramaFile).
-					Float64("filter_rate", flagFilterRate).
-					Msg("starting piracy detection from files")
-
-				// Run piracy detection from files
-				return piracy.DetectFromFiles(flagDataFile, flagDramaFile, flagFilterRate, flagOutputCSV)
-			}
-
-			// Default: Feishu mode
-			resultURL := pickOrEnv("", feishu.EnvResultBitableURL)
-			dramaURL := pickOrEnv("", "DRAMA_BITABLE_URL")
-			if resultURL == "" {
-				return fmt.Errorf("result table url is required ($%s)", feishu.EnvResultBitableURL)
-			}
-			if dramaURL == "" {
+			reporter := piracy.NewReporter()
+			if reporter.DramaTableURL() == "" {
 				return fmt.Errorf("original drama table url is required ($DRAMA_BITABLE_URL)")
+			}
+			if reporter.TaskTableURL() == "" {
+				return fmt.Errorf("task status table url is required ($TASK_BITABLE_URL)")
+			}
+
+			params := getParams(flagParams)
+
+			if len(params) == 0 {
+				if strings.TrimSpace(flagApp) == "" {
+					return fmt.Errorf("--app is required to fetch params from task table")
+				}
+
+				client, err := feishu.NewClientFromEnv()
+				if err != nil {
+					return err
+				}
+
+				params, err = piracy.FetchParamsFromTaskTable(cmd.Context(), client, reporter.TaskTableURL(), flagApp, "综合页搜索", "success")
+				if err != nil {
+					return err
+				}
+				if len(params) == 0 {
+					log.Warn().Msg("no params found in task table with given filters; nothing to detect")
+					return nil
+				}
+			}
+
+			// Ensure downstream sqlite consumers read the same db file
+			if dbPath != "" {
+				os.Setenv("TRACKING_STORAGE_DB_PATH", dbPath)
 			}
 
 			resultFilter, err := piracy.ParseFilterJSON(flagResultFilter)
@@ -82,58 +85,57 @@ Examples:
 				return fmt.Errorf("invalid drama-filter: %w", err)
 			}
 
-			opts := piracy.Options{
-				ResultTable: piracy.TableConfig{
-					URL:    resultURL,
-					Filter: resultFilter,
-				},
-				DramaTable: piracy.TableConfig{
-					URL:    dramaURL,
-					Filter: dramaFilter,
-				},
-				// Config fields will be read from environment variables
+			if flagReport {
+				if reporter.TaskTableURL() == "" {
+					return fmt.Errorf("task status table url is required ($TASK_BITABLE_URL)")
+				}
+				if strings.TrimSpace(flagApp) == "" {
+					return fmt.Errorf("--app is required when --report is set")
+				}
 			}
 
 			log.Info().
-				Str("result_table", resultURL).
-				Str("drama_table", dramaURL).
-				Msg("starting piracy detection from Feishu tables")
+				Int("params", len(params)).
+				Str("sqlite_path", dbPath).
+				Str("drama_table", reporter.DramaTableURL()).
+				Str("task_table", reporter.TaskTableURL()).
+				Float64("threshold", reporter.Threshold()).
+				Msg("starting piracy detection from sqlite results")
 
-			report, err := piracy.Detect(cmd.Context(), opts)
+			report, err := reporter.DetectWithFilters(cmd.Context(), params, resultFilter, dramaFilter)
 			if err != nil {
 				return err
 			}
 
 			printReport(report)
 			if flagOutputCSV != "" {
-				return dumpCSV(flagOutputCSV, report)
+				if err := dumpCSV(flagOutputCSV, report); err != nil {
+					return err
+				}
 			}
-			return nil
+
+			if !flagReport {
+				return nil
+			}
+
+			return reporter.ReportMatches(cmd.Context(), flagApp, report.Matches)
 		},
 	}
 
-	// Feishu mode flags
+	// Query flags
 	cmd.Flags().StringVar(&flagResultFilter, "result-filter", "", "Feishu FilterInfo JSON for result rows")
-	cmd.Flags().StringVar(&flagTargetFilter, "target-filter", "", "Feishu filter for target rows")
 	cmd.Flags().StringVar(&flagDramaFilter, "drama-filter", "", "Feishu FilterInfo JSON for drama rows")
+	cmd.Flags().StringVar(&flagParams, "params", "", "Comma-separated list of drama params (optional override)")
 
-	// File mode flags
-	cmd.Flags().BoolVar(&flagUseFiles, "use-files", false, "Use local files instead of Feishu tables")
-	cmd.Flags().StringVar(&flagDataFile, "data-file", "", "Input JSONL data file path (for file mode)")
-	cmd.Flags().StringVar(&flagDramaFile, "drama-file", "", "Input CSV drama file path (for file mode)")
-	cmd.Flags().Float64Var(&flagFilterRate, "filter-rate", 50.0, "Filter rate threshold for display in percentage (default 50, for file mode)")
+	// SQLite mode flags
+	cmd.Flags().StringVar(&flagSQLitePath, "sqlite", "", "Path to sqlite result database; enables sqlite mode when set")
+	cmd.Flags().StringVar(&flagApp, "app", "", "App package name for filtering task table params (required with --report or when no --params)")
+	cmd.Flags().BoolVar(&flagReport, "report", false, "Write suspicious combos to task status table (requires --app)")
 
 	// Common flags
 	cmd.Flags().StringVar(&flagOutputCSV, "output-csv", "", "Optional output CSV file path")
 
 	return cmd
-}
-
-func pickOrEnv(flagVal, envKey string) string {
-	if trimmed := strings.TrimSpace(flagVal); trimmed != "" {
-		return trimmed
-	}
-	return strings.TrimSpace(os.Getenv(envKey))
 }
 
 func printReport(report *piracy.Report) {

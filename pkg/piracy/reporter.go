@@ -79,6 +79,9 @@ func (pr *Reporter) ResultTableURL() string { return pr.resultTableURL }
 // DramaTableURL exposes the configured drama table URL.
 func (pr *Reporter) DramaTableURL() string { return pr.dramaTableURL }
 
+// TaskTableURL exposes the configured task status table URL.
+func (pr *Reporter) TaskTableURL() string { return pr.taskTableURL }
+
 // Threshold returns the configured detection threshold.
 func (pr *Reporter) Threshold() float64 { return pr.threshold }
 

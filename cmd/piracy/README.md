@@ -1,69 +1,55 @@
-# Piracy CLI
+# Piracy CLI（盗版检测辅助工具）
 
-A unified CLI that exposes both piracy detection and reporting workflows through `piracy detect` and `piracy report`. The shared command root configures logging and environment loading before command-specific logic executes.
+基于 Feishu 多维表格 + 本地 sqlite 采集结果的检测与（可选）上报工具。当前仅保留 `piracy detect` 命令。
 
 ## Subcommands
 
-### detect
-- Fetches rows from the result and drama Feishu Bitables (default)
-- Alternatively consumes local files via `--use-files` (JSONL capture data + CSV drama catalog)
-- Aggregates durations for `(Params, UserID)` combinations
-- Compares aggregated totals against original drama durations
-- Prints suspicious combos and optionally dumps a CSV
+### detect（检测 + 可选上报）
+- 参数来源：默认从飞书“任务状态”表按 `App` 过滤出 Params（Scene 固定“综合页搜索”，Status 固定 `success`）；也可用 `--params` 直接指定单点验证。
+- 数据来源：本地 sqlite `capture_results` 表（采集结果）；飞书剧单表（全剧时长）。
+- 行为：比对 `(Params, UserID)` 聚合时长与全剧时长，打印结果，可导出 CSV；`--report` 时把可疑项写回任务状态表。
 
 The command relies on the same environment variables described below and adds a few query-specific flags:
 
+#### 示例 1：从任务状态表批量取参，只看结果（不写回）
 ```bash
 go run ./cmd/piracy detect \
-  --result-filter '{"conjunction":"and","conditions":[{"field_name":"Params","operator":"is","value":["少女嗨翻系统"]}]}' \
-  --drama-filter '<drama filter json>' \
+  --sqlite /path/to/capture.sqlite \
+  --app com.smile.gifmaker \
   --output-csv suspicious.csv
 ```
 
-Available flags:
-- `--result-filter`: Filter for result table rows
-- `--target-filter`: (currently unused) Filter for task table rows
-- `--drama-filter`: Filter for drama table rows
-- `--output-csv`: Optional path to persist suspicious combos as CSV
-- `--use-files`: Toggle local-file mode instead of Feishu Bitables
-- `--data-file`: JSONL capture file consumed when `--use-files` is set
-- `--drama-file`: CSV drama catalog used in file mode
-- `--filter-rate`: Percentage threshold for filtering printed matches in file mode (default 50)
-
-### report
-- Runs detection for the supplied drama params
-- Writes suspicious matches into the Feishu task table via `pkg/piracy`
-
+#### 示例 2：从任务状态表取参并写回任务表
 ```bash
-go run ./cmd/piracy report \
+go run ./cmd/piracy detect \
+  --sqlite /path/to/capture.sqlite \
   --app com.smile.gifmaker \
-  --params "80姐妹的交换人生,短剧B" \
-  --params-file dramas.txt
+  --report
 ```
 
-Available flags:
-- `--app` (required): App package name, e.g., `com.smile.gifmaker`
-- `--params`: Comma-separated list of drama params
-- `--params-file`: File with one param per line (ignores empty lines and `#` comments)
-
-### auto
-- Fetches the entire drama list and durations from the drama table
-- Iterates each drama, fetching matching capture results and running detection immediately
-- Reports suspicious matches per drama before moving to the next and writes a consolidated CSV at the end
-- Supports configurable concurrency (default 10) to process multiple dramas in parallel
-
+#### 示例 3：指定少量剧名做单点验证（不依赖任务表）
 ```bash
-go run ./cmd/piracy auto \
-  --app com.smile.gifmaker \
-  --output results/piracy_auto.csv
+go run ./cmd/piracy detect \
+  --sqlite /path/to/capture.sqlite \
+  --params "剧A,剧B"
 ```
 
-Available flags:
-- `--app` (required): App package name used for reporting
-- `--output`: Optional CSV output path (`./piracy_auto_<timestamp>.csv` by default)
-- `--result-filter`: Extra filter for the result table query
-- `--drama-filter`: Extra filter for the drama table query
-- `--concurrency`: Number of dramas processed in parallel (default 10)
+#### 示例 4：单点验证并写回任务表（不依赖任务表）
+```bash
+go run ./cmd/piracy detect \
+  --sqlite /path/to/capture.sqlite \
+  --params "剧A,剧B" \
+  --report \
+  --app com.smile.gifmaker
+```
+
+常用参数：
+- `--sqlite`：采集结果 sqlite 路径，默认 `~/.eval/records.sqlite`
+- `--params`：逗号分隔的剧名，单点验证用；不提供则从任务状态表取参（Scene 固定综合页搜索，Status 固定 success）
+- `--app`：任务状态表的 App 过滤（必填）
+- `--result-filter` / `--drama-filter`：对结果表 / 剧单表附加 Feishu FilterInfo JSON
+- `--output-csv`：导出 CSV 路径
+- `--report`：写回任务状态表
 
 ## Environment configuration
 

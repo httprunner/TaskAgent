@@ -78,7 +78,7 @@ func (c *Config) ApplyDefaults() {
 		if dramaDurationField := os.Getenv("DRAMA_FIELD_DURATION"); dramaDurationField != "" {
 			c.DramaDurationField = dramaDurationField
 		} else {
-			c.DramaDurationField = "TotalDuration"
+			c.DramaDurationField = feishu.DefaultDramaFields.TotalDuration
 		}
 	}
 	if c.Threshold <= 0 {
@@ -348,13 +348,4 @@ func DetectCommon(contentRecords []ContentRecord, dramaRecords []DramaRecord, th
 		MissingParams: missingParams,
 		Threshold:     threshold,
 	}
-}
-
-// extractKeys converts a map's keys to a slice.
-func extractKeys(m map[string]struct{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
 }
