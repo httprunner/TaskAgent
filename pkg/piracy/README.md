@@ -141,6 +141,29 @@ records := payload["records"].([]map[string]any)
 log.Info().Int("records", len(records)).Msg("summary delivered")
 ```
 
+#### Webhook 鉴权（VEDEM AGW）
+
+当下游 Webhook 服务位于 VEDEM 网关之后时，`SendSummaryWebhook` 会启用 AGW 签名方案：
+
+- 签名算法：`auth-v2`，使用 HMAC-SHA256 计算签名；
+- 签名内容：固定字符串 `"UNSIGNED-PAYLOAD"`（即“unsigned body” 模式）；
+- 请求头：
+  - `Agw-Auth`：`auth-v2/<AK>/<timestamp>/1800/<HMAC(UNSIGNED-PAYLOAD)>`
+  - `Agw-Auth-Content`：`UNSIGNED-PAYLOAD`
+
+所需环境变量：
+
+```bash
+VEDEM_IMAGE_AK=your_ak_here
+VEDEM_IMAGE_SK=your_sk_here
+```
+
+行为说明：
+
+- 当 `VEDEM_IMAGE_AK` / `VEDEM_IMAGE_SK` 均非空时，Webhook 请求将自动携带上述 AGW 鉴权头；
+- 任一为空时，鉴权会被显式跳过，`SendSummaryWebhook` 仍会正常发送 **未签名** 的 HTTP 请求（适合本地调试或非 VEDEM 环境）；
+- TaskAgent 不负责加载 `.env`，请在启动进程前确保相关环境变量已注入（例如通过 shell 导出或上游进程配置）。
+
 Key environment knobs for this workflow:
 
 - `DRAMA_FIELD_PRIORITY` 与 `DRAMA_FIELD_RIGHTS_SCENARIO` 可自定义短剧优先级与维权场景字段，避免表结构差异导致查询失败。

@@ -3,6 +3,8 @@ package piracy
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -144,13 +146,19 @@ func postWebhook(ctx context.Context, url string, payload map[string]any, client
 		httpClient = &http.Client{Timeout: 15 * time.Second}
 	}
 
+	// vedem expects UNSIGNED-PAYLOAD signing (same as cv_vedem.go).
+	if token, content := buildVedemAgwTokenUnsigned(); token != "" {
+		req.Header.Set("Agw-Auth", token)
+		req.Header.Set("Agw-Auth-Content", content)
+	}
+
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("post webhook failed: %w", err)
 	}
+	bodyBytes, _ := io.ReadAll(resp.Body)
 	defer resp.Body.Close()
 
-	bodyBytes, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("webhook responded with status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
@@ -220,6 +228,34 @@ func flattenRecordFields(records []CaptureRecordPayload, schema feishu.ResultFie
 		result = append(result, entry)
 	}
 	return result
+}
+
+const vedemSignToken = "UNSIGNED-PAYLOAD"
+const vedemSignatureExpiration = 1800
+
+// buildVedemAgwTokenUnsigned reproduces the auth-v2 signing used by vedem image APIs (cv_vedem.go).
+// When VEDEM_IMAGE_AK/SK are absent, it returns empty strings and auth is skipped.
+func buildVedemAgwTokenUnsigned() (token string, content string) {
+	ak := strings.TrimSpace(os.Getenv("VEDEM_IMAGE_AK"))
+	sk := strings.TrimSpace(os.Getenv("VEDEM_IMAGE_SK"))
+	if ak == "" || sk == "" {
+		return "", ""
+	}
+
+	content = vedemSignToken
+	// Same algorithm as httprunner/v5 internal builtin.Sign.
+	signKeyInfo := fmt.Sprintf("%s/%s/%d/%d", "auth-v2", ak, time.Now().Unix(), vedemSignatureExpiration)
+	signKey := sha256HMAC([]byte(sk), []byte(signKeyInfo))
+	signResult := sha256HMAC(signKey, []byte(content))
+	token = fmt.Sprintf("%s/%s", signKeyInfo, string(signResult))
+	return token, content
+}
+
+// sha256HMAC wraps the HMAC-SHA256 calculation used by the vedem signing scheme.
+func sha256HMAC(key []byte, data []byte) []byte {
+	mac := hmac.New(sha256.New, key)
+	mac.Write(data)
+	return []byte(fmt.Sprintf("%x", mac.Sum(nil)))
 }
 
 // structFieldMap returns a mapping of struct field names (English keys) to their raw column names.
