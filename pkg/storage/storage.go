@@ -622,7 +622,7 @@ func prepareSchema(db *sql.DB) error {
 // succeed even if older builds inserted duplicates.
 func dedupeCaptureResults(db *sql.DB, table string) error {
 	stmt := fmt.Sprintf(`DELETE FROM %s WHERE rowid NOT IN (
-		SELECT MIN(rowid) FROM %s GROUP BY DeviceSerial, TaskID, ItemID
+		SELECT MIN(rowid) FROM %s GROUP BY DeviceSerial, Params, ItemID
 	);`, quoteIdent(table), quoteIdent(table))
 	if _, err := db.Exec(stmt); err != nil {
 		return pkgerrors.Wrap(err, "storage: dedupe capture_results failed")
@@ -639,7 +639,7 @@ func ensureDeviceTaskItemUniqueIndex(db *sql.DB, table string) error {
 	if err != nil {
 		return err
 	}
-	desired := []string{"DeviceSerial", "TaskID", "ItemID"}
+	desired := []string{"DeviceSerial", "Params", "ItemID"}
 	if slicesEqualFold(columns, desired) {
 		return nil // already correct
 	}
@@ -649,7 +649,7 @@ func ensureDeviceTaskItemUniqueIndex(db *sql.DB, table string) error {
 			return pkgerrors.Wrap(err, "storage: drop stale dedup index failed")
 		}
 	}
-	createStmt := fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS %s ON %s(DeviceSerial, TaskID, ItemID);`, quoteIdent(indexName), quoteIdent(table))
+	createStmt := fmt.Sprintf(`CREATE UNIQUE INDEX IF NOT EXISTS %s ON %s(DeviceSerial, Params, ItemID);`, quoteIdent(indexName), quoteIdent(table))
 	if _, err := db.Exec(createStmt); err != nil {
 		return pkgerrors.Wrap(err, "storage: create task/app/item unique index failed")
 	}
