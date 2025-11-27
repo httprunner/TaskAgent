@@ -158,10 +158,9 @@ func postWebhook(ctx context.Context, url string, payload map[string]any, client
 		httpClient = &http.Client{Timeout: 15 * time.Second}
 	}
 
-	// vedem expects UNSIGNED-PAYLOAD signing (same as cv_vedem.go).
-	if token, content := buildVedemAgwTokenUnsigned(); token != "" {
+	// Use signed payload authentication
+	if token := buildVedemAgwTokenSigned(body); token != "" {
 		req.Header.Set("Agw-Auth", token)
-		req.Header.Set("Agw-Auth-Content", content)
 	}
 
 	resp, err := httpClient.Do(req)
@@ -244,25 +243,22 @@ func flattenRecordsAndCollectItemIDs(records []CaptureRecordPayload, schema feis
 	return result, itemIDs
 }
 
-const vedemSignToken = "UNSIGNED-PAYLOAD"
 const vedemSignatureExpiration = 1800
 
-// buildVedemAgwTokenUnsigned reproduces the auth-v2 signing used by vedem image APIs (cv_vedem.go).
-// When VEDEM_IMAGE_AK/SK are absent, it returns empty strings and auth is skipped.
-func buildVedemAgwTokenUnsigned() (token string, content string) {
+// buildVedemAgwTokenSigned signs the actual request payload.
+// When VEDEM_IMAGE_AK/SK are absent, it returns an empty string and auth is skipped.
+func buildVedemAgwTokenSigned(payloadBytes []byte) string {
 	ak := strings.TrimSpace(os.Getenv("VEDEM_IMAGE_AK"))
 	sk := strings.TrimSpace(os.Getenv("VEDEM_IMAGE_SK"))
 	if ak == "" || sk == "" {
-		return "", ""
+		return ""
 	}
 
-	content = vedemSignToken
-	// Same algorithm as httprunner/v5 internal builtin.Sign.
+	// Sign function
 	signKeyInfo := fmt.Sprintf("%s/%s/%d/%d", "auth-v2", ak, time.Now().Unix(), vedemSignatureExpiration)
 	signKey := sha256HMAC([]byte(sk), []byte(signKeyInfo))
-	signResult := sha256HMAC(signKey, []byte(content))
-	token = fmt.Sprintf("%s/%s", signKeyInfo, string(signResult))
-	return token, content
+	signResult := sha256HMAC(signKey, payloadBytes)
+	return fmt.Sprintf("%s/%s", signKeyInfo, string(signResult))
 }
 
 // sha256HMAC wraps the HMAC-SHA256 calculation used by the vedem signing scheme.
