@@ -14,7 +14,7 @@ import (
 const (
 	liveReadableBitableURL = "https://bytedance.larkoffice.com/wiki/DKKwwF9XRincITkd0g1c6udUnHe?table=tblLUmsGgp5SECWF&view=vew9Kwl9uR"
 	liveWritableBitableURL = "https://bytedance.larkoffice.com/wiki/DKKwwF9XRincITkd0g1c6udUnHe?table=tblLUmsGgp5SECWF"
-	liveResultBitableURL   = "https://bytedance.larkoffice.com/wiki/DKKwwF9XRincITkd0g1c6udUnHe?table=tblzoZuR6aminfye&view=vewTF27mJQ"
+	liveResultBitableURL   = "https://bytedance.larkoffice.com/wiki/DKKwwF9XRincITkd0g1c6udUnHe?table=tblNwTe8mUxiHUqd&view=vewTF27mJQ"
 	liveTargetApp          = "com.smile.gifmaker"
 )
 

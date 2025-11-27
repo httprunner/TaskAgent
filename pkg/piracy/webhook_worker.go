@@ -151,6 +151,7 @@ func (w *WebhookWorker) processOnce(ctx context.Context) error {
 				}
 			} else {
 				log.Error().Err(err).
+					Str("webhook_url", w.webhookURL).
 					Int64("task_id", row.TaskID).
 					Str("params", params).
 					Msg("webhook delivery failed")

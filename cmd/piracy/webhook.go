@@ -29,15 +29,15 @@ func newWebhookCmd() *cobra.Command {
 			if strings.TrimSpace(target) == "" {
 				return fmt.Errorf("--task-url or %s must be provided", feishu.EnvTaskBitableURL)
 			}
-			summary := firstNonEmpty(flagWebhookURL, os.Getenv("SUMMARY_WEBHOOK_URL"))
-			if strings.TrimSpace(summary) == "" {
+			webhookURL := firstNonEmpty(flagWebhookURL, os.Getenv("SUMMARY_WEBHOOK_URL"))
+			if strings.TrimSpace(webhookURL) == "" {
 				return fmt.Errorf("--webhook-url or SUMMARY_WEBHOOK_URL must be provided")
 			}
 			app := firstNonEmpty(flagApp, os.Getenv("BUNDLE_ID"))
 
 			cfg := piracy.WebhookWorkerConfig{
 				TaskBitableURL:    strings.TrimSpace(target),
-				SummaryWebhookURL: strings.TrimSpace(summary),
+				SummaryWebhookURL: strings.TrimSpace(webhookURL),
 				App:               strings.TrimSpace(app),
 				PollInterval:      flagPoll,
 				BatchLimit:        flagBatchLimit,

@@ -71,7 +71,7 @@ recordID, err := client.CreateTargetRecord(ctx, taskTableURL, feishu.TaskRecordI
 
 ## 采集结果记录表
 
-根据需求新增的结果表（表 ID `tblzoZuR6aminfye`）由以下字段组成：
+根据需求新增的结果表由以下字段组成：
 
 - Datetime（毫秒时间戳或可解析时间字符串）
 - DeviceSerial / App / Scene / Params
@@ -132,7 +132,7 @@ FEISHU_LIVE_TEST=1 go test ./feishu -run Live
 
 - 飞书接口文档：https://www.postman.com/feishu-op/feishu-s-public-workspace/overview
 - 任务表（读写）示例：`https://bytedance.larkoffice.com/wiki/DKKwwF9XRincITkd0g1c6udUnHe?table=tblLUmsGgp5SECWF`
-- 采集结果表：`https://bytedance.larkoffice.com/wiki/DKKwwF9XRincITkd0g1c6udUnHe?table=tblzoZuR6aminfye&view=vewTF27mJQ`
+- 采集结果表：`https://bytedance.larkoffice.com/wiki/DKKwwF9XRincITkd0g1c6udUnHe?table=tblNwTe8mUxiHUqd&view=vewTF27mJQ`
 
 在新环境中部署时，只需将上述链接替换为对应租户的多维表格地址，或通过 `override` 参数调整列名，即可复用该模块。
 ## 设备信息表 & 设备任务表（新增）
