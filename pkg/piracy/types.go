@@ -8,6 +8,7 @@ type Config struct {
 	ParamsField   string
 	UserIDField   string
 	DurationField string // item duration seconds
+	ItemIDField   string // video/item identifier column (用于去重)
 
 	// Fields in task table (source B)
 	TaskParamsField string // Params field in task table

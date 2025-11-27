@@ -210,6 +210,7 @@ TASK_BITABLE_URL=https://example.feishu.cn/base/zzz  # Where to write reports
 RESULT_FIELD_PARAMS=Params
 RESULT_FIELD_USERID=UserID
 RESULT_FIELD_DURATION=ItemDuration
+RESULT_FIELD_ITEMID=ItemID
 DRAMA_FIELD_NAME=短剧名称
 DRAMA_FIELD_DURATION=全剧时长（秒）
 THRESHOLD=0.5
@@ -226,14 +227,14 @@ RESULT_SQLITE_TABLE=capture_results
 
 The package uses sensible defaults based on Feishu's standard field names:
 
-- **Result Table**: `Params`, `UserID`, `ItemDuration`
+- **Result Table**: `Params`, `UserID`, `ItemDuration`, `ItemID`
 - **Drama Table**: `Params`, `TotalDuration`
 - **Task Table**: Fields for `App`, `Scene`, `Params`, `User`, `Status`
 
 ## Detection Logic
 
 1. **Data Fetching**: Retrieves video records and drama duration information
-2. **Aggregation**: Groups video durations by `(Params, UserID)` combinations
+2. **Aggregation**: Groups video durations by `(Params, UserID)` combinations and deduplicates repeated videos via `ItemID`
 3. **Ratio Calculation**: Calculates `sum_duration / drama_total_duration`
 4. **Threshold Filtering**: Flags combinations exceeding the threshold (default 50%)
 5. **Reporting**: Outputs suspicious combinations with detailed metrics

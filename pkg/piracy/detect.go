@@ -20,6 +20,7 @@ type ContentRecord struct {
 	Params      string  // 短剧名称/Params
 	UserID      string  // 用户ID
 	UserName    string  // 用户名称
+	ItemID      string  // 视频 ItemID，用于去重
 	DurationSec float64 // 时长（秒）
 }
 
@@ -51,6 +52,13 @@ func (c *Config) ApplyDefaults() {
 			c.DurationField = durationField
 		} else {
 			c.DurationField = feishu.DefaultResultFields.ItemDuration
+		}
+	}
+	if strings.TrimSpace(c.ItemIDField) == "" {
+		if itemIDField := os.Getenv("RESULT_FIELD_ITEMID"); itemIDField != "" {
+			c.ItemIDField = itemIDField
+		} else {
+			c.ItemIDField = feishu.DefaultResultFields.ItemID
 		}
 	}
 	if strings.TrimSpace(c.TaskParamsField) == "" {
@@ -198,11 +206,13 @@ func analyzeRows(resultRows, dramaRows []Row, cfg Config) *Report {
 		}
 
 		userName := strings.TrimSpace(getString(row.Fields, "UserName"))
+		itemID := strings.TrimSpace(getString(row.Fields, cfg.ItemIDField))
 
 		contentRecords = append(contentRecords, ContentRecord{
 			Params:      params,
 			UserID:      userID,
 			UserName:    userName,
+			ItemID:      itemID,
 			DurationSec: duration,
 		})
 	}
@@ -258,9 +268,10 @@ func DetectCommon(contentRecords []ContentRecord, dramaRecords []DramaRecord, th
 
 	// Aggregate content records by Params + UserID
 	type aggEntry struct {
-		sum      float64
-		count    int
-		userName string
+		sum       float64
+		count     int
+		userName  string
+		seenItems map[string]struct{}
 	}
 	resultAgg := make(map[string]aggEntry) // key: params + separator + userID
 
@@ -273,6 +284,16 @@ func DetectCommon(contentRecords []ContentRecord, dramaRecords []DramaRecord, th
 
 		key := params + keySeparator + userID
 		entry := resultAgg[key]
+		if record.ItemID != "" {
+			if entry.seenItems == nil {
+				entry.seenItems = make(map[string]struct{})
+			}
+			if _, exists := entry.seenItems[record.ItemID]; exists {
+				resultAgg[key] = entry
+				continue
+			}
+			entry.seenItems[record.ItemID] = struct{}{}
+		}
 		entry.sum += record.DurationSec
 		entry.count++
 		// Get user name (first non-empty one if duplicates)

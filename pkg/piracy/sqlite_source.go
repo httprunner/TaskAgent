@@ -50,6 +50,10 @@ func (s *sqliteResultSource) FetchRows(ctx context.Context, cfg Config, params [
 	if durationCol == "" {
 		durationCol = feishu.DefaultResultFields.ItemDuration
 	}
+	itemIDCol := strings.TrimSpace(cfg.ItemIDField)
+	if itemIDCol == "" {
+		itemIDCol = feishu.DefaultResultFields.ItemID
+	}
 
 	placeholders := make([]string, len(params))
 	args := make([]any, len(params))
@@ -58,11 +62,12 @@ func (s *sqliteResultSource) FetchRows(ctx context.Context, cfg Config, params [
 		args[i] = strings.TrimSpace(param)
 	}
 
-	query := fmt.Sprintf(`SELECT id, %s, %s, %s, %s FROM %s WHERE %s IN (%s)`,
+	query := fmt.Sprintf(`SELECT id, %s, %s, %s, %s, %s FROM %s WHERE %s IN (%s)`,
 		quoteIdentifier(paramCol),
 		quoteIdentifier(userIDCol),
 		quoteIdentifier(userNameCol),
 		quoteIdentifier(durationCol),
+		quoteIdentifier(itemIDCol),
 		quoteIdentifier(s.table),
 		quoteIdentifier(paramCol),
 		strings.Join(placeholders, ","),
@@ -81,8 +86,9 @@ func (s *sqliteResultSource) FetchRows(ctx context.Context, cfg Config, params [
 			userID   sql.NullString
 			userName sql.NullString
 			duration sql.NullFloat64
+			itemID   sql.NullString
 		)
-		if err := rows.Scan(&id, &param, &userID, &userName, &duration); err != nil {
+		if err := rows.Scan(&id, &param, &userID, &userName, &duration, &itemID); err != nil {
 			return nil, errors.Wrap(err, "piracy: scan sqlite capture row failed")
 		}
 		if strings.TrimSpace(param.String) == "" || strings.TrimSpace(userID.String) == "" || !duration.Valid || duration.Float64 <= 0 {
@@ -93,6 +99,9 @@ func (s *sqliteResultSource) FetchRows(ctx context.Context, cfg Config, params [
 			cfg.UserIDField:   strings.TrimSpace(userID.String),
 			"UserName":        strings.TrimSpace(userName.String),
 			cfg.DurationField: duration.Float64,
+		}
+		if trimmed := strings.TrimSpace(itemID.String); trimmed != "" {
+			fields[cfg.ItemIDField] = trimmed
 		}
 		resultRows = append(resultRows, Row{
 			RecordID: fmt.Sprintf("sqlite-%d", id),

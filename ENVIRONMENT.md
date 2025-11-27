@@ -34,6 +34,7 @@ names.
 | `RESULT_FIELD_USERID` | `UserID` | Result-table column containing the uploader ID. |
 | `RESULT_FIELD_USERNAME` | `UserName` | Result-table column storing uploader name. |
 | `RESULT_FIELD_DURATION` | `ItemDuration` | Result-table duration column (seconds). |
+| `RESULT_FIELD_ITEMID` | `ItemID` | Result-table column storing the video ItemID; used for piracy ratio de-duplication. |
 | `TASK_FIELD_PARAMS` | `Params` | Field name inside the task table for drama params. |
 | `DRAMA_FIELD_ID` | `短剧 ID` (template; piracy detection falls back to `DramaID` if unset) | Drama table column that stores the drama identifier. |
 | `DRAMA_FIELD_NAME` | `短剧名称` | Drama table column for short-drama names (used by webhook summaries and filters). |

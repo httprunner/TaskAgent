@@ -186,6 +186,40 @@ func TestAnalyzeRowsMultipleMatches(t *testing.T) {
 	}
 }
 
+func TestAnalyzeRowsDedupByItemID(t *testing.T) {
+	resultRows := []Row{
+		{Fields: map[string]any{"Params": "drama1", "UserID": "user1", "ItemDuration": 30.0, "ItemID": "dup"}},
+		{Fields: map[string]any{"Params": "drama1", "UserID": "user1", "ItemDuration": 30.0, "ItemID": "dup"}},
+		{Fields: map[string]any{"Params": "drama1", "UserID": "user1", "ItemDuration": 40.0, "ItemID": "unique"}},
+	}
+
+	dramaRows := []Row{
+		{Fields: map[string]any{"Params": "drama1", "TotalDuration": 60.0}},
+	}
+
+	cfg := Config{
+		ParamsField:        "Params",
+		UserIDField:        "UserID",
+		DurationField:      "ItemDuration",
+		ItemIDField:        "ItemID",
+		DramaNameField:     "Params",
+		DramaDurationField: "TotalDuration",
+		Threshold:          0.5,
+	}
+
+	report := analyzeRows(resultRows, dramaRows, cfg)
+	if len(report.Matches) != 1 {
+		t.Fatalf("expected 1 match, got %d", len(report.Matches))
+	}
+	match := report.Matches[0]
+	if match.SumDuration != 70 {
+		t.Fatalf("expected deduped duration 70, got %v", match.SumDuration)
+	}
+	if match.RecordCount != 2 {
+		t.Fatalf("expected record count 2 (unique ItemIDs), got %d", match.RecordCount)
+	}
+}
+
 func TestGetString(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -239,16 +273,19 @@ func TestConfigApplyDefaultsWithEnv(t *testing.T) {
 	// Save original env vars to restore later
 	origParamsField := os.Getenv("RESULT_FIELD_PARAMS")
 	origUserIDField := os.Getenv("RESULT_FIELD_USERID")
+	origItemIDField := os.Getenv("RESULT_FIELD_ITEMID")
 	origThreshold := os.Getenv("THRESHOLD")
 	defer func() {
 		os.Setenv("RESULT_FIELD_PARAMS", origParamsField)
 		os.Setenv("RESULT_FIELD_USERID", origUserIDField)
+		os.Setenv("RESULT_FIELD_ITEMID", origItemIDField)
 		os.Setenv("THRESHOLD", origThreshold)
 	}()
 
 	// Test empty config with env vars set
 	os.Setenv("RESULT_FIELD_PARAMS", "MyParams")
 	os.Setenv("RESULT_FIELD_USERID", "MyUserID")
+	os.Setenv("RESULT_FIELD_ITEMID", "VideoID")
 	os.Setenv("THRESHOLD", "0.75")
 
 	c := Config{}
@@ -262,6 +299,9 @@ func TestConfigApplyDefaultsWithEnv(t *testing.T) {
 	}
 	if c.DurationField != "ItemDuration" { // should use default since not set
 		t.Errorf("expected DurationField to be 'ItemDuration', got %s", c.DurationField)
+	}
+	if c.ItemIDField != "VideoID" {
+		t.Errorf("expected ItemIDField to be 'VideoID', got %s", c.ItemIDField)
 	}
 	if c.Threshold != 0.75 {
 		t.Errorf("expected Threshold to be 0.75, got %v", c.Threshold)
@@ -286,6 +326,9 @@ func TestConfigApplyDefaults(t *testing.T) {
 				}
 				if c.DurationField != "ItemDuration" {
 					t.Errorf("expected DurationField to be 'ItemDuration', got %s", c.DurationField)
+				}
+				if c.ItemIDField != "ItemID" {
+					t.Errorf("expected ItemIDField to be 'ItemID', got %s", c.ItemIDField)
 				}
 				// Check DramaDurationField - may be overridden by environment variable
 				expectedDramaDurationField := "TotalDuration"
