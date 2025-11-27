@@ -315,3 +315,42 @@ func TestSendSummaryWebhookFeishuLive(t *testing.T) {
 		t.Fatalf("expected at least one capture record for drama, got 0")
 	}
 }
+
+func TestPostWebhookLogidExtraction(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Set X-Tt-Logid header in response
+		w.Header().Set("X-Tt-Logid", "202511272111311B9477B53752848BC2AD")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"code":0,"data":0,"msg":"success"}`))
+	}))
+	defer server.Close()
+
+	payload := map[string]any{
+		"test": "data",
+	}
+
+	err := postWebhook(context.Background(), server.URL, payload, nil)
+	if err != nil {
+		t.Fatalf("postWebhook failed: %v", err)
+	}
+}
+
+func TestPostWebhookLogidExtractionError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Set X-Tt-Logid header in response even for error cases
+		w.Header().Set("X-Tt-Logid", "202511272111311B9477B53752848BC2AD")
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("internal error"))
+	}))
+	defer server.Close()
+
+	payload := map[string]any{
+		"test": "data",
+	}
+
+	err := postWebhook(context.Background(), server.URL, payload, nil)
+	if err == nil {
+		t.Fatal("expected postWebhook to fail")
+	}
+}

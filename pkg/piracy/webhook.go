@@ -170,11 +170,30 @@ func postWebhook(ctx context.Context, url string, payload map[string]any, client
 	bodyBytes, _ := io.ReadAll(resp.Body)
 	defer resp.Body.Close()
 
+	// Extract X-Tt-Logid from response headers for logging
+	logid := resp.Header.Get("X-Tt-Logid")
+
 	if resp.StatusCode >= 300 {
+		log.Error().
+			Str("webhook_url", url).
+			Int("status_code", resp.StatusCode).
+			Str("logid", logid).
+			RawJSON("response_body", bodyBytes).
+			Msg("webhook request failed")
 		return fmt.Errorf("webhook responded with status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
+
 	if len(bodyBytes) > 0 {
-		log.Debug().Str("webhook_url", url).RawJSON("response_body", bodyBytes).Msg("webhook response")
+		log.Info().
+			Str("webhook_url", url).
+			Str("logid", logid).
+			RawJSON("response_body", bodyBytes).
+			Msg("webhook response received")
+	} else {
+		log.Info().
+			Str("webhook_url", url).
+			Str("logid", logid).
+			Msg("webhook response received (empty body)")
 	}
 	return nil
 }
