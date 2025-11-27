@@ -29,7 +29,7 @@ const (
 	// minClaimTTL defines the minimum amount of time a claimed row must stay
 	// in the inflight state before it can be re-queued. This keeps the reporter
 	// crash-tolerant without letting stuck rows accumulate indefinitely.
-	minClaimTTL = 30 * time.Second
+	minClaimTTL = 5 * time.Minute
 )
 
 type resultReporter struct {
@@ -87,10 +87,9 @@ func (r *resultReporter) loop() {
 }
 
 func (r *resultReporter) flushOnce() {
-	timeout := r.feishuTimeout + 5*time.Second
-	if timeout < 30*time.Second {
-		timeout = 30 * time.Second
-	}
+	// Ensure timeout is long enough for the entire batch
+	// 3 minutes should be enough for 10-30 items even with retries
+	timeout := 3 * time.Minute
 	ctx, cancel := context.WithTimeout(r.ctx, timeout)
 	defer cancel()
 	rows, err := r.fetchPending(ctx)
@@ -445,12 +444,12 @@ func parsePollInterval() time.Duration {
 func parseBatchSize() int {
 	raw := strings.TrimSpace(os.Getenv(envResultReportBatchSize))
 	if raw == "" {
-		return 30
+		return 10
 	}
 	if size, err := strconv.Atoi(raw); err == nil && size > 0 {
 		return size
 	}
-	return 30
+	return 10
 }
 
 func parseReportTimeout() time.Duration {

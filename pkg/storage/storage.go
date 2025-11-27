@@ -29,6 +29,11 @@ const (
 	reportErrorColumn = "report_error"
 )
 
+var (
+	globalReporter   *resultReporter
+	globalReporterMu sync.Mutex
+)
+
 var captureResultColumns = []string{
 	"Params",
 	"DeviceSerial",
@@ -139,18 +144,37 @@ func NewManager(cfg Config) (*Manager, error) {
 	}
 	manager := &Manager{sinks: sinks, name: strings.Join(names, ",")}
 	if feishuStorage != nil {
-		reporter, err := newResultReporter(feishuStorage)
+		// Use process-level singleton reporter to avoid concurrency competition
+		_, err := getOrStartGlobalReporter(feishuStorage)
 		if err != nil {
 			for _, sink := range sinks {
 				sink.Close()
 			}
 			return nil, err
 		}
-		manager.reporter = reporter
+		// NOTE: We do NOT assign manager.reporter = reporter here.
+		// The global reporter runs as a daemon and should not be closed by individual managers.
+		// manager.reporter = reporter
 		names = append(names, "feishu-reporter")
 		manager.name = strings.Join(names, ",")
 	}
 	return manager, nil
+}
+
+func getOrStartGlobalReporter(storage *feishu.ResultStorage) (*resultReporter, error) {
+	globalReporterMu.Lock()
+	defer globalReporterMu.Unlock()
+
+	if globalReporter != nil {
+		return globalReporter, nil
+	}
+
+	reporter, err := newResultReporter(storage)
+	if err != nil {
+		return nil, err
+	}
+	globalReporter = reporter
+	return globalReporter, nil
 }
 
 func buildSinks(cfg Config) ([]Sink, *feishu.ResultStorage, error) {
