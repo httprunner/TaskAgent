@@ -214,10 +214,10 @@ func flattenDramaFields(raw map[string]any, schema feishu.DramaFields) map[strin
 // mapAppFieldValue maps package names to human-readable app names
 func mapAppFieldValue(app string) string {
 	appMapping := map[string]string{
-		"com.smile.gifmaker": "快手-Android",
-		"com.jiangjia.gif":   "快手-iOS",
-		"com.tencent.mm":     "微信-Android",
-		"com.tencent.xin":    "微信-iOS",
+		"com.smile.gifmaker": "快手",
+		"com.jiangjia.gif":   "快手",
+		"com.tencent.mm":     "微信",
+		"com.tencent.xin":    "微信",
 	}
 	if mapped, ok := appMapping[app]; ok {
 		return mapped

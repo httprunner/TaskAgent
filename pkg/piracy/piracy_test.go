@@ -383,12 +383,12 @@ func TestMapAppFieldValue(t *testing.T) {
 		{
 			name:     "Kuaishou Android",
 			input:    "com.smile.gifmaker",
-			expected: "快手-Android",
+			expected: "快手",
 		},
 		{
 			name:     "Kuaishou iOS",
 			input:    "com.jiangjia.gif",
-			expected: "快手-iOS",
+			expected: "快手",
 		},
 		{
 			name:     "Unknown app - no mapping",
@@ -464,14 +464,14 @@ func TestFlattenRecordsWithAppMapping(t *testing.T) {
 		t.Fatalf("expected 3 item IDs, got %d", len(itemIDs))
 	}
 
-	// Check first record - should map to 快手-Android
-	if flattened[0]["App"] != "快手-Android" {
-		t.Errorf("expected App to be '快手-Android', got %q", flattened[0]["App"])
+	// Check first record - should map to 快手
+	if flattened[0]["App"] != "快手" {
+		t.Errorf("expected App to be '快手', got %q", flattened[0]["App"])
 	}
 
-	// Check second record - should map to 快手-iOS
-	if flattened[1]["App"] != "快手-iOS" {
-		t.Errorf("expected App to be '快手-iOS', got %q", flattened[1]["App"])
+	// Check second record - should map to 快手
+	if flattened[1]["App"] != "快手" {
+		t.Errorf("expected App to be '快手', got %q", flattened[1]["App"])
 	}
 
 	// Check third record - should remain unchanged
