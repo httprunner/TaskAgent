@@ -157,13 +157,13 @@ log.Info().Int("records", len(records)).Msg("summary delivered")
 所需环境变量：
 
 ```bash
-VEDEM_IMAGE_AK=your_ak_here
-VEDEM_IMAGE_SK=your_sk_here
+VEDEM_DRAMA_AK=your_ak_here
+VEDEM_DRAMA_SK=your_sk_here
 ```
 
 行为说明：
 
-- 当 `VEDEM_IMAGE_AK` / `VEDEM_IMAGE_SK` 均非空时，Webhook 请求将自动携带上述 AGW 鉴权头；
+- 当 `VEDEM_DRAMA_AK` / `VEDEM_DRAMA_SK` 均非空时，Webhook 请求将自动携带上述 AGW 鉴权头；
 - 任一为空时，鉴权会被显式跳过，`SendSummaryWebhook` 仍会正常发送 **未签名** 的 HTTP 请求（适合本地调试或非 VEDEM 环境）；
 - TaskAgent 不负责加载 `.env`，请在启动进程前确保相关环境变量已注入（例如通过 shell 导出或上游进程配置）。
 

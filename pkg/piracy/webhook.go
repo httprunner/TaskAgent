@@ -268,11 +268,12 @@ func flattenRecordsAndCollectItemIDs(records []CaptureRecordPayload, schema feis
 const vedemSignatureExpiration = 1800
 
 // buildVedemAgwTokenSigned signs the actual request payload.
-// When VEDEM_IMAGE_AK/SK are absent, it returns an empty string and auth is skipped.
+// When VEDEM_DRAMA_AK/SK are absent, it returns an empty string and auth is skipped.
 func buildVedemAgwTokenSigned(payloadBytes []byte) string {
-	ak := strings.TrimSpace(os.Getenv("VEDEM_IMAGE_AK"))
-	sk := strings.TrimSpace(os.Getenv("VEDEM_IMAGE_SK"))
+	ak := strings.TrimSpace(os.Getenv("VEDEM_DRAMA_AK"))
+	sk := strings.TrimSpace(os.Getenv("VEDEM_DRAMA_SK"))
 	if ak == "" || sk == "" {
+		log.Fatal().Msg("VEDEM_DRAMA_AK or VEDEM_DRAMA_SK is not set")
 		return ""
 	}
 
