@@ -102,6 +102,11 @@ func (r *resultReporter) flushOnce() {
 		Int("pending_rows", len(rows)).
 		Dur("timeout", timeout).
 		Msg("result reporter flush fetched pending sqlite rows")
+
+	// Collect successful and failed row IDs for batch updates
+	var successIDs []int64
+	failedRows := make(map[int64]error)
+
 	for _, row := range rows {
 		if ctx.Err() != nil {
 			return
@@ -109,23 +114,36 @@ func (r *resultReporter) flushOnce() {
 		log.Trace().
 			Int64("row_id", row.ID).
 			Str("app", trimNull(row.App)).
-			Str("scene", trimNull(row.Scene)).
-			Str("params", trimNull(row.Params)).
+			Str("item_id", trimNull(row.ItemID)).
 			Msg("result reporter dispatching capture row to feishu")
 		if err := r.dispatchRow(row); err != nil {
 			log.Error().Err(err).Int64("row_id", row.ID).Msg("result reporter dispatch row failed")
-			if markErr := r.markFailure(row.ID, err); markErr != nil {
-				log.Error().Err(markErr).Int64("row_id", row.ID).Msg("result reporter mark failure failed")
+			failedRows[row.ID] = err
+			continue
+		}
+		successIDs = append(successIDs, row.ID)
+	}
+
+	// Batch update successful rows
+	if len(successIDs) > 0 {
+		if err := r.markSuccessBatch(successIDs); err != nil {
+			log.Error().Err(err).Int("count", len(successIDs)).Msg("result reporter mark success batch failed")
+			// Fallback to individual updates
+			for _, id := range successIDs {
+				if err := r.markSuccess(id); err != nil {
+					log.Error().Err(err).Int64("row_id", id).Msg("result reporter mark success fallback failed")
+				}
 			}
-			continue
+		} else {
+			log.Info().Int("count", len(successIDs)).Msg("result reporter marked batch reported")
 		}
-		if err := r.markSuccess(row.ID); err != nil {
-			log.Error().Err(err).Int64("row_id", row.ID).Msg("result reporter mark success failed")
-			continue
+	}
+
+	// Mark failed rows
+	for id, dispatchErr := range failedRows {
+		if markErr := r.markFailure(id, dispatchErr); markErr != nil {
+			log.Error().Err(markErr).Int64("row_id", id).Msg("result reporter mark failure failed")
 		}
-		log.Trace().
-			Int64("row_id", row.ID).
-			Msg("result reporter marked capture row reported")
 	}
 }
 
@@ -264,6 +282,34 @@ func (r *resultReporter) markSuccess(id int64) error {
 	stmt := fmt.Sprintf(`UPDATE %s SET %s=1, %s=?, %s=NULL WHERE id=?`,
 		quoteIdent(r.table), quoteIdent(reportedColumn), quoteIdent(reportedAtColumn), quoteIdent(reportErrorColumn))
 	return pkgerrors.Wrap(execWithRetry(ctx, r.db, stmt, time.Now().UnixMilli(), id), "storage: mark capture row reported")
+}
+
+func (r *resultReporter) markSuccessBatch(ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Build placeholders for IN clause
+	placeholders := make([]string, len(ids))
+	for i := range ids {
+		placeholders[i] = "?"
+	}
+	placeholderStr := strings.Join(placeholders, ",")
+
+	stmt := fmt.Sprintf(`UPDATE %s SET %s=1, %s=?, %s=NULL WHERE id IN (%s)`,
+		quoteIdent(r.table), quoteIdent(reportedColumn), quoteIdent(reportedAtColumn),
+		quoteIdent(reportErrorColumn), placeholderStr)
+
+	// Build args: reported_at timestamp + all IDs
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, time.Now().UnixMilli())
+	for _, id := range ids {
+		args = append(args, id)
+	}
+
+	return pkgerrors.Wrap(execWithRetry(ctx, r.db, stmt, args...), "storage: mark capture rows reported batch")
 }
 
 func (r *resultReporter) markFailure(id int64, err error) error {
@@ -420,6 +466,8 @@ func parseReportTimeout() time.Duration {
 
 func execWithRetry(ctx context.Context, db *sql.DB, stmt string, args ...any) error {
 	const maxAttempts = 3
+	// Increased backoff intervals to handle longer lock contention
+	backoffs := []time.Duration{500 * time.Millisecond, 1 * time.Second, 2 * time.Second}
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		_, err := db.ExecContext(ctx, stmt, args...)
 		if err == nil {
@@ -428,7 +476,11 @@ func execWithRetry(ctx context.Context, db *sql.DB, stmt string, args ...any) er
 		if !isSQLiteBusy(err) || attempt == maxAttempts-1 {
 			return err
 		}
-		backoff := time.Duration(attempt+1) * 200 * time.Millisecond
+		backoff := backoffs[attempt]
+		log.Warn().Err(err).
+			Int("attempt", attempt+1).
+			Dur("backoff", backoff).
+			Msg("sqlite busy, retrying after backoff")
 		select {
 		case <-time.After(backoff):
 		case <-ctx.Done():
