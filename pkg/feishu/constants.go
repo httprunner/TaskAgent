@@ -27,6 +27,8 @@ const (
 	WebhookSuccess = "success"
 	// WebhookFailed marks a task whose webhook synchronization failed.
 	WebhookFailed = "failed"
+	// WebhookError marks a task whose webhook synchronization was skipped due to missing data.
+	WebhookError = "error"
 )
 
 // DefaultDramaFields matches the default schema used by the built-in drama

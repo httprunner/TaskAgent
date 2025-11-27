@@ -96,17 +96,11 @@ func (s *feishuSummarySource) buildRecordFilter(query recordQuery) *feishu.Filte
 	if query.ExtraFilter != nil {
 		filters = append(filters, query.ExtraFilter)
 	}
-	if trimmed := strings.TrimSpace(query.App); trimmed != "" {
-		filters = append(filters, EqFilter(s.fields.Result.App, trimmed))
-	}
 	if trimmed := strings.TrimSpace(query.Params); trimmed != "" {
 		filters = append(filters, BuildParamsFilter([]string{trimmed}, s.fields.Result.Params))
 	}
 	if trimmed := strings.TrimSpace(query.UserID); trimmed != "" {
 		filters = append(filters, EqFilter(s.fields.Result.UserID, trimmed))
-	}
-	if trimmed := strings.TrimSpace(query.UserName); trimmed != "" {
-		filters = append(filters, EqFilter(s.fields.Result.UserName, trimmed))
 	}
 	return CombineFiltersAND(filters...)
 }

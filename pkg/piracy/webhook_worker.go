@@ -2,6 +2,7 @@ package piracy
 
 import (
 	"context"
+	stdErrors "errors"
 	"fmt"
 	"strings"
 	"time"
@@ -108,8 +109,14 @@ func (w *WebhookWorker) processOnce(ctx context.Context) error {
 		log.Debug().Msg("webhook worker found no pending tasks")
 		return nil
 	}
+	log.Info().
+		Int("rows", len(table.Rows)).
+		Int("invalid_rows", len(table.Invalid)).
+		Msg("webhook worker fetched candidates")
+
 	var successIDs []int64
 	var failedIDs []int64
+	var errorIDs []int64
 	var errs []string
 
 	for _, row := range table.Rows {
@@ -118,6 +125,10 @@ func (w *WebhookWorker) processOnce(ctx context.Context) error {
 		}
 		params := strings.TrimSpace(row.Params)
 		if params == "" || row.TaskID == 0 {
+			log.Warn().
+				Int64("task_id", row.TaskID).
+				Str("params", params).
+				Msg("skip task missing params or task_id")
 			continue
 		}
 		app := w.resolveApp(row.App)
@@ -125,20 +136,37 @@ func (w *WebhookWorker) processOnce(ctx context.Context) error {
 			errs = append(errs, fmt.Sprintf("task %d missing app", row.TaskID))
 			continue
 		}
-		if err := w.sendSummary(ctx, app, params, strings.TrimSpace(row.UserID), strings.TrimSpace(row.UserName)); err != nil {
-			log.Error().Err(err).
-				Int64("task_id", row.TaskID).
-				Str("params", params).
-				Msg("webhook delivery failed")
-			failedIDs = append(failedIDs, row.TaskID)
-			if err := w.updateWebhookState(ctx, table, []int64{row.TaskID}, feishu.WebhookFailed); err != nil {
-				errs = append(errs, err.Error())
+		if err := w.sendSummary(ctx, app, params, row.Scene, strings.TrimSpace(row.UserID), strings.TrimSpace(row.UserName)); err != nil {
+			if stdErrors.Is(err, ErrNoCaptureRecords) {
+				log.Warn().
+					Int64("task_id", row.TaskID).
+					Str("params", params).
+					Str("app", app).
+					Str("scene", strings.TrimSpace(row.Scene)).
+					Str("user_id", strings.TrimSpace(row.UserID)).
+					Msg("webhook skipped: no capture records")
+				errorIDs = append(errorIDs, row.TaskID)
+				if err := w.updateWebhookState(ctx, table, []int64{row.TaskID}, feishu.WebhookError); err != nil {
+					errs = append(errs, err.Error())
+				}
+			} else {
+				log.Error().Err(err).
+					Int64("task_id", row.TaskID).
+					Str("params", params).
+					Msg("webhook delivery failed")
+				failedIDs = append(failedIDs, row.TaskID)
+				if err := w.updateWebhookState(ctx, table, []int64{row.TaskID}, feishu.WebhookFailed); err != nil {
+					errs = append(errs, err.Error())
+				}
 			}
 		} else {
 			log.Info().
 				Int64("task_id", row.TaskID).
 				Str("params", params).
 				Str("app", app).
+				Str("scene", strings.TrimSpace(row.Scene)).
+				Str("user_id", strings.TrimSpace(row.UserID)).
+				Str("user_name", strings.TrimSpace(row.UserName)).
 				Msg("webhook delivered")
 			successIDs = append(successIDs, row.TaskID)
 			if err := w.updateWebhookState(ctx, table, []int64{row.TaskID}, feishu.WebhookSuccess); err != nil {
@@ -147,10 +175,11 @@ func (w *WebhookWorker) processOnce(ctx context.Context) error {
 		}
 	}
 
-	if len(successIDs)+len(failedIDs) > 0 {
+	if len(successIDs)+len(failedIDs)+len(errorIDs) > 0 {
 		log.Info().
 			Int("success", len(successIDs)).
 			Int("failed", len(failedIDs)).
+			Int("error", len(errorIDs)).
 			Msg("webhook worker iteration completed")
 	}
 
@@ -169,19 +198,112 @@ func eligibleForWebhook(row feishu.TaskRow) bool {
 	return webhook == feishu.WebhookPending || webhook == feishu.WebhookFailed
 }
 
+func limitEligibleRows(rows []feishu.TaskRow, limit int) ([]feishu.TaskRow, int) {
+	if limit <= 0 || limit > len(rows) {
+		limit = len(rows)
+	}
+	eligible := make([]feishu.TaskRow, 0, limit)
+	skipped := 0
+	for _, row := range rows {
+		if eligibleForWebhook(row) {
+			eligible = append(eligible, row)
+			if len(eligible) >= limit {
+				break
+			}
+			continue
+		}
+		skipped++
+	}
+	return eligible, skipped
+}
+
 func (w *WebhookWorker) fetchWebhookCandidates(ctx context.Context) (*feishu.TaskTable, error) {
+	totalLimit := w.batchLimit
+	if totalLimit <= 0 {
+		totalLimit = 20
+	}
+
+	webhookStates := []string{feishu.WebhookPending, feishu.WebhookFailed}
+	var combined *feishu.TaskTable
+	totalSkipped := 0
+
+	for _, state := range webhookStates {
+		remaining := totalLimit
+		if combined != nil {
+			remaining -= len(combined.Rows)
+			if remaining <= 0 {
+				break
+			}
+		}
+		table, skipped, err := w.fetchWebhookBatch(ctx, state, remaining)
+		if err != nil {
+			return nil, err
+		}
+		totalSkipped += skipped
+		if table == nil || len(table.Rows) == 0 {
+			continue
+		}
+		if combined == nil {
+			combined = table
+			continue
+		}
+		combined.Rows = append(combined.Rows, table.Rows...)
+		combined.Invalid = append(combined.Invalid, table.Invalid...)
+	}
+
+	if combined == nil {
+		return nil, nil
+	}
+
+	if len(combined.Invalid) > 0 {
+		log.Warn().
+			Int("invalid_rows", len(combined.Invalid)).
+			Str("sample_error", combined.Invalid[0].Err.Error()).
+			Msg("webhook worker skipped invalid task rows")
+	}
+	if totalSkipped > 0 {
+		log.Debug().
+			Int("skipped", totalSkipped).
+			Msg("webhook worker dropped ineligible rows from batches")
+	}
+	return combined, nil
+}
+
+func (w *WebhookWorker) fetchWebhookBatch(ctx context.Context, webhookState string, need int) (*feishu.TaskTable, int, error) {
+	if need <= 0 {
+		return nil, 0, nil
+	}
+	requestLimit := need * 5
+	if requestLimit < need {
+		requestLimit = need
+	}
+	if requestLimit > 200 {
+		requestLimit = 200
+	}
 	opts := &feishu.TaskQueryOptions{
-		Filter: w.buildFilterInfo(),
-		Limit:  w.batchLimit,
+		Filter: w.buildFilterInfo(webhookState),
+		Limit:  requestLimit,
+	}
+	if opts.Filter != nil {
+		log.Debug().
+			Str("filter", FilterToJSON(opts.Filter)).
+			Str("webhook_state", webhookState).
+			Int("limit", requestLimit).
+			Msg("webhook worker query filter")
 	}
 	table, err := w.client.FetchTaskTableWithOptions(ctx, w.bitableURL, nil, opts)
 	if err != nil {
-		return nil, errors.Wrap(err, "fetch webhook candidates failed")
+		return nil, 0, errors.Wrap(err, "fetch webhook candidates failed")
 	}
-	return table, nil
+	if table == nil {
+		return nil, 0, nil
+	}
+	eligible, skipped := limitEligibleRows(table.Rows, need)
+	table.Rows = eligible
+	return table, skipped, nil
 }
 
-func (w *WebhookWorker) buildFilterInfo() *feishu.FilterInfo {
+func (w *WebhookWorker) buildFilterInfo(webhookState string) *feishu.FilterInfo {
 	fields := feishu.DefaultTaskFields
 	filter := feishu.NewFilterInfo("and")
 	if appRef := strings.TrimSpace(fields.App); appRef != "" && strings.TrimSpace(w.app) != "" {
@@ -191,9 +313,9 @@ func (w *WebhookWorker) buildFilterInfo() *feishu.FilterInfo {
 		filter.Conditions = append(filter.Conditions, feishu.NewCondition(statusRef, "is", feishu.StatusSuccess))
 	}
 	if webhookRef := strings.TrimSpace(fields.Webhook); webhookRef != "" {
-		pending := feishu.NewCondition(webhookRef, "is", feishu.WebhookPending)
-		failed := feishu.NewCondition(webhookRef, "is", feishu.WebhookFailed)
-		filter.Children = append(filter.Children, feishu.NewChildrenFilter("or", pending, failed))
+		if strings.TrimSpace(webhookState) != "" {
+			filter.Conditions = append(filter.Conditions, feishu.NewCondition(webhookRef, "is", strings.TrimSpace(webhookState)))
+		}
 	}
 	if EmptyFilter(filter) {
 		return nil
@@ -208,19 +330,21 @@ func (w *WebhookWorker) resolveApp(taskApp string) string {
 	return w.app
 }
 
-func (w *WebhookWorker) sendSummary(ctx context.Context, app, params, userID, userName string) error {
+func (w *WebhookWorker) sendSummary(ctx context.Context, app, params, scene, userID, userName string) error {
 	opts := WebhookOptions{
 		App:        app,
 		Params:     params,
+		Scene:      scene,
 		UserID:     userID,
 		UserName:   userName,
 		WebhookURL: w.webhookURL,
 		Source:     WebhookSourceFeishu,
 	}
-	if _, err := SendSummaryWebhook(ctx, opts); err != nil {
-		return errors.Wrapf(err, "send summary webhook failed")
+	_, err := SendSummaryWebhook(ctx, opts)
+	if err == nil || stdErrors.Is(err, ErrNoCaptureRecords) {
+		return err
 	}
-	return nil
+	return errors.Wrapf(err, "send summary webhook failed")
 }
 
 func (w *WebhookWorker) updateWebhookState(ctx context.Context, table *feishu.TaskTable, taskIDs []int64, state string) error {

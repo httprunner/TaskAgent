@@ -462,6 +462,10 @@ func (c *Client) FetchTaskTableWithOptions(ctx context.Context, rawURL string, o
 			table.Invalid = append(table.Invalid, TaskRowError{RecordID: rec.RecordID, Err: err})
 			continue
 		}
+		if strings.TrimSpace(row.Status) == "" {
+			table.Invalid = append(table.Invalid, TaskRowError{RecordID: rec.RecordID, Err: errors.New("empty status after decode")})
+			continue
+		}
 		table.Rows = append(table.Rows, row)
 		if _, exists := table.taskIndex[row.TaskID]; !exists {
 			table.taskIndex[row.TaskID] = row.RecordID

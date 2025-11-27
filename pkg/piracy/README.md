@@ -125,6 +125,9 @@ if err != nil {
 
 `SendSummaryWebhook` aggregates drama metadata together with capture records (from either Feishu Bitables or the local tracking SQLite database) and POSTs a normalized JSON payload to a webhook URL. The payload flattens every column described by `feishu.DramaFields` at the top level and adds a `records` slice where each element contains the columns defined by `feishu.ResultFields`.
 
+- 结果筛选仅使用 `Params + UserID` 组合定位抓取记录，确保不同 App / 用户名场景下也能命中。
+- 当抓取表没有相关记录时，函数会返回 `ErrNoCaptureRecords` 而不会发送 HTTP 请求；webhook worker 会把任务的 `Webhook` 字段更新为 `error` 方便排查。
+
 ```go
 payload, err := piracy.SendSummaryWebhook(ctx, piracy.WebhookOptions{
     Params:      "真千金她是学霸",

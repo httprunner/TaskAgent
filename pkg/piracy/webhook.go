@@ -35,6 +35,7 @@ const (
 type WebhookOptions struct {
 	App        string
 	Params     string
+	Scene      string
 	UserID     string
 	UserName   string
 	WebhookURL string
@@ -62,6 +63,9 @@ type CaptureRecordPayload struct {
 	RecordID string
 	Fields   map[string]any
 }
+
+// ErrNoCaptureRecords indicates that the capture result query returned zero rows.
+var ErrNoCaptureRecords = errors.New("no capture records found")
 
 // SendSummaryWebhook aggregates drama metadata plus capture records and posts the payload to the provided webhook.
 // The returned map mirrors all columns defined by feishu.DramaFields plus an extra `records` field that contains
@@ -106,21 +110,29 @@ func SendSummaryWebhook(ctx context.Context, opts WebhookOptions) (map[string]an
 	}
 
 	records, err := ds.FetchRecords(ctx, recordQuery{
-		App:         strings.TrimSpace(opts.App),
 		Params:      params,
 		UserID:      strings.TrimSpace(opts.UserID),
-		UserName:    strings.TrimSpace(opts.UserName),
 		Limit:       limit,
 		ExtraFilter: opts.ResultFilter,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("fetch capture records failed: %w", err)
 	}
-	if records == nil {
-		records = make([]CaptureRecordPayload, 0)
+	if len(records) == 0 {
+		return nil, ErrNoCaptureRecords
 	}
 
-	payload := buildWebhookPayload(drama, records, fields)
+	flattenedRecords, itemIDs := flattenRecordsAndCollectItemIDs(records, fields.Result)
+	payload := buildWebhookPayload(drama, flattenedRecords, fields)
+	log.Info().
+		Str("params", params).
+		Str("app", strings.TrimSpace(opts.App)).
+		Str("scene", strings.TrimSpace(opts.Scene)).
+		Str("user_id", strings.TrimSpace(opts.UserID)).
+		Str("user_name", strings.TrimSpace(opts.UserName)).
+		Int("record_count", len(flattenedRecords)).
+		Strs("item_ids", itemIDs).
+		Msg("sending summary webhook")
 	if err := postWebhook(ctx, webhookURL, payload, opts.HTTPClient); err != nil {
 		return nil, err
 	}
@@ -168,7 +180,7 @@ func postWebhook(ctx context.Context, url string, payload map[string]any, client
 	return nil
 }
 
-func buildWebhookPayload(drama *dramaInfo, records []CaptureRecordPayload, fields summaryFieldConfig) map[string]any {
+func buildWebhookPayload(drama *dramaInfo, records []map[string]any, fields summaryFieldConfig) map[string]any {
 	var raw map[string]any
 	var dramaName string
 	if drama != nil {
@@ -180,7 +192,7 @@ func buildWebhookPayload(drama *dramaInfo, records []CaptureRecordPayload, field
 	if val, ok := payload["DramaName"]; !ok || strings.TrimSpace(fmt.Sprint(val)) == "" {
 		payload["DramaName"] = dramaName
 	}
-	payload["records"] = flattenRecordFields(records, fields.Result)
+	payload["records"] = records
 	return payload
 }
 
@@ -200,11 +212,12 @@ func flattenDramaFields(raw map[string]any, schema feishu.DramaFields) map[strin
 	return payload
 }
 
-func flattenRecordFields(records []CaptureRecordPayload, schema feishu.ResultFields) []map[string]any {
+func flattenRecordsAndCollectItemIDs(records []CaptureRecordPayload, schema feishu.ResultFields) ([]map[string]any, []string) {
 	fieldMap := structFieldMap(schema)
 	result := make([]map[string]any, 0, len(records))
 	rawItemKey := fieldMap["ItemID"]
 	seenItem := make(map[string]struct{}, len(records))
+	itemIDs := make([]string, 0, len(records))
 	for _, rec := range records {
 		if rawItemKey != "" {
 			itemID := strings.TrimSpace(getString(rec.Fields, rawItemKey))
@@ -213,6 +226,7 @@ func flattenRecordFields(records []CaptureRecordPayload, schema feishu.ResultFie
 					continue
 				}
 				seenItem[itemID] = struct{}{}
+				itemIDs = append(itemIDs, itemID)
 			}
 		}
 		entry := make(map[string]any, len(fieldMap)+1)
@@ -227,7 +241,7 @@ func flattenRecordFields(records []CaptureRecordPayload, schema feishu.ResultFie
 		}
 		result = append(result, entry)
 	}
-	return result
+	return result, itemIDs
 }
 
 const vedemSignToken = "UNSIGNED-PAYLOAD"

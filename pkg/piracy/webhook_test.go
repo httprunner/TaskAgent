@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -179,6 +180,69 @@ func TestSendSummaryWebhookSQLite(t *testing.T) {
 	}
 	if _, exists := posted["drama_extra"]; exists {
 		t.Fatalf("unexpected drama_extra field present")
+	}
+}
+
+func TestSendSummaryWebhookNoRecords(t *testing.T) {
+	t.Setenv("DRAMA_SQLITE_TABLE", "drama_catalog")
+	t.Setenv("RESULT_SQLITE_TABLE", "capture_results")
+	t.Setenv("DRAMA_FIELD_NAME", "Params")
+	t.Setenv("DRAMA_FIELD_ID", "DramaID")
+
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "records.sqlite")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	createSQL := []string{
+		`CREATE TABLE drama_catalog (
+	            DramaID TEXT,
+	            Params TEXT,
+	            Priority TEXT,
+	            RightsProtectionScenario TEXT
+	        );`,
+		`CREATE TABLE capture_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            Params TEXT,
+            DeviceSerial TEXT,
+            App TEXT,
+            ItemID TEXT,
+            ItemCaption TEXT,
+            ItemDuration REAL,
+            UserName TEXT,
+            UserID TEXT,
+            Tags TEXT,
+            TaskID INTEGER,
+            Datetime INTEGER,
+            Extra TEXT
+        );`,
+	}
+	for _, stmt := range createSQL {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("create table failed: %v", err)
+		}
+	}
+
+	if _, err := db.Exec(`INSERT INTO drama_catalog (DramaID, Params) VALUES (?, ?)`,
+		"7547613592992894014", "真千金她是学霸"); err != nil {
+		t.Fatalf("insert drama row failed: %v", err)
+	}
+
+	opts := WebhookOptions{
+		Params:     "真千金她是学霸",
+		App:        "kuaishou",
+		UserID:     "3618381723",
+		UserName:   "幽幽爱看",
+		Source:     WebhookSourceSQLite,
+		SQLitePath: dbPath,
+		WebhookURL: "http://127.0.0.1",
+	}
+
+	if _, err := SendSummaryWebhook(context.Background(), opts); !errors.Is(err, ErrNoCaptureRecords) {
+		t.Fatalf("expected ErrNoCaptureRecords, got %v", err)
 	}
 }
 
