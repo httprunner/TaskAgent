@@ -3,6 +3,8 @@ package piracy
 import (
 	"os"
 	"testing"
+
+	"github.com/httprunner/TaskAgent/pkg/feishu"
 )
 
 func TestAnalyzeRows(t *testing.T) {
@@ -369,5 +371,111 @@ func TestConfigApplyDefaults(t *testing.T) {
 			c.ApplyDefaults()
 			tt.check(&c)
 		})
+	}
+}
+
+func TestMapAppFieldValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Kuaishou Android",
+			input:    "com.smile.gifmaker",
+			expected: "快手-Android",
+		},
+		{
+			name:     "Kuaishou iOS",
+			input:    "com.jiangjia.gif",
+			expected: "快手-iOS",
+		},
+		{
+			name:     "Unknown app - no mapping",
+			input:    "com.example.app",
+			expected: "com.example.app",
+		},
+		{
+			name:     "Empty string",
+			input:    "",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := mapAppFieldValue(tt.input)
+			if result != tt.expected {
+				t.Errorf("mapAppFieldValue(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestFlattenRecordsWithAppMapping(t *testing.T) {
+	schema := feishu.ResultFields{
+		App:      "App",
+		ItemID:   "ItemID",
+		UserID:   "UserID",
+		UserName: "UserName",
+		Params:   "Params",
+	}
+
+	records := []CaptureRecordPayload{
+		{
+			RecordID: "rec1",
+			Fields: map[string]any{
+				"App":      "com.smile.gifmaker",
+				"ItemID":   "item123",
+				"UserID":   "user1",
+				"UserName": "测试用户",
+				"Params":   "测试剧集",
+			},
+		},
+		{
+			RecordID: "rec2",
+			Fields: map[string]any{
+				"App":      "com.jiangjia.gif",
+				"ItemID":   "item456",
+				"UserID":   "user2",
+				"UserName": "测试用户2",
+				"Params":   "测试剧集2",
+			},
+		},
+		{
+			RecordID: "rec3",
+			Fields: map[string]any{
+				"App":      "com.other.app",
+				"ItemID":   "item789",
+				"UserID":   "user3",
+				"UserName": "测试用户3",
+				"Params":   "测试剧集3",
+			},
+		},
+	}
+
+	flattened, itemIDs := flattenRecordsAndCollectItemIDs(records, schema)
+
+	if len(flattened) != 3 {
+		t.Fatalf("expected 3 flattened records, got %d", len(flattened))
+	}
+
+	if len(itemIDs) != 3 {
+		t.Fatalf("expected 3 item IDs, got %d", len(itemIDs))
+	}
+
+	// Check first record - should map to 快手-Android
+	if flattened[0]["App"] != "快手-Android" {
+		t.Errorf("expected App to be '快手-Android', got %q", flattened[0]["App"])
+	}
+
+	// Check second record - should map to 快手-iOS
+	if flattened[1]["App"] != "快手-iOS" {
+		t.Errorf("expected App to be '快手-iOS', got %q", flattened[1]["App"])
+	}
+
+	// Check third record - should remain unchanged
+	if flattened[2]["App"] != "com.other.app" {
+		t.Errorf("expected App to be 'com.other.app', got %q", flattened[2]["App"])
 	}
 }

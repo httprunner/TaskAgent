@@ -211,10 +211,25 @@ func flattenDramaFields(raw map[string]any, schema feishu.DramaFields) map[strin
 	return payload
 }
 
+// mapAppFieldValue maps package names to human-readable app names
+func mapAppFieldValue(app string) string {
+	appMapping := map[string]string{
+		"com.smile.gifmaker": "快手-Android",
+		"com.jiangjia.gif":   "快手-iOS",
+		"com.tencent.mm":     "微信-Android",
+		"com.tencent.xin":    "微信-iOS",
+	}
+	if mapped, ok := appMapping[app]; ok {
+		return mapped
+	}
+	return app
+}
+
 func flattenRecordsAndCollectItemIDs(records []CaptureRecordPayload, schema feishu.ResultFields) ([]map[string]any, []string) {
 	fieldMap := structFieldMap(schema)
 	result := make([]map[string]any, 0, len(records))
 	rawItemKey := fieldMap["ItemID"]
+	rawAppKey := fieldMap["App"]
 	seenItem := make(map[string]struct{}, len(records))
 	itemIDs := make([]string, 0, len(records))
 	for _, rec := range records {
@@ -236,7 +251,14 @@ func flattenRecordsAndCollectItemIDs(records []CaptureRecordPayload, schema feis
 				continue
 			}
 			// Downstream webhook schema expects strings for all capture fields, including Extra.
-			entry[engName] = getString(rec.Fields, rawKey)
+			fieldValue := getString(rec.Fields, rawKey)
+
+			// Apply App field mapping if this is the App field
+			if rawKey == rawAppKey && engName == "App" {
+				fieldValue = mapAppFieldValue(fieldValue)
+			}
+
+			entry[engName] = fieldValue
 		}
 		result = append(result, entry)
 	}
