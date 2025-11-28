@@ -70,7 +70,8 @@ func (s *sqliteSummarySource) FetchDrama(ctx context.Context, params string) (*d
 	if strings.TrimSpace(params) == "" {
 		return nil, fmt.Errorf("params is empty")
 	}
-	query := fmt.Sprintf("SELECT %s, %s, %s, %s FROM %s WHERE %s = ? LIMIT 1",
+	// Use LIKE to handle JSON-formatted drama names: [{"text":"许你一世峥嵘","type":"text"}]
+	query := fmt.Sprintf("SELECT %s, %s, %s, %s FROM %s WHERE %s LIKE ? LIMIT 1",
 		s.column(s.fields.Drama.DramaID),
 		s.column(s.fields.Drama.DramaName),
 		s.column(s.fields.Drama.Priority),
@@ -79,7 +80,7 @@ func (s *sqliteSummarySource) FetchDrama(ctx context.Context, params string) (*d
 		s.column(s.fields.Drama.DramaName),
 	)
 
-	row := s.db.QueryRowContext(ctx, query, params)
+	row := s.db.QueryRowContext(ctx, query, "%"+params+"%")
 	var (
 		id, name, priority, rights sql.NullString
 	)
@@ -90,16 +91,28 @@ func (s *sqliteSummarySource) FetchDrama(ctx context.Context, params string) (*d
 		return nil, fmt.Errorf("query drama row failed: %w", err)
 	}
 
+	// Parse JSON-formatted fields if needed
+	dramaName := strings.TrimSpace(name.String)
+	dramaID := strings.TrimSpace(id.String)
+	priorityVal := strings.TrimSpace(priority.String)
+	rightsVal := strings.TrimSpace(rights.String)
+
+	// Try to extract text from JSON format: [{"text":"value","type":"text"}]
+	dramaName = extractTextFromJSON(dramaName)
+	dramaID = extractTextFromJSON(dramaID)
+	priorityVal = extractTextFromJSON(priorityVal)
+	rightsVal = extractTextFromJSON(rightsVal)
+
 	info := &dramaInfo{
-		ID:             strings.TrimSpace(id.String),
-		Name:           strings.TrimSpace(name.String),
-		Priority:       strings.TrimSpace(priority.String),
-		RightsScenario: strings.TrimSpace(rights.String),
+		ID:             dramaID,
+		Name:           dramaName,
+		Priority:       priorityVal,
+		RightsScenario: rightsVal,
 		RawFields: map[string]any{
-			s.fields.Drama.DramaID:                  strings.TrimSpace(id.String),
-			s.fields.Drama.DramaName:                strings.TrimSpace(name.String),
-			s.fields.Drama.Priority:                 strings.TrimSpace(priority.String),
-			s.fields.Drama.RightsProtectionScenario: strings.TrimSpace(rights.String),
+			s.fields.Drama.DramaID:                  dramaID,
+			s.fields.Drama.DramaName:                dramaName,
+			s.fields.Drama.Priority:                 priorityVal,
+			s.fields.Drama.RightsProtectionScenario: rightsVal,
 		},
 	}
 	if info.Name == "" {
@@ -239,6 +252,26 @@ func decodeExtra(raw string) any {
 	var data any
 	if err := json.Unmarshal([]byte(trimmed), &data); err == nil {
 		return data
+	}
+	return trimmed
+}
+
+// extractTextFromJSON attempts to parse JSON format: [{"text":"value","type":"text"}]
+// Returns the original string if parsing fails or if it's not in the expected format.
+func extractTextFromJSON(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || !strings.HasPrefix(trimmed, "[") {
+		return trimmed
+	}
+	var items []map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &items); err != nil {
+		return trimmed
+	}
+	if len(items) == 0 {
+		return trimmed
+	}
+	if text, ok := items[0]["text"].(string); ok {
+		return strings.TrimSpace(text)
 	}
 	return trimmed
 }
