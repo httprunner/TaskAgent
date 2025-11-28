@@ -332,20 +332,48 @@ func (w *WebhookWorker) resolveApp(taskApp string) string {
 }
 
 func (w *WebhookWorker) sendSummary(ctx context.Context, app, params, scene, userID, userName string) error {
-	opts := WebhookOptions{
+	baseOpts := WebhookOptions{
 		App:        app,
 		Params:     params,
 		Scene:      scene,
 		UserID:     userID,
 		UserName:   userName,
 		WebhookURL: w.webhookURL,
-		Source:     WebhookSourceFeishu,
 	}
+
+	sqliteErr := w.sendSummaryWithSource(ctx, baseOpts, WebhookSourceSQLite)
+	if sqliteErr == nil {
+		return nil
+	}
+	if isContextError(sqliteErr) {
+		return sqliteErr
+	}
+
+	log.Warn().
+		Err(sqliteErr).
+		Str("params", params).
+		Str("app", app).
+		Str("scene", scene).
+		Msg("sqlite summary lookup failed, falling back to feishu")
+
+	feishuErr := w.sendSummaryWithSource(ctx, baseOpts, WebhookSourceFeishu)
+	if feishuErr != nil {
+		return errors.Wrapf(feishuErr, "send summary webhook via feishu failed after sqlite error: %v", sqliteErr)
+	}
+	return nil
+}
+
+func (w *WebhookWorker) sendSummaryWithSource(ctx context.Context, opts WebhookOptions, source WebhookSource) error {
+	opts.Source = source
 	_, err := SendSummaryWebhook(ctx, opts)
-	if err == nil || stdErrors.Is(err, ErrNoCaptureRecords) {
-		return err
+	return err
+}
+
+func isContextError(err error) bool {
+	if err == nil {
+		return false
 	}
-	return errors.Wrapf(err, "send summary webhook failed")
+	return stdErrors.Is(err, context.Canceled) || stdErrors.Is(err, context.DeadlineExceeded)
 }
 
 func (w *WebhookWorker) updateWebhookState(ctx context.Context, table *feishu.TaskTable, taskIDs []int64, state string) error {
