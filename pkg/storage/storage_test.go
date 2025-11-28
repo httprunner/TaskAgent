@@ -1,6 +1,11 @@
 package storage
 
-import "testing"
+import (
+	"os"
+	"testing"
+
+	"github.com/httprunner/TaskAgent/pkg/feishu"
+)
 
 func TestBuildJSONLRow(t *testing.T) {
 	duration := 1.23
@@ -62,5 +67,73 @@ func TestBuildJSONLRowNilDuration(t *testing.T) {
 	}
 	if row["ItemDuration"] != nil {
 		t.Fatalf("expected nil ItemDuration, got %v", row["ItemDuration"])
+	}
+}
+
+func TestEnsureResultReporterSkipsWithoutEnv(t *testing.T) {
+	origFactory := feishuStorageFactory
+	origReporterFactory := resultReporterFactory
+	origReporter := globalReporter
+	t.Cleanup(func() {
+		feishuStorageFactory = origFactory
+		resultReporterFactory = origReporterFactory
+		globalReporter = origReporter
+		os.Unsetenv(feishu.EnvResultBitableURL)
+	})
+
+	os.Unsetenv(feishu.EnvResultBitableURL)
+	called := 0
+	feishuStorageFactory = func() (*feishu.ResultStorage, error) {
+		called++
+		return &feishu.ResultStorage{}, nil
+	}
+	resultReporterFactory = func(storage *feishu.ResultStorage) (*resultReporter, error) {
+		return &resultReporter{}, nil
+	}
+
+	if err := EnsureResultReporter(); err != nil {
+		t.Fatalf("EnsureResultReporter returned error: %v", err)
+	}
+	if called != 0 {
+		t.Fatalf("expected storage factory not called, got %d", called)
+	}
+}
+
+func TestEnsureResultReporterStartsOnce(t *testing.T) {
+	origFactory := feishuStorageFactory
+	origReporterFactory := resultReporterFactory
+	origReporter := globalReporter
+	t.Cleanup(func() {
+		feishuStorageFactory = origFactory
+		resultReporterFactory = origReporterFactory
+		globalReporter = origReporter
+		os.Unsetenv(feishu.EnvResultBitableURL)
+	})
+
+	os.Setenv(feishu.EnvResultBitableURL, "https://bitable")
+	storageCalls := 0
+	feishuStorageFactory = func() (*feishu.ResultStorage, error) {
+		storageCalls++
+		return &feishu.ResultStorage{}, nil
+	}
+	resultReporterFactory = func(storage *feishu.ResultStorage) (*resultReporter, error) {
+		return &resultReporter{}, nil
+	}
+	globalReporter = nil
+
+	if err := EnsureResultReporter(); err != nil {
+		t.Fatalf("EnsureResultReporter returned error: %v", err)
+	}
+	if globalReporter == nil {
+		t.Fatalf("expected global reporter to be initialized")
+	}
+	if storageCalls != 1 {
+		t.Fatalf("expected storage factory called once, got %d", storageCalls)
+	}
+	if err := EnsureResultReporter(); err != nil {
+		t.Fatalf("EnsureResultReporter second call returned error: %v", err)
+	}
+	if storageCalls != 1 {
+		t.Fatalf("expected no extra storage factory call, got %d", storageCalls)
 	}
 }

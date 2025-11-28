@@ -14,6 +14,7 @@ import (
 
 	"github.com/httprunner/TaskAgent/pkg/feishu"
 	pkgerrors "github.com/pkg/errors"
+	"github.com/rs/zerolog/log"
 	_ "modernc.org/sqlite"
 )
 
@@ -30,8 +31,10 @@ const (
 )
 
 var (
-	globalReporter   *resultReporter
-	globalReporterMu sync.Mutex
+	globalReporter        *resultReporter
+	globalReporterMu      sync.Mutex
+	feishuStorageFactory  = newFeishuStorage
+	resultReporterFactory = newResultReporter
 )
 
 var captureResultColumns = []string{
@@ -169,7 +172,7 @@ func getOrStartGlobalReporter(storage *feishu.ResultStorage) (*resultReporter, e
 		return globalReporter, nil
 	}
 
-	reporter, err := newResultReporter(storage)
+	reporter, err := resultReporterFactory(storage)
 	if err != nil {
 		return nil, err
 	}
@@ -287,6 +290,38 @@ func newFeishuStorage() (*feishu.ResultStorage, error) {
 		return nil, err
 	}
 	return storage, nil
+}
+
+// EnsureResultReporter starts the shared Feishu reporter so queued SQLite rows
+// continue to flush even if no TrackingRunner is active.
+func EnsureResultReporter() error {
+	if strings.TrimSpace(os.Getenv(feishu.EnvResultBitableURL)) == "" {
+		log.Warn().Msg("storage: RESULT_BITABLE_URL not set, skip reporter bootstrap")
+		return nil
+	}
+
+	globalReporterMu.Lock()
+	if globalReporter != nil {
+		globalReporterMu.Unlock()
+		log.Debug().Msg("storage: result reporter already running")
+		return nil
+	}
+	globalReporterMu.Unlock()
+
+	storage, err := feishuStorageFactory()
+	if err != nil {
+		return err
+	}
+	if storage == nil {
+		log.Warn().Msg("storage: feishu storage factory returned nil, reporter not started")
+		return nil
+	}
+
+	if _, err := getOrStartGlobalReporter(storage); err != nil {
+		return err
+	}
+	log.Info().Msg("storage: result reporter initialized")
+	return nil
 }
 
 func (m *Manager) Write(ctx context.Context, record ResultRecord) error {
