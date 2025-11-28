@@ -1514,6 +1514,9 @@ func (c *Client) createBitableRecord(ctx context.Context, ref BitableRef, fields
 	if strings.TrimSpace(ref.AppToken) == "" {
 		return "", errors.New("feishu: bitable app token is empty")
 	}
+	if strings.TrimSpace(ref.TableID) == "" {
+		return "", errors.New("feishu: bitable table id is empty")
+	}
 	payload := map[string]any{"fields": fields}
 	path := fmt.Sprintf("/open-apis/bitable/v1/apps/%s/tables/%s/records", url.PathEscape(ref.AppToken), url.PathEscape(ref.TableID))
 
@@ -1553,6 +1556,9 @@ func (c *Client) batchCreateBitableRecords(ctx context.Context, ref BitableRef, 
 	}
 	if strings.TrimSpace(ref.AppToken) == "" {
 		return nil, errors.New("feishu: bitable app token is empty")
+	}
+	if strings.TrimSpace(ref.TableID) == "" {
+		return nil, errors.New("feishu: bitable table id is empty")
 	}
 	items := make([]map[string]any, 0, len(records))
 	for _, fields := range records {
@@ -1595,17 +1601,115 @@ func (c *Client) getBitableRecord(ctx context.Context, ref BitableRef, recordID 
 	if strings.TrimSpace(recordID) == "" {
 		return bitableRecord{}, errors.New("feishu: record id is empty")
 	}
-	if strings.TrimSpace(ref.AppToken) == "" {
-		return bitableRecord{}, errors.New("feishu: bitable app token is empty")
-	}
-	path := fmt.Sprintf("/open-apis/bitable/v1/apps/%s/tables/%s/records/batch_get", url.PathEscape(ref.AppToken), url.PathEscape(ref.TableID))
-	payload := map[string]any{
-		"record_ids": []string{recordID},
-	}
-	_, raw, err := c.doJSONRequest(ctx, http.MethodPost, path, payload)
+	records, err := c.BatchGetBitableRecords(ctx, ref, []string{recordID}, "")
 	if err != nil {
 		return bitableRecord{}, err
 	}
+	if len(records) == 0 {
+		return bitableRecord{}, fmt.Errorf("feishu: record %s not found", recordID)
+	}
+	return records[0], nil
+}
+
+// BatchUpdateBitableRecords updates multiple records in a single request.
+// Max 1000 records per request.
+func (c *Client) BatchUpdateBitableRecords(ctx context.Context, ref BitableRef, records []map[string]any) (updated []bitableRecord, err error) {
+	defer func() {
+		if err != nil {
+			err = errors.Wrap(err, "batch update bitable records failed")
+		}
+	}()
+
+	if len(records) == 0 {
+		return nil, errors.New("feishu: no records provided for batch update")
+	}
+	if strings.TrimSpace(ref.AppToken) == "" {
+		return nil, errors.New("feishu: bitable app token is empty")
+	}
+	if strings.TrimSpace(ref.TableID) == "" {
+		return nil, errors.New("feishu: bitable table id is empty")
+	}
+
+	items := make([]map[string]any, 0, len(records))
+	for _, fields := range records {
+		if len(fields) == 0 {
+			continue
+		}
+		// check if record_id exists in fields, if so, move it to top level
+		recordID, ok := fields["record_id"].(string)
+		if !ok || recordID == "" {
+			// try to find it in "fields" map if structure is flattened?
+			// The input `records` is expected to be a list of objects, each containing `record_id` and `fields`.
+			// However, looking at `batchCreateBitableRecords`, it takes `[]map[string]any` where each map is the fields.
+			// But for update, we need record_id.
+			// Let's assume the input `records` here is a list of objects that ALREADY has "record_id" and "fields" keys,
+			// OR it is a map of fields that INCLUDES "record_id".
+			// Let's stick to the official API structure:
+			// { "records": [ { "record_id": "...", "fields": { ... } } ] }
+			// So the input `records` should be `[]map[string]any` where each map has "record_id" and "fields".
+			return nil, errors.New("feishu: record_id is missing in update payload")
+		}
+		items = append(items, fields)
+	}
+
+	payload := map[string]any{"records": items}
+	path := fmt.Sprintf("/open-apis/bitable/v1/apps/%s/tables/%s/records/batch_update", url.PathEscape(ref.AppToken), url.PathEscape(ref.TableID))
+
+	_, raw, err := c.doJSONRequest(ctx, http.MethodPost, path, payload)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			Records []bitableRecord `json:"records"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, fmt.Errorf("feishu: decode batch update response: %w", err)
+	}
+	if resp.Code != 0 {
+		return nil, fmt.Errorf("feishu: batch update records failed code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	return resp.Data.Records, nil
+}
+
+// BatchGetBitableRecords retrieves multiple records by their IDs.
+// Max 100 records per request.
+func (c *Client) BatchGetBitableRecords(ctx context.Context, ref BitableRef, recordIDs []string, userIDType string) (records []bitableRecord, err error) {
+	defer func() {
+		if err != nil {
+			err = errors.Wrap(err, "batch get bitable records failed")
+		}
+	}()
+
+	if len(recordIDs) == 0 {
+		return nil, errors.New("feishu: no record ids provided")
+	}
+	if strings.TrimSpace(ref.AppToken) == "" {
+		return nil, errors.New("feishu: bitable app token is empty")
+	}
+	if strings.TrimSpace(ref.TableID) == "" {
+		return nil, errors.New("feishu: bitable table id is empty")
+	}
+
+	path := fmt.Sprintf("/open-apis/bitable/v1/apps/%s/tables/%s/records/batch_get", url.PathEscape(ref.AppToken), url.PathEscape(ref.TableID))
+	if userIDType != "" {
+		path += "?user_id_type=" + url.QueryEscape(userIDType)
+	}
+
+	payload := map[string]any{
+		"record_ids": recordIDs,
+	}
+
+	_, raw, err := c.doJSONRequest(ctx, http.MethodPost, path, payload)
+	if err != nil {
+		return nil, err
+	}
+
 	var resp struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
@@ -1616,17 +1720,20 @@ func (c *Client) getBitableRecord(ctx context.Context, ref BitableRef, recordID 
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return bitableRecord{}, fmt.Errorf("feishu: decode get record response: %w", err)
+		return nil, fmt.Errorf("feishu: decode batch get response: %w", err)
 	}
 	if resp.Code != 0 {
-		return bitableRecord{}, fmt.Errorf("feishu: get record failed code=%d msg=%s", resp.Code, resp.Msg)
+		return nil, fmt.Errorf("feishu: batch get records failed code=%d msg=%s", resp.Code, resp.Msg)
 	}
-	for _, rec := range resp.Data.Records {
-		if rec.RecordID == recordID {
-			return rec, nil
-		}
+
+	if len(resp.Data.Absent) > 0 {
+		log.Warn().Strs("absent_ids", resp.Data.Absent).Msg("feishu: some records were absent")
 	}
-	return bitableRecord{}, fmt.Errorf("feishu: record %s not found", recordID)
+	if len(resp.Data.Forbidden) > 0 {
+		log.Warn().Strs("forbidden_ids", resp.Data.Forbidden).Msg("feishu: some records were forbidden")
+	}
+
+	return resp.Data.Records, nil
 }
 
 type wikiNodeInfo struct {

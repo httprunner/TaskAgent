@@ -20,6 +20,8 @@ type ResultStorage struct {
 	tableURL string
 }
 
+const maxResultRecordsPerRequest = 500
+
 var (
 	resultLimiterOnce sync.Once
 	resultLimiter     *rateLimiter
@@ -32,7 +34,9 @@ type rateLimiter struct {
 
 func newRateLimiterFromEnv() *rateLimiter {
 	val := strings.TrimSpace(os.Getenv("FEISHU_REPORT_RPS"))
-	rps := 1.0
+	// Official rate limits: 50 RPS for writes, 20 RPS for reads.
+	// We use 15 RPS as a safe default for both.
+	rps := 15.0
 	if val != "" {
 		parsed, err := strconv.ParseFloat(val, 64)
 		if err == nil && parsed > 0 && !math.IsInf(parsed, 0) && !math.IsNaN(parsed) {
@@ -82,20 +86,52 @@ func NewResultStorageFromEnv() (*ResultStorage, error) {
 
 // Write uploads a single record to the Feishu result table.
 func (s *ResultStorage) Write(ctx context.Context, record ResultRecordInput) error {
+	return s.writeRecords(ctx, []ResultRecordInput{record})
+}
+
+// WriteBatch uploads multiple records to the Feishu result table using batch_create API.
+func (s *ResultStorage) WriteBatch(ctx context.Context, records []ResultRecordInput) error {
+	if len(records) == 0 {
+		return errors.New("feishu storage: no records provided for batch write")
+	}
+	return s.writeRecords(ctx, records)
+}
+
+func (s *ResultStorage) writeRecords(ctx context.Context, records []ResultRecordInput) error {
 	if s == nil || s.client == nil {
 		return errors.New("feishu storage: storage is nil")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	for start := 0; start < len(records); start += maxResultRecordsPerRequest {
+		end := start + maxResultRecordsPerRequest
+		if end > len(records) {
+			end = len(records)
+		}
+		chunk := records[start:end]
+		if err := s.writeChunk(ctx, chunk); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *ResultStorage) writeChunk(ctx context.Context, chunk []ResultRecordInput) error {
+	if len(chunk) == 0 {
+		return nil
+	}
 	limiter := s.initLimiter()
 	if err := limiter.wait(ctx); err != nil {
 		return err
 	}
-	_, err := s.client.CreateResultRecord(ctx, s.tableURL, record, nil)
+	_, err := s.client.CreateResultRecords(ctx, s.tableURL, chunk, nil)
 	if err != nil {
-		err = annotateFeishuFieldError(err, record)
-		return errors.Wrap(err, "feishu storage: create result record failed")
+		if len(chunk) == 1 {
+			err = annotateFeishuFieldError(err, chunk[0])
+			return errors.Wrap(err, "feishu storage: create result record failed")
+		}
+		return errors.Wrapf(err, "feishu storage: create %d result records failed", len(chunk))
 	}
 	return nil
 }

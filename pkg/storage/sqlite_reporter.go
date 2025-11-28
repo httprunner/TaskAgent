@@ -101,6 +101,33 @@ func (r *resultReporter) flushOnce() {
 		Int("pending_rows", len(rows)).
 		Dur("timeout", timeout).
 		Msg("result reporter flush fetched pending sqlite rows")
+	if len(rows) == 0 {
+		return
+	}
+
+	batchErr := r.dispatchBatch(rows)
+	if batchErr == nil {
+		ids := make([]int64, 0, len(rows))
+		for _, row := range rows {
+			ids = append(ids, row.ID)
+		}
+		if err := r.markSuccessBatch(ids); err != nil {
+			log.Error().Err(err).Int("count", len(ids)).Msg("result reporter mark success batch failed")
+			for _, id := range ids {
+				if markErr := r.markSuccess(id); markErr != nil {
+					log.Error().Err(markErr).Int64("row_id", id).Msg("result reporter mark success fallback failed")
+				}
+			}
+		} else {
+			log.Info().Int("count", len(ids)).Msg("result reporter marked batch reported")
+		}
+		return
+	}
+
+	log.Warn().
+		Err(batchErr).
+		Int("pending_rows", len(rows)).
+		Msg("result reporter batch dispatch failed, falling back to single uploads")
 
 	// Collect successful and failed row IDs for batch updates
 	var successIDs []int64
@@ -273,6 +300,22 @@ func (r *resultReporter) dispatchRow(row pendingResultRow) error {
 	ctx, cancel := context.WithTimeout(r.ctx, r.feishuTimeout)
 	defer cancel()
 	return r.storage.Write(ctx, payload)
+}
+
+func (r *resultReporter) dispatchBatch(rows []pendingResultRow) error {
+	if r.storage == nil {
+		return pkgerrors.New("storage: feishu reporter nil")
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	records := make([]feishu.ResultRecordInput, 0, len(rows))
+	for _, row := range rows {
+		records = append(records, row.toResultRecord())
+	}
+	ctx, cancel := context.WithTimeout(r.ctx, r.feishuTimeout)
+	defer cancel()
+	return r.storage.WriteBatch(ctx, records)
 }
 
 func (r *resultReporter) markSuccess(id int64) error {
