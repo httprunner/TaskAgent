@@ -8,6 +8,7 @@ import (
 
 	"github.com/httprunner/TaskAgent/pkg/feishu"
 	"github.com/httprunner/TaskAgent/pkg/piracy"
+	"github.com/httprunner/TaskAgent/pkg/storage"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
@@ -34,6 +35,15 @@ func newWebhookCmd() *cobra.Command {
 				return fmt.Errorf("--webhook-url or SUMMARY_WEBHOOK_URL must be provided")
 			}
 			app := firstNonEmpty(flagApp, os.Getenv("BUNDLE_ID"))
+
+			// Initialize storage manager to enable background Feishu reporting
+			// if configured via environment variables (RESULT_STORAGE_ENABLE_FEISHU=1).
+			storeManager, err := storage.NewManager(storage.Config{})
+			if err != nil {
+				log.Warn().Err(err).Msg("failed to init storage manager; feishu reporting disabled")
+			} else {
+				defer storeManager.Close()
+			}
 
 			cfg := piracy.WebhookWorkerConfig{
 				TaskBitableURL:    strings.TrimSpace(target),
