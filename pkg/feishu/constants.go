@@ -1,5 +1,12 @@
 package feishu
 
+import (
+	"os"
+	"strings"
+
+	envload "github.com/httprunner/TaskAgent/internal"
+)
+
 // Shared constants for Feishu bitable integrations. Keep these in TaskAgent so
 // downstream agents can reference a single source of truth when wiring Feishu task workflows.
 const (
@@ -33,65 +40,167 @@ const (
 
 // DefaultDramaFields matches the default schema used by the built-in drama
 // catalog template.
-var DefaultDramaFields = DramaFields{
-	DramaID:                  "短剧 ID",
-	DramaName:                "短剧名称",
-	TotalDuration:            "全剧时长（秒）",
-	EpisodeCount:             "全剧集数",
-	Priority:                 "优先级",
-	RightsProtectionScenario: "维权场景",
-}
+var (
+	baseDramaFields = DramaFields{
+		DramaID:                  "短剧 ID",
+		DramaName:                "短剧名称",
+		TotalDuration:            "全剧时长（秒）",
+		EpisodeCount:             "全剧集数",
+		Priority:                 "优先级",
+		RightsProtectionScenario: "维权场景",
+	}
+	DefaultDramaFields = baseDramaFields
+)
 
 // DefaultTaskFields matches the schema provided in the requirements.
-var DefaultTaskFields = TaskFields{
-	TaskID:           "TaskID",           // 任务 ID
-	App:              "App",              // 平台名称
-	Scene:            "Scene",            // 场景名称
-	Params:           "Params",           // 查询参数
-	UserID:           "UserID",           // 用户 ID
-	UserName:         "UserName",         // 用户名称
-	Datetime:         "Datetime",         // 任务执行时间配置
-	Status:           "Status",           // 任务状态
-	Webhook:          "Webhook",          // Webhook 同步状态
-	GroupID:          "GroupID",          // 任务分组ID，用于关联同一盗版线索的多场景任务
-	DeviceSerial:     "DeviceSerial",     // 目标执行设备
-	DispatchedDevice: "DispatchedDevice", // 实际派发设备
-	DispatchedAt:     "DispatchedAt",     // 任务派发时间
-	StartAt:          "StartAt",          // 任务开始时间
-	EndAt:            "EndAt",            // 任务结束时间
-	ElapsedSeconds:   "ElapsedSeconds",   // 任务耗时（秒）
-	Extra:            "Extra",            // 额外信息
-}
+var (
+	baseTaskFields = TaskFields{
+		TaskID:           "TaskID",           // 任务 ID
+		App:              "App",              // 平台名称
+		Scene:            "Scene",            // 场景名称
+		Params:           "Params",           // 查询参数
+		UserID:           "UserID",           // 用户 ID
+		UserName:         "UserName",         // 用户名称
+		Datetime:         "Datetime",         // 任务执行时间配置
+		Status:           "Status",           // 任务状态
+		Webhook:          "Webhook",          // Webhook 同步状态
+		GroupID:          "GroupID",          // 任务分组ID，用于关联同一盗版线索的多场景任务
+		DeviceSerial:     "DeviceSerial",     // 目标执行设备
+		DispatchedDevice: "DispatchedDevice", // 实际派发设备
+		DispatchedAt:     "DispatchedAt",     // 任务派发时间
+		StartAt:          "StartAt",          // 任务开始时间
+		EndAt:            "EndAt",            // 任务结束时间
+		ElapsedSeconds:   "ElapsedSeconds",   // 任务耗时（秒）
+		Extra:            "Extra",            // 额外信息
+	}
+	DefaultTaskFields = baseTaskFields
+)
 
 // DefaultResultFields matches the schema required by the capture result table.
-var DefaultResultFields = ResultFields{
-	Datetime:       "Datetime",       // 抓取时间
-	App:            "App",            // 平台名称
-	Scene:          "Scene",          // 场景名称
-	Params:         "Params",         // 查询参数
-	ItemID:         "ItemID",         // 内容 ID
-	ItemCaption:    "ItemCaption",    // 内容标题
-	ItemCDNURL:     "ItemCDNURL",     // 内容CDN链接
-	ItemURL:        "ItemURL",        // 内容分享链接
-	ItemDuration:   "ItemDuration",   // 内容时长（秒），仅限视频
-	UserName:       "UserName",       // 用户名称
-	UserID:         "UserID",         // 用户 ID
-	UserAuthEntity: "UserAuthEntity", // 用户认证实体
-	Tags:           "Tags",           // 内容标签
-	LikeCount:      "LikeCount",      // 点赞数
-	ViewCount:      "ViewCount",      // 播放/观看数
-	CommentCount:   "CommentCount",   // 评论数
-	CollectCount:   "CollectCount",   // 收藏数
-	ForwardCount:   "ForwardCount",   // 转发数
-	ShareCount:     "ShareCount",     // 分享数
-	AnchorPoint:    "AnchorPoint",    // 锚点信息
-	PayMode:        "PayMode",        // 付费模式
-	Collection:     "Collection",     // 所属合集
-	Episode:        "Episode",        // 剧集信息（总集数/免费数/付费数）
-	PublishTime:    "PublishTime",    // 发布时间
-	TaskID:         "TaskID",         // 任务 ID（关联 TaskFields）
-	DeviceSerial:   "DeviceSerial",   // 设备序列号
-	Extra:          "Extra",          // 额外信息
+var (
+	baseResultFields = ResultFields{
+		Datetime:       "Datetime",       // 抓取时间
+		App:            "App",            // 平台名称
+		Scene:          "Scene",          // 场景名称
+		Params:         "Params",         // 查询参数
+		ItemID:         "ItemID",         // 内容 ID
+		ItemCaption:    "ItemCaption",    // 内容标题
+		ItemCDNURL:     "ItemCDNURL",     // 内容CDN链接
+		ItemURL:        "ItemURL",        // 内容分享链接
+		ItemDuration:   "ItemDuration",   // 内容时长（秒），仅限视频
+		UserName:       "UserName",       // 用户名称
+		UserID:         "UserID",         // 用户 ID
+		UserAuthEntity: "UserAuthEntity", // 用户认证实体
+		Tags:           "Tags",           // 内容标签
+		LikeCount:      "LikeCount",      // 点赞数
+		ViewCount:      "ViewCount",      // 播放/观看数
+		CommentCount:   "CommentCount",   // 评论数
+		CollectCount:   "CollectCount",   // 收藏数
+		ForwardCount:   "ForwardCount",   // 转发数
+		ShareCount:     "ShareCount",     // 分享数
+		AnchorPoint:    "AnchorPoint",    // 锚点信息
+		PayMode:        "PayMode",        // 付费模式
+		Collection:     "Collection",     // 所属合集
+		Episode:        "Episode",        // 剧集信息（总集数/免费数/付费数）
+		PublishTime:    "PublishTime",    // 发布时间
+		TaskID:         "TaskID",         // 任务 ID（关联 TaskFields）
+		DeviceSerial:   "DeviceSerial",   // 设备序列号
+		Extra:          "Extra",          // 额外信息
+	}
+	DefaultResultFields = baseResultFields
+)
+
+func init() {
+	_ = envload.Ensure()
+	RefreshFieldMappings()
+}
+
+// RefreshFieldMappings re-applies environment overrides to all exported field maps.
+// Call this after loading .env files or mutating related environment variables at runtime.
+func RefreshFieldMappings() {
+	DefaultTaskFields = baseTaskFields
+	DefaultResultFields = baseResultFields
+	DefaultDramaFields = baseDramaFields
+	applyTaskFieldEnvOverrides(&DefaultTaskFields)
+	applyResultFieldEnvOverrides(&DefaultResultFields)
+	applyDramaFieldEnvOverrides(&DefaultDramaFields)
+}
+
+func applyTaskFieldEnvOverrides(fields *TaskFields) {
+	if fields == nil {
+		return
+	}
+	overrideFieldFromEnv("TASK_FIELD_TASKID", &fields.TaskID)
+	overrideFieldFromEnv("TASK_FIELD_APP", &fields.App)
+	overrideFieldFromEnv("TASK_FIELD_SCENE", &fields.Scene)
+	overrideFieldFromEnv("TASK_FIELD_PARAMS", &fields.Params)
+	overrideFieldFromEnv("TASK_FIELD_USERID", &fields.UserID)
+	overrideFieldFromEnv("TASK_FIELD_USERNAME", &fields.UserName)
+	overrideFieldFromEnv("TASK_FIELD_DATETIME", &fields.Datetime)
+	overrideFieldFromEnv("TASK_FIELD_STATUS", &fields.Status)
+	overrideFieldFromEnv("TASK_FIELD_WEBHOOK", &fields.Webhook)
+	overrideFieldFromEnv("TASK_FIELD_EXTRA", &fields.Extra)
+	overrideFieldFromEnv("TASK_FIELD_GROUPID", &fields.GroupID)
+	overrideFieldFromEnv("TASK_FIELD_DEVICE_SERIAL", &fields.DeviceSerial)
+	overrideFieldFromEnv("TASK_FIELD_DISPATCHED_DEVICE", &fields.DispatchedDevice)
+	overrideFieldFromEnv("TASK_FIELD_DISPATCHED_AT", &fields.DispatchedAt)
+	overrideFieldFromEnv("TASK_FIELD_START_AT", &fields.StartAt)
+	overrideFieldFromEnv("TASK_FIELD_END_AT", &fields.EndAt)
+	overrideFieldFromEnv("TASK_FIELD_ELAPSED_SECONDS", &fields.ElapsedSeconds)
+}
+
+func applyResultFieldEnvOverrides(fields *ResultFields) {
+	if fields == nil {
+		return
+	}
+	overrideFieldFromEnv("RESULT_FIELD_DATETIME", &fields.Datetime)
+	overrideFieldFromEnv("RESULT_FIELD_DEVICE_SERIAL", &fields.DeviceSerial)
+	overrideFieldFromEnv("RESULT_FIELD_APP", &fields.App)
+	overrideFieldFromEnv("RESULT_FIELD_SCENE", &fields.Scene)
+	overrideFieldFromEnv("RESULT_FIELD_PARAMS", &fields.Params)
+	overrideFieldFromEnv("RESULT_FIELD_ITEMID", &fields.ItemID)
+	overrideFieldFromEnv("RESULT_FIELD_ITEMCAPTION", &fields.ItemCaption)
+	overrideFieldFromEnv("RESULT_FIELD_ITEMCDNURL", &fields.ItemCDNURL)
+	overrideFieldFromEnv("RESULT_FIELD_ITEMURL", &fields.ItemURL)
+	overrideFieldFromEnv("RESULT_FIELD_DURATION", &fields.ItemDuration)
+	overrideFieldFromEnv("RESULT_FIELD_USERNAME", &fields.UserName)
+	overrideFieldFromEnv("RESULT_FIELD_USERID", &fields.UserID)
+	overrideFieldFromEnv("RESULT_FIELD_USERAUTHENTITY", &fields.UserAuthEntity)
+	overrideFieldFromEnv("RESULT_FIELD_TAGS", &fields.Tags)
+	overrideFieldFromEnv("RESULT_FIELD_TASKID", &fields.TaskID)
+	overrideFieldFromEnv("RESULT_FIELD_EXTRA", &fields.Extra)
+	overrideFieldFromEnv("RESULT_FIELD_LIKECOUNT", &fields.LikeCount)
+	overrideFieldFromEnv("RESULT_FIELD_VIEWCOUNT", &fields.ViewCount)
+	overrideFieldFromEnv("RESULT_FIELD_ANCHORPOINT", &fields.AnchorPoint)
+	overrideFieldFromEnv("RESULT_FIELD_COMMENTCOUNT", &fields.CommentCount)
+	overrideFieldFromEnv("RESULT_FIELD_COLLECTCOUNT", &fields.CollectCount)
+	overrideFieldFromEnv("RESULT_FIELD_FORWARDCOUNT", &fields.ForwardCount)
+	overrideFieldFromEnv("RESULT_FIELD_SHARECOUNT", &fields.ShareCount)
+	overrideFieldFromEnv("RESULT_FIELD_PAYMODE", &fields.PayMode)
+	overrideFieldFromEnv("RESULT_FIELD_COLLECTION", &fields.Collection)
+	overrideFieldFromEnv("RESULT_FIELD_EPISODE", &fields.Episode)
+	overrideFieldFromEnv("RESULT_FIELD_PUBLISHTIME", &fields.PublishTime)
+}
+
+func applyDramaFieldEnvOverrides(fields *DramaFields) {
+	if fields == nil {
+		return
+	}
+	overrideFieldFromEnv("DRAMA_FIELD_ID", &fields.DramaID)
+	overrideFieldFromEnv("DRAMA_FIELD_NAME", &fields.DramaName)
+	overrideFieldFromEnv("DRAMA_FIELD_DURATION", &fields.TotalDuration)
+	overrideFieldFromEnv("DRAMA_FIELD_EPISODE_COUNT", &fields.EpisodeCount)
+	overrideFieldFromEnv("DRAMA_FIELD_PRIORITY", &fields.Priority)
+	overrideFieldFromEnv("DRAMA_FIELD_RIGHTS_SCENARIO", &fields.RightsProtectionScenario)
+}
+
+func overrideFieldFromEnv(env string, target *string) {
+	if target == nil {
+		return
+	}
+	if val, ok := os.LookupEnv(env); ok {
+		*target = strings.TrimSpace(val)
+	}
 }
 
 // DefaultDeviceFields provides sensible defaults matching the design doc.

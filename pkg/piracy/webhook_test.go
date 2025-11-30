@@ -14,9 +14,12 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/httprunner/TaskAgent/pkg/feishu"
 )
 
 func TestSendSummaryWebhookSQLite(t *testing.T) {
+	t.Cleanup(feishu.RefreshFieldMappings)
 	t.Setenv("DRAMA_SQLITE_TABLE", "drama_catalog")
 	t.Setenv("RESULT_SQLITE_TABLE", "capture_results")
 	t.Setenv("DRAMA_FIELD_NAME", "Params")
@@ -27,6 +30,8 @@ func TestSendSummaryWebhookSQLite(t *testing.T) {
 	t.Setenv("RESULT_FIELD_APP", "App")
 	t.Setenv("RESULT_FIELD_USERID", "UserID")
 	t.Setenv("RESULT_FIELD_USERNAME", "UserName")
+	t.Setenv("RESULT_FIELD_ITEMID", "ItemID")
+	feishu.RefreshFieldMappings()
 
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "records.sqlite")
@@ -184,10 +189,13 @@ func TestSendSummaryWebhookSQLite(t *testing.T) {
 }
 
 func TestSendSummaryWebhookNoRecords(t *testing.T) {
+	t.Cleanup(feishu.RefreshFieldMappings)
 	t.Setenv("DRAMA_SQLITE_TABLE", "drama_catalog")
 	t.Setenv("RESULT_SQLITE_TABLE", "capture_results")
 	t.Setenv("DRAMA_FIELD_NAME", "Params")
 	t.Setenv("DRAMA_FIELD_ID", "DramaID")
+	t.Setenv("RESULT_FIELD_ITEMID", "ItemID")
+	feishu.RefreshFieldMappings()
 
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "records.sqlite")

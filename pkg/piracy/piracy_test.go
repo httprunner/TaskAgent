@@ -282,6 +282,7 @@ func TestConfigApplyDefaultsWithEnv(t *testing.T) {
 		os.Setenv("RESULT_FIELD_USERID", origUserIDField)
 		os.Setenv("RESULT_FIELD_ITEMID", origItemIDField)
 		os.Setenv("THRESHOLD", origThreshold)
+		feishu.RefreshFieldMappings()
 	}()
 
 	// Test empty config with env vars set
@@ -289,6 +290,7 @@ func TestConfigApplyDefaultsWithEnv(t *testing.T) {
 	os.Setenv("RESULT_FIELD_USERID", "MyUserID")
 	os.Setenv("RESULT_FIELD_ITEMID", "VideoID")
 	os.Setenv("THRESHOLD", "0.75")
+	feishu.RefreshFieldMappings()
 
 	c := Config{}
 	c.ApplyDefaults()
@@ -311,6 +313,17 @@ func TestConfigApplyDefaultsWithEnv(t *testing.T) {
 }
 
 func TestConfigApplyDefaults(t *testing.T) {
+	t.Cleanup(feishu.RefreshFieldMappings)
+	t.Setenv("RESULT_FIELD_PARAMS", "Params")
+	t.Setenv("RESULT_FIELD_USERID", "UserID")
+	t.Setenv("RESULT_FIELD_DURATION", "ItemDuration")
+	t.Setenv("RESULT_FIELD_ITEMID", "ItemID")
+	t.Setenv("TASK_FIELD_PARAMS", "Params")
+	t.Setenv("DRAMA_FIELD_ID", "DramaID")
+	t.Setenv("DRAMA_FIELD_NAME", "短剧名称")
+	t.Setenv("DRAMA_FIELD_DURATION", "TotalDuration")
+	feishu.RefreshFieldMappings()
+
 	tests := []struct {
 		name   string
 		config Config

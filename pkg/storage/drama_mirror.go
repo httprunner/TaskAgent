@@ -313,33 +313,7 @@ func getFieldFloat(fields map[string]any, name string) (float64, bool) {
 }
 
 func resolveDramaFields() feishu.DramaFields {
-	fields := feishu.DefaultDramaFields
-	if v := dramaFieldEnv("DRAMA_FIELD_ID", fields.DramaID); v != "" {
-		fields.DramaID = v
-	}
-	if v := dramaFieldEnv("DRAMA_FIELD_NAME", fields.DramaName); v != "" {
-		fields.DramaName = v
-	}
-	if v := dramaFieldEnv("DRAMA_FIELD_DURATION", fields.TotalDuration); v != "" {
-		fields.TotalDuration = v
-	}
-	if v := dramaFieldEnv("DRAMA_FIELD_EPISODE_COUNT", fields.EpisodeCount); v != "" {
-		fields.EpisodeCount = v
-	}
-	if v := dramaFieldEnv("DRAMA_FIELD_PRIORITY", fields.Priority); v != "" {
-		fields.Priority = v
-	}
-	if v := dramaFieldEnv("DRAMA_FIELD_RIGHTS_SCENARIO", fields.RightsProtectionScenario); v != "" {
-		fields.RightsProtectionScenario = v
-	}
-	return fields
-}
-
-func dramaFieldEnv(key, fallback string) string {
-	if val := strings.TrimSpace(os.Getenv(key)); val != "" {
-		return val
-	}
-	return fallback
+	return feishu.DefaultDramaFields
 }
 
 // Exposed only for tests to reset cached state.
