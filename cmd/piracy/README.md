@@ -1,6 +1,6 @@
 # Piracy CLI（盗版检测辅助工具）
 
-基于 Feishu 多维表格 + 本地 sqlite 采集结果的检测与（可选）上报工具。当前仅保留 `piracy detect` 命令。
+基于 Feishu 多维表格 + 本地 sqlite 采集结果的检测与（可选）上报工具，提供 `detect`、`replay`、`webhook-worker` 三个子命令。
 
 ## Subcommands
 
@@ -53,6 +53,24 @@ go run ./cmd/piracy detect \
 - `--output-csv`：导出 CSV 路径
 - `--report`：写回任务状态表
 - `--threshold`：覆盖阈值（小数，0 表示使用环境 THRESHOLD 或默认 0.5）
+
+### replay（重放单个任务并生成子任务）
+- 场景：采集流程完成后，需要针对某个 TaskID 重试盗版检测/子任务创建（例如排查 DatetimeFieldConvFail）。
+- 数据来源：`capture_tasks` sqlite（默认 `~/.eval/records.sqlite`，可用 `--db-path` 覆盖），以及线上 `RESULT_BITABLE_URL` / `DRAMA_BITABLE_URL`。
+- 行为：读取指定 TaskID 的 Params/App/Datetime，调用 `DetectMatchesWithDetails` + `ReportMatchesWithChildTasks`，对结果完全等价于线上自动流程。
+
+示例：
+```bash
+go run ./cmd/piracy replay \
+  --task-id 1234 \
+  --app com.smile.gifmaker \
+  --db-path /Users/me/.eval/records.sqlite
+```
+
+常用参数：
+- `--task-id`（必填）：要重放的 TaskID。
+- `--db-path`：自定义 sqlite 路径；留空时自动解析 tracking DB（`storage.ResolveDatabasePath`）。
+- 全局 `--app`：覆盖任务行里的 App 值（当任务表缺失 App 或需要临时切换包名时使用）。
 
 ### webhook-worker（重试 webhook 汇总）
 - 功能：轮询任务状态表中挂起/失败的 webhook 汇总任务，重新发送到 SUMMARY_WEBHOOK_URL。
