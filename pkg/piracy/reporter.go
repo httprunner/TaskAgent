@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -402,14 +403,14 @@ func (pr *Reporter) fetchVideosFromFeishu(ctx context.Context, client *feishu.Cl
 	return videos, nil
 }
 
-// ReportMatchesWithChildTasks creates child tasks for each piracy match based on video details.
+// CreateGroupTasksForPiracyMatches creates group tasks for each piracy match based on video details.
 // For each MatchDetail, it creates:
 //   - 1 "个人页搜索" task
 //   - 1 "合集视频采集" task if any video has "合集" or "短剧" tag (uses first matching video's ItemID)
 //   - N "视频锚点采集" tasks for each video with appLink in AnchorPoint
 //
 // All tasks in the same group share the GroupID for webhook aggregation.
-func (pr *Reporter) ReportMatchesWithChildTasks(ctx context.Context, app string, parentTaskID int64, parentDatetime *time.Time, details []MatchDetail) error {
+func (pr *Reporter) CreateGroupTasksForPiracyMatches(ctx context.Context, app string, parentTaskID int64, parentDatetime *time.Time, parentDatetimeRaw string, details []MatchDetail) error {
 	if len(details) == 0 {
 		log.Info().Msg("No match details provided, nothing to report")
 		return nil
@@ -418,7 +419,7 @@ func (pr *Reporter) ReportMatchesWithChildTasks(ctx context.Context, app string,
 	log.Info().
 		Int("detail_count", len(details)).
 		Int64("parent_task_id", parentTaskID).
-		Msg("Creating child tasks for piracy matches")
+		Msg("Creating group tasks for piracy matches")
 
 	client, err := feishu.NewClientFromEnv()
 	if err != nil {
@@ -426,6 +427,7 @@ func (pr *Reporter) ReportMatchesWithChildTasks(ctx context.Context, app string,
 	}
 
 	var records []feishu.TaskRecordInput
+	inheritRaw := inheritDatetimeRaw(parentDatetimeRaw, parentDatetime)
 
 	for idx, detail := range details {
 		// GroupID format: {parentTaskID}_{index}, index starts from 1
@@ -433,30 +435,32 @@ func (pr *Reporter) ReportMatchesWithChildTasks(ctx context.Context, app string,
 
 		// 1. Create "个人页搜索" task
 		records = append(records, feishu.TaskRecordInput{
-			App:      strings.TrimSpace(app),
-			Scene:    "个人页搜索",
-			Params:   strings.TrimSpace(detail.Match.Params),
-			UserID:   strings.TrimSpace(detail.Match.UserID),
-			UserName: strings.TrimSpace(detail.Match.UserName),
-			Extra:    fmt.Sprintf("ratio=%.2f%%", detail.Match.Ratio*100),
-			GroupID:  groupID,
-			Datetime: parentDatetime,
-			Status:   feishu.StatusPending,
-			Webhook:  feishu.WebhookPending,
+			App:         strings.TrimSpace(app),
+			Scene:       "个人页搜索",
+			Params:      strings.TrimSpace(detail.Match.Params),
+			UserID:      strings.TrimSpace(detail.Match.UserID),
+			UserName:    strings.TrimSpace(detail.Match.UserName),
+			Extra:       fmt.Sprintf("ratio=%.2f%%", detail.Match.Ratio*100),
+			GroupID:     groupID,
+			Datetime:    parentDatetime,
+			DatetimeRaw: inheritRaw,
+			Status:      feishu.StatusPending,
+			Webhook:     feishu.WebhookPending,
 		})
 
 		// 2. Create "合集视频采集" task if any video has collection tag
 		if collectionItemID := FindFirstCollectionVideo(detail.Videos); collectionItemID != "" {
 			records = append(records, feishu.TaskRecordInput{
-				App:      strings.TrimSpace(app),
-				Scene:    "合集视频采集",
-				Params:   collectionItemID,
-				UserID:   strings.TrimSpace(detail.Match.UserID),
-				UserName: strings.TrimSpace(detail.Match.UserName),
-				GroupID:  groupID,
-				Datetime: parentDatetime,
-				Status:   feishu.StatusPending,
-				Webhook:  feishu.WebhookPending,
+				App:         strings.TrimSpace(app),
+				Scene:       "合集视频采集",
+				Params:      collectionItemID,
+				UserID:      strings.TrimSpace(detail.Match.UserID),
+				UserName:    strings.TrimSpace(detail.Match.UserName),
+				GroupID:     groupID,
+				Datetime:    parentDatetime,
+				DatetimeRaw: inheritRaw,
+				Status:      feishu.StatusPending,
+				Webhook:     feishu.WebhookPending,
 			})
 		}
 
@@ -474,15 +478,16 @@ func (pr *Reporter) ReportMatchesWithChildTasks(ctx context.Context, app string,
 			seenAppLinks[appLink] = struct{}{}
 
 			records = append(records, feishu.TaskRecordInput{
-				App:      strings.TrimSpace(app),
-				Scene:    "视频锚点采集",
-				Params:   appLink,
-				UserID:   strings.TrimSpace(detail.Match.UserID),
-				UserName: strings.TrimSpace(detail.Match.UserName),
-				GroupID:  groupID,
-				Datetime: parentDatetime,
-				Status:   feishu.StatusPending,
-				Webhook:  feishu.WebhookPending,
+				App:         strings.TrimSpace(app),
+				Scene:       "视频锚点采集",
+				Params:      appLink,
+				UserID:      strings.TrimSpace(detail.Match.UserID),
+				UserName:    strings.TrimSpace(detail.Match.UserName),
+				GroupID:     groupID,
+				Datetime:    parentDatetime,
+				DatetimeRaw: inheritRaw,
+				Status:      feishu.StatusPending,
+				Webhook:     feishu.WebhookPending,
 			})
 		}
 	}
@@ -508,4 +513,14 @@ func (pr *Reporter) ReportMatchesWithChildTasks(ctx context.Context, app string,
 		Int("group_count", len(details)).
 		Msg("Successfully wrote child task records to task table")
 	return nil
+}
+
+func inheritDatetimeRaw(parentRaw string, parent *time.Time) string {
+	if trimmed := strings.TrimSpace(parentRaw); trimmed != "" {
+		return trimmed
+	}
+	if parent == nil {
+		return ""
+	}
+	return strconv.FormatInt(parent.UTC().UnixMilli(), 10)
 }

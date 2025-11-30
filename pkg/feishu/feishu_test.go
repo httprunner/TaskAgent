@@ -515,6 +515,30 @@ func TestCreateTaskRecords(t *testing.T) {
 	}
 }
 
+func TestBuildTaskRecordPayloadsDatetimeMs(t *testing.T) {
+	records := []TaskRecordInput{
+		{TaskID: 1, DatetimeRaw: "1700000000000"},
+	}
+	rows, err := buildTaskRecordPayloads(records, DefaultTaskFields)
+	if err != nil {
+		t.Fatalf("buildTaskRecordPayloads returned error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("unexpected payload length %d", len(rows))
+	}
+	val, ok := rows[0][DefaultTaskFields.Datetime]
+	if !ok {
+		t.Fatalf("datetime field missing in payload")
+	}
+	num, ok := val.(int64)
+	if !ok {
+		t.Fatalf("expected datetime payload to be int64, got %T (%v)", val, val)
+	}
+	if num != 1700000000000 {
+		t.Fatalf("unexpected datetime value %d", num)
+	}
+}
+
 func TestCreateTaskRecordSingle(t *testing.T) {
 	const wikiResponse = `{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnSingle","obj_type":"bitable"}}}`
 	const createResponse = `{"code":0,"msg":"success","data":{"record":{"record_id":"recSingle"}}}`

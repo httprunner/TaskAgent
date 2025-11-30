@@ -339,18 +339,8 @@ func loadSummaryFieldConfig() summaryFieldConfig {
 	cfg.ApplyDefaults()
 
 	dramaFields := feishu.DefaultDramaFields
-	if v := pickFieldEnv("DRAMA_FIELD_ID", dramaFields.DramaID); v != "" {
-		dramaFields.DramaID = v
-	}
-	dramaFields.DramaName = pickFieldEnv("DRAMA_FIELD_NAME", dramaFields.DramaName)
 	if strings.TrimSpace(cfg.DramaNameField) != "" {
 		dramaFields.DramaName = cfg.DramaNameField
-	}
-	if v := pickFieldEnv("DRAMA_FIELD_PRIORITY", dramaFields.Priority); v != "" {
-		dramaFields.Priority = v
-	}
-	if v := pickFieldEnv("DRAMA_FIELD_RIGHTS_SCENARIO", dramaFields.RightsProtectionScenario); v != "" {
-		dramaFields.RightsProtectionScenario = v
 	}
 	if strings.TrimSpace(cfg.DramaDurationField) != "" {
 		dramaFields.TotalDuration = cfg.DramaDurationField
@@ -366,24 +356,11 @@ func loadSummaryFieldConfig() summaryFieldConfig {
 	if strings.TrimSpace(cfg.DurationField) != "" {
 		resultFields.ItemDuration = cfg.DurationField
 	}
-	if v := pickFieldEnv("RESULT_FIELD_APP", resultFields.App); v != "" {
-		resultFields.App = v
-	}
-	if v := pickFieldEnv("RESULT_FIELD_USERNAME", resultFields.UserName); v != "" {
-		resultFields.UserName = v
-	}
 
 	return summaryFieldConfig{
 		Drama:  dramaFields,
 		Result: resultFields,
 	}
-}
-
-func pickFieldEnv(key, fallback string) string {
-	if val := strings.TrimSpace(os.Getenv(key)); val != "" {
-		return val
-	}
-	return fallback
 }
 
 // summaryFieldConfig centralizes the column/field names needed by both data sources.

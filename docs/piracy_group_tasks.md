@@ -29,7 +29,7 @@
     │
     ▼
 ┌─────────────────────────────────┐
-│  ReportMatchesWithChildTasks    │
+│  CreateGroupTasksForPiracyMatches    │
 │  - 根据视频详情创建子任务         │
 │  - 分配 GroupID                  │
 └─────────────────────────────────┘
@@ -169,7 +169,7 @@ WebhookWorker.processOnce()
 | 组件 | 文件 | 函数/方法 |
 |------|------|----------|
 | 检测+获取视频详情 | pkg/piracy/reporter.go | `DetectMatchesWithDetails` |
-| 创建子任务 | pkg/piracy/reporter.go | `ReportMatchesWithChildTasks` |
+| 创建子任务 | pkg/piracy/reporter.go | `CreateGroupTasksForPiracyMatches` |
 | 工作流调度 | biz/fox/search/piracy_workflow.go | `handleGeneralSearch` |
 | Webhook 处理 | pkg/piracy/webhook_worker.go | `processOnce` |
 | 辅助函数 | pkg/piracy/helpers.go | `FindFirstCollectionVideo`, `ExtractAppLink` |

@@ -71,7 +71,7 @@ func ReplayTask(ctx context.Context, cfg ReplayConfig) error {
 		return fmt.Errorf("task %d missing app; pass --app or ensure App column is populated", row.TaskID)
 	}
 
-	if err := reporter.ReportMatchesWithChildTasks(ctx, appName, row.TaskID, row.Datetime, row.DatetimeRaw, details); err != nil {
+	if err := reporter.CreateGroupTasksForPiracyMatches(ctx, appName, row.TaskID, row.Datetime, row.DatetimeRaw, details); err != nil {
 		return fmt.Errorf("create child tasks failed: %w", err)
 	}
 

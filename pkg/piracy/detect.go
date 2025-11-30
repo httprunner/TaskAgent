@@ -31,63 +31,31 @@ type DramaRecord struct {
 }
 
 // ApplyDefaults populates missing config fields from environment variables or sensible defaults.
+
 func (c *Config) ApplyDefaults() {
-	// Read from environment or use Feishu defaults
 	if strings.TrimSpace(c.ParamsField) == "" {
-		if paramField := os.Getenv("RESULT_FIELD_PARAMS"); paramField != "" {
-			c.ParamsField = paramField
-		} else {
-			c.ParamsField = feishu.DefaultResultFields.Params
-		}
+		c.ParamsField = feishu.DefaultResultFields.Params
 	}
 	if strings.TrimSpace(c.UserIDField) == "" {
-		if userField := os.Getenv("RESULT_FIELD_USERID"); userField != "" {
-			c.UserIDField = userField
-		} else {
-			c.UserIDField = feishu.DefaultResultFields.UserID
-		}
+		c.UserIDField = feishu.DefaultResultFields.UserID
 	}
 	if strings.TrimSpace(c.DurationField) == "" {
-		if durationField := os.Getenv("RESULT_FIELD_DURATION"); durationField != "" {
-			c.DurationField = durationField
-		} else {
-			c.DurationField = feishu.DefaultResultFields.ItemDuration
-		}
+		c.DurationField = feishu.DefaultResultFields.ItemDuration
 	}
 	if strings.TrimSpace(c.ItemIDField) == "" {
-		if itemIDField := os.Getenv("RESULT_FIELD_ITEMID"); itemIDField != "" {
-			c.ItemIDField = itemIDField
-		} else {
-			c.ItemIDField = feishu.DefaultResultFields.ItemID
-		}
+		c.ItemIDField = feishu.DefaultResultFields.ItemID
 	}
 	if strings.TrimSpace(c.TaskParamsField) == "" {
-		if targetParamsField := os.Getenv("TASK_FIELD_PARAMS"); targetParamsField != "" {
-			c.TaskParamsField = targetParamsField
-		} else {
-			c.TaskParamsField = "Params"
-		}
+		c.TaskParamsField = feishu.DefaultTaskFields.Params
 	}
 	if strings.TrimSpace(c.DramaIDField) == "" {
-		if dramaIDField := os.Getenv("DRAMA_FIELD_ID"); dramaIDField != "" {
-			c.DramaIDField = dramaIDField
-		} else {
-			c.DramaIDField = "DramaID"
-		}
+		c.DramaIDField = feishu.DefaultDramaFields.DramaID
 	}
 	if strings.TrimSpace(c.DramaNameField) == "" {
-		if dramaNameField := os.Getenv("DRAMA_FIELD_NAME"); dramaNameField != "" {
-			c.DramaNameField = dramaNameField
-		} else {
-			c.DramaNameField = feishu.DefaultDramaFields.DramaName
-		}
+		c.DramaNameField = feishu.DefaultDramaFields.DramaName
 	}
 	if strings.TrimSpace(c.DramaDurationField) == "" {
-		if dramaDurationField := os.Getenv("DRAMA_FIELD_DURATION"); dramaDurationField != "" {
-			c.DramaDurationField = dramaDurationField
-		} else {
-			c.DramaDurationField = feishu.DefaultDramaFields.TotalDuration
-		}
+		c.DramaDurationField = feishu.DefaultDramaFields.TotalDuration
 	}
 	if c.Threshold <= 0 {
 		if threshold := os.Getenv("THRESHOLD"); threshold != "" {

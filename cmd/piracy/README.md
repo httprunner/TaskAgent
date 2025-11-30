@@ -57,7 +57,7 @@ go run ./cmd/piracy detect \
 ### replay（重放单个任务并生成子任务）
 - 场景：采集流程完成后，需要针对某个 TaskID 重试盗版检测/子任务创建（例如排查 DatetimeFieldConvFail）。
 - 数据来源：`capture_tasks` sqlite（默认 `~/.eval/records.sqlite`，可用 `--db-path` 覆盖），以及线上 `RESULT_BITABLE_URL` / `DRAMA_BITABLE_URL`。
-- 行为：读取指定 TaskID 的 Params/App/Datetime，调用 `DetectMatchesWithDetails` + `ReportMatchesWithChildTasks`，对结果完全等价于线上自动流程。
+- 行为：读取指定 TaskID 的 Params/App/Datetime，调用 `DetectMatchesWithDetails` + `CreateGroupTasksForPiracyMatches`，对结果完全等价于线上自动流程。
 
 示例：
 ```bash

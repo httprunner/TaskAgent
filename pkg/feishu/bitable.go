@@ -973,16 +973,16 @@ func buildTaskRecordPayloads(records []TaskRecordInput, fields TaskFields) ([]ma
 		addOptionalField(row, fields.App, rec.App)
 		addOptionalField(row, fields.Scene, rec.Scene)
 		if start := formatRecordDatetimeString(rec.StartAt, rec.StartAtRaw); start != "" && strings.TrimSpace(fields.StartAt) != "" {
-			row[fields.StartAt] = start
+			row[fields.StartAt] = normalizeDatetimePayload(start)
 		}
 		if end := formatRecordDatetimeString(rec.EndAt, rec.EndAtRaw); end != "" && strings.TrimSpace(fields.EndAt) != "" {
-			row[fields.EndAt] = end
+			row[fields.EndAt] = normalizeDatetimePayload(end)
 		}
 		if dt := formatRecordDatetimeString(rec.Datetime, rec.DatetimeRaw); dt != "" && strings.TrimSpace(fields.Datetime) != "" {
-			row[fields.Datetime] = dt
+			row[fields.Datetime] = normalizeDatetimePayload(dt)
 		}
 		if dispatched := formatRecordDatetimeString(rec.DispatchedAt, rec.DispatchedAtRaw); dispatched != "" && strings.TrimSpace(fields.DispatchedAt) != "" {
-			row[fields.DispatchedAt] = dispatched
+			row[fields.DispatchedAt] = normalizeDatetimePayload(dispatched)
 		}
 		if strings.TrimSpace(fields.Status) != "" && rec.Status != "" {
 			row[fields.Status] = rec.Status
@@ -1093,6 +1093,17 @@ func formatRecordDatetimeString(dt *time.Time, raw string) string {
 		return dt.Format(time.RFC3339)
 	}
 	return ""
+}
+
+func normalizeDatetimePayload(value string) any {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return trimmed
+	}
+	if num, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+		return num
+	}
+	return trimmed
 }
 
 func formatResultRecordTimestamp(dt *time.Time, raw string) (int64, bool, error) {
