@@ -402,19 +402,12 @@ type targetTableClient interface {
 }
 
 const (
-	maxFeishuTasksPerApp = 5
-	sceneGeneralSearch   = "综合页搜索"
-	sceneProfileSearch   = "个人页搜索"
-	sceneCollection      = "合集视频采集"
-	sceneAnchorCapture   = "视频锚点采集"
-)
-
-// Exported scene identifiers for downstream agents.
-const (
-	SceneGeneralSearch = sceneGeneralSearch
-	SceneProfileSearch = sceneProfileSearch
-	SceneCollection    = sceneCollection
-	SceneAnchorCapture = sceneAnchorCapture
+	maxFeishuTasksPerApp    = 5
+	SceneGeneralSearch      = "综合页搜索"
+	SceneProfileSearch      = "个人页搜索"
+	SceneCollection         = "合集视频采集"
+	SceneAnchorCapture      = "视频锚点采集"
+	SceneVideoScreenCapture = "视频录屏采集"
 )
 
 func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient, bitableURL, app string, limit int) ([]*FeishuTask, error) {
@@ -436,14 +429,16 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient,
 		scene  string
 		status string
 	}{
-		{scene: sceneGeneralSearch, status: feishu.StatusPending},
-		{scene: sceneProfileSearch, status: feishu.StatusPending},
-		{scene: sceneCollection, status: feishu.StatusPending},
-		{scene: sceneAnchorCapture, status: feishu.StatusPending},
-		{scene: sceneGeneralSearch, status: feishu.StatusFailed},
-		{scene: sceneProfileSearch, status: feishu.StatusFailed},
-		{scene: sceneCollection, status: feishu.StatusFailed},
-		{scene: sceneAnchorCapture, status: feishu.StatusFailed},
+		{scene: SceneVideoScreenCapture, status: feishu.StatusPending},
+		{scene: SceneVideoScreenCapture, status: feishu.StatusFailed},
+		{scene: SceneGeneralSearch, status: feishu.StatusPending},
+		{scene: SceneProfileSearch, status: feishu.StatusPending},
+		{scene: SceneCollection, status: feishu.StatusPending},
+		{scene: SceneAnchorCapture, status: feishu.StatusPending},
+		{scene: SceneGeneralSearch, status: feishu.StatusFailed},
+		{scene: SceneProfileSearch, status: feishu.StatusFailed},
+		{scene: SceneCollection, status: feishu.StatusFailed},
+		{scene: SceneAnchorCapture, status: feishu.StatusFailed},
 	}
 
 	appendAndMaybeReturn := func(batch []*FeishuTask) {

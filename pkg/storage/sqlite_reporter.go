@@ -105,7 +105,7 @@ func (r *resultReporter) flushOnce() {
 		log.Error().Err(err).Msg("result reporter fetch pending rows failed")
 		return
 	}
-	log.Info().
+	log.Debug().
 		Int("pending_rows", len(rows)).
 		Dur("timeout", timeout).
 		Msg("result reporter flush fetched pending sqlite rows")
