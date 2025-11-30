@@ -57,6 +57,14 @@ func newResultReporter(storage *feishu.ResultStorage) (*resultReporter, error) {
 	if err != nil {
 		return nil, pkgerrors.Wrap(err, "storage: open sqlite reporter db failed")
 	}
+	if err := configureSQLite(db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := prepareSchema(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	reporter := &resultReporter{
 		storage:       storage,
 		db:            db,
