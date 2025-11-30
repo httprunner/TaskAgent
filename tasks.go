@@ -44,7 +44,7 @@ type FeishuTaskClient struct {
 }
 
 func (c *FeishuTaskClient) FetchAvailableTasks(ctx context.Context, app string, limit int) ([]*Task, error) {
-	feishuTasks, err := fetchTodayPendingFeishuTasks(ctx, c.client, c.bitableURL, app, limit, c.now())
+	feishuTasks, err := fetchTodayPendingFeishuTasks(ctx, c.client, c.bitableURL, app, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +62,7 @@ func (c *FeishuTaskClient) FetchPendingTasks(ctx context.Context, app string, li
 	if c == nil {
 		return nil, errors.New("feishu: task client is nil")
 	}
-	tasks, err := fetchTodayPendingFeishuTasks(ctx, c.client, c.bitableURL, app, limit, c.now())
+	tasks, err := fetchTodayPendingFeishuTasks(ctx, c.client, c.bitableURL, app, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -402,13 +402,10 @@ type targetTableClient interface {
 }
 
 const (
-	feishuTaskFilterLayout  = "2006-01-02 15:04:05"
-	maxFeishuTasksPerApp    = 5
-	fallbackFetchMultiplier = 5
-	maxFeishuFallbackFetch  = 100
+	maxFeishuTasksPerApp = 5
 )
 
-func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient, bitableURL, app string, limit int, now time.Time) ([]*FeishuTask, error) {
+func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient, bitableURL, app string, limit int) ([]*FeishuTask, error) {
 	if client == nil {
 		return nil, errors.New("feishu: client is nil")
 	}
@@ -419,27 +416,22 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient,
 		limit = maxFeishuTasksPerApp
 	}
 
-	loc := now.Location()
-	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
-	dayEnd := dayStart.Add(24 * time.Hour)
 	fields := feishu.DefaultTaskFields
-
 	result := make([]*FeishuTask, 0, limit)
 	seen := make(map[int64]struct{}, limit)
 
 	priorityCombos := []struct {
-		scene           string
-		status          string
-		includeDatetime bool
+		scene  string
+		status string
 	}{
-		{scene: "个人页搜索", status: feishu.StatusPending, includeDatetime: true},
-		{scene: "个人页搜索", status: feishu.StatusPending, includeDatetime: false},
-		{scene: "个人页搜索", status: feishu.StatusFailed, includeDatetime: true},
-		{scene: "个人页搜索", status: feishu.StatusFailed, includeDatetime: false},
-		{scene: "综合页搜索", status: feishu.StatusPending, includeDatetime: true},
-		{scene: "综合页搜索", status: feishu.StatusPending, includeDatetime: false},
-		{scene: "综合页搜索", status: feishu.StatusFailed, includeDatetime: true},
-		{scene: "综合页搜索", status: feishu.StatusPending, includeDatetime: false},
+		{scene: "综合页搜索", status: feishu.StatusPending},
+		{scene: "个人页搜索", status: feishu.StatusPending},
+		{scene: "合集页采集", status: feishu.StatusPending},
+		{scene: "视频锚点采集", status: feishu.StatusPending},
+		{scene: "综合页搜索", status: feishu.StatusFailed},
+		{scene: "个人页搜索", status: feishu.StatusFailed},
+		{scene: "合集页采集", status: feishu.StatusFailed},
+		{scene: "视频锚点采集", status: feishu.StatusFailed},
 	}
 
 	appendAndMaybeReturn := func(batch []*FeishuTask) {
@@ -457,9 +449,10 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient,
 				break
 			}
 		}
-		batch, err := fetchFeishuTasksWithStrategy(ctx, client, bitableURL, fields, app, dayStart, dayEnd, now, []string{combo.status}, remaining, combo.includeDatetime, combo.scene)
+		batch, err := fetchFeishuTasksWithStrategy(ctx, client, bitableURL, fields, app, []string{combo.status}, remaining, combo.scene)
 		if err != nil {
-			return nil, err
+			log.Warn().Err(err).Str("scene", combo.scene).Msg("fetch feishu tasks failed for scene; skipping")
+			continue
 		}
 		appendAndMaybeReturn(batch)
 		if limit > 0 && len(result) >= limit {
@@ -484,7 +477,7 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient,
 	return result, nil
 }
 
-func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient, bitableURL string, fields feishu.TaskFields, app string, dayStart, dayEnd, now time.Time, statuses []string, limit int, includeDatetime bool, scene string) ([]*FeishuTask, error) {
+func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient, bitableURL string, fields feishu.TaskFields, app string, statuses []string, limit int, scene string) ([]*FeishuTask, error) {
 	if len(statuses) == 0 {
 		return nil, nil
 	}
@@ -492,24 +485,10 @@ func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient,
 	if fetchLimit <= 0 {
 		fetchLimit = maxFeishuTasksPerApp
 	}
-	if !includeDatetime {
-		fetchLimit = fetchLimit * fallbackFetchMultiplier
-		if fetchLimit < limit {
-			fetchLimit = limit
-		}
-		if fetchLimit > maxFeishuFallbackFetch {
-			fetchLimit = maxFeishuFallbackFetch
-		}
-	}
-	purpose := "with_datetime"
-	if !includeDatetime {
-		purpose = "without_datetime"
-	}
-	filter := buildFeishuFilterInfo(fields, app, dayStart, dayEnd, statuses, includeDatetime, scene)
+
+	filter := buildFeishuFilterInfo(fields, app, statuses, scene)
 	log.Debug().
 		Str("app", app).
-		Str("purpose", purpose).
-		Bool("include_datetime", includeDatetime).
 		Strs("statuses", statuses).
 		Str("scene", strings.TrimSpace(scene)).
 		Int("fetch_limit", fetchLimit).
@@ -519,12 +498,9 @@ func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient,
 	if err != nil {
 		return nil, err
 	}
-	subset = filterFeishuTasksByDate(subset, dayStart, dayEnd, now)
 	if len(subset) > 0 {
 		log.Info().
 			Str("app", app).
-			Str("purpose", purpose).
-			Bool("include_datetime", includeDatetime).
 			Strs("statuses", statuses).
 			Int("batch_limit", limit).
 			Int("fetch_limit", fetchLimit).
@@ -593,7 +569,7 @@ func fetchFeishuTasksWithFilter(ctx context.Context, client targetTableClient, b
 	return tasks, nil
 }
 
-func buildFeishuFilterInfo(fields feishu.TaskFields, app string, start, end time.Time, statuses []string, includeDatetime bool, scene string) *feishu.FilterInfo {
+func buildFeishuFilterInfo(fields feishu.TaskFields, app string, statuses []string, scene string) *feishu.FilterInfo {
 	filter := feishu.NewFilterInfo("and")
 	if field := strings.TrimSpace(fields.App); field != "" && strings.TrimSpace(app) != "" {
 		filter.Conditions = append(filter.Conditions, feishu.NewCondition(field, "is", strings.TrimSpace(app)))
@@ -601,10 +577,8 @@ func buildFeishuFilterInfo(fields feishu.TaskFields, app string, start, end time
 	if field := strings.TrimSpace(fields.Scene); field != "" && strings.TrimSpace(scene) != "" {
 		filter.Conditions = append(filter.Conditions, feishu.NewCondition(field, "is", strings.TrimSpace(scene)))
 	}
-	if includeDatetime {
-		if field := strings.TrimSpace(fields.Datetime); field != "" {
-			filter.Conditions = append(filter.Conditions, feishu.NewCondition(field, "is", "Today"))
-		}
+	if field := strings.TrimSpace(fields.Datetime); field != "" {
+		filter.Conditions = append(filter.Conditions, feishu.NewCondition(field, "is", "Today"))
 	}
 	if statusChild := buildFeishuStatusGroup(fields, statuses); statusChild != nil {
 		filter.Children = append(filter.Children, statusChild)
@@ -654,31 +628,6 @@ func formatFilterForLog(filter *feishu.FilterInfo) string {
 		return ""
 	}
 	return string(raw)
-}
-
-func filterFeishuTasksByDate(tasks []*FeishuTask, start, end, now time.Time) []*FeishuTask {
-	if len(tasks) == 0 || start.IsZero() || end.IsZero() || now.IsZero() {
-		return nil
-	}
-	inWindow := make([]*FeishuTask, 0, len(tasks))
-	for _, task := range tasks {
-		if task == nil {
-			continue
-		}
-		if task.Datetime == nil {
-			inWindow = append(inWindow, task)
-			continue
-		}
-		dt := task.Datetime
-		if dt.Before(start) || !dt.Before(end) {
-			continue
-		}
-		if dt.After(now) {
-			continue
-		}
-		inWindow = append(inWindow, task)
-	}
-	return inWindow
 }
 
 func summarizeFeishuTasks(tasks []*FeishuTask) []map[string]any {

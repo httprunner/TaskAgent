@@ -9,47 +9,9 @@ import (
 	feishusvc "github.com/httprunner/TaskAgent/pkg/feishu"
 )
 
-func TestFilterFeishuTasksByDate(t *testing.T) {
-	loc := time.FixedZone("UTC+8", 8*3600)
-	dayStart := time.Date(2025, 11, 9, 0, 0, 0, 0, loc)
-	dayEnd := dayStart.Add(24 * time.Hour)
-	now := time.Date(2025, 11, 9, 12, 0, 0, 0, loc)
-
-	makeTime := func(h int) *time.Time {
-		v := time.Date(2025, 11, 9, h, 0, 0, 0, loc)
-		return &v
-	}
-
-	tasks := []*FeishuTask{
-		{TaskID: 1, Datetime: makeTime(9)},  // valid
-		{TaskID: 2, Datetime: makeTime(12)}, // valid edge (equal now)
-		{TaskID: 3, Datetime: makeTime(13)}, // future today
-		{TaskID: 4, Datetime: timePtr(time.Date(2025, 11, 8, 23, 0, 0, 0, loc))},
-		{TaskID: 5}, // missing datetime
-	}
-
-	filtered := filterFeishuTasksByDate(tasks, dayStart, dayEnd, now)
-	expected := []int64{1, 2, 5}
-	if len(filtered) != len(expected) {
-		bt := make([]int64, 0, len(filtered))
-		for _, task := range filtered {
-			bt = append(bt, task.TaskID)
-		}
-		t.Fatalf("expected %d tasks, got %d: %#v", len(expected), len(filtered), bt)
-	}
-	for i, id := range expected {
-		if filtered[i].TaskID != id {
-			t.Fatalf("unexpected task order: got %d at position %d, want %d", filtered[i].TaskID, i, id)
-		}
-	}
-}
-
 func TestFetchFeishuTasksWithStrategyFiltersInvalidTasks(t *testing.T) {
 	ctx := context.Background()
 	loc := time.FixedZone("UTC+8", 8*3600)
-	dayStart := time.Date(2025, 11, 9, 0, 0, 0, 0, loc)
-	dayEnd := dayStart.Add(24 * time.Hour)
-	now := time.Date(2025, 11, 9, 10, 0, 0, 0, loc)
 
 	valid := timePtr(time.Date(2025, 11, 9, 9, 30, 0, 0, loc))
 	future := timePtr(time.Date(2025, 11, 9, 21, 0, 0, 0, loc))
@@ -68,11 +30,11 @@ func TestFetchFeishuTasksWithStrategyFiltersInvalidTasks(t *testing.T) {
 		},
 	}
 
-	tasks, err := fetchFeishuTasksWithStrategy(ctx, client, "https://example.com/bitable/abc", feishusvc.DefaultTaskFields, "com.app", dayStart, dayEnd, now, []string{""}, 5, true, "")
+	tasks, err := fetchFeishuTasksWithStrategy(ctx, client, "https://example.com/bitable/abc", feishusvc.DefaultTaskFields, "com.app", []string{""}, 5, "")
 	if err != nil {
 		t.Fatalf("fetchFeishuTasksWithStrategy returned error: %v", err)
 	}
-	expectedIDs := []int64{1, 4}
+	expectedIDs := []int64{1, 2, 3, 4}
 	if len(tasks) != len(expectedIDs) {
 		t.Fatalf("expected %d tasks, got %d", len(expectedIDs), len(tasks))
 	}
@@ -80,36 +42,6 @@ func TestFetchFeishuTasksWithStrategyFiltersInvalidTasks(t *testing.T) {
 		if tasks[i].TaskID != id {
 			t.Fatalf("unexpected task order: got %d at position %d, want %d", tasks[i].TaskID, i, id)
 		}
-	}
-}
-
-func TestFetchFeishuTasksWithStrategyFallbackFiltersFutureTasks(t *testing.T) {
-	ctx := context.Background()
-	loc := time.FixedZone("UTC+8", 8*3600)
-	dayStart := time.Date(2025, 11, 9, 0, 0, 0, 0, loc)
-	dayEnd := dayStart.Add(24 * time.Hour)
-	now := time.Date(2025, 11, 9, 11, 0, 0, 0, loc)
-
-	valid := timePtr(time.Date(2025, 11, 9, 10, 0, 0, 0, loc))
-	future := timePtr(time.Date(2025, 11, 9, 15, 0, 0, 0, loc))
-
-	client := &stubTargetClient{
-		tables: []*feishusvc.TaskTable{
-			{
-				Rows: []feishusvc.TaskRow{
-					{TaskID: 10, Params: "foo", App: "com.app", Datetime: valid},
-					{TaskID: 20, Params: "bar", App: "com.app", Datetime: future},
-				},
-			},
-		},
-	}
-
-	tasks, err := fetchFeishuTasksWithStrategy(ctx, client, "https://example.com/bitable/def", feishusvc.DefaultTaskFields, "com.app", dayStart, dayEnd, now, []string{""}, 2, false, "")
-	if err != nil {
-		t.Fatalf("fetchFeishuTasksWithStrategy fallback returned error: %v", err)
-	}
-	if len(tasks) != 1 || tasks[0].TaskID != 10 {
-		t.Fatalf("unexpected fallback result: %#v", tasks)
 	}
 }
 
@@ -142,16 +74,12 @@ func timePtr(t time.Time) *time.Time {
 
 func TestFetchTodayPendingFeishuTasksSceneStatusPriorityStopsAfterLimit(t *testing.T) {
 	ctx := context.Background()
-	loc := time.FixedZone("UTC+8", 8*3600)
-	now := time.Date(2025, 11, 9, 10, 0, 0, 0, loc)
 
 	client := &sceneStatusTargetClient{
 		rows: map[string][]feishusvc.TaskRow{
 			"个人页搜索|pending|with": {
 				{TaskID: 11, Params: "A", App: "com.app", Scene: "个人页搜索"},
 				{TaskID: 12, Params: "B", App: "com.app", Scene: "个人页搜索"},
-			},
-			"个人页搜索|pending|without": {
 				{TaskID: 13, Params: "C", App: "com.app", Scene: "个人页搜索"},
 			},
 			"个人页搜索|failed|with": {
@@ -163,12 +91,12 @@ func TestFetchTodayPendingFeishuTasksSceneStatusPriorityStopsAfterLimit(t *testi
 		},
 	}
 
-	tasks, err := fetchTodayPendingFeishuTasks(ctx, client, "https://example.com/bitable/foo", "com.app", 3, now)
+	tasks, err := fetchTodayPendingFeishuTasks(ctx, client, "https://example.com/bitable/foo", "com.app", 3)
 	if err != nil {
 		t.Fatalf("fetchTodayPendingFeishuTasks returned error: %v", err)
 	}
 	got := collectTaskIDs(tasks)
-	want := []int64{11, 12, 13}
+	want := []int64{11, 12, 21}
 	if !equalIDs(got, want) {
 		t.Fatalf("unexpected ids: got %v, want %v", got, want)
 	}
