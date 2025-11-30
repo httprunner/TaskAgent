@@ -276,12 +276,40 @@ func newSQLiteWriter() (Sink, error) {
 
 func buildResultInsertStatement() string {
 	table := resolveResultTableName()
-	columns := strings.Join(captureResultColumns, ", ")
-	placeholders := strings.Repeat("?,", len(captureResultColumns))
-	placeholders = strings.TrimRight(placeholders, ",")
-	// Use OR IGNORE so a unique index can safely deduplicate concurrent writes
-	// without surfacing SQLITE_CONSTRAINT errors to callers.
-	return fmt.Sprintf(`INSERT OR IGNORE INTO %s (%s) VALUES (%s)`, table, columns, placeholders)
+	quotedCols := make([]string, len(captureResultColumns))
+	placeholders := make([]string, len(captureResultColumns))
+	for i, col := range captureResultColumns {
+		quotedCols[i] = quoteIdent(col)
+		placeholders[i] = "?"
+	}
+	conflictCols := []string{"DeviceSerial", "Params", "ItemID"}
+	conflictSet := make(map[string]struct{}, len(conflictCols))
+	for _, col := range conflictCols {
+		conflictSet[col] = struct{}{}
+	}
+	updateAssignments := make([]string, 0, len(captureResultColumns)+3)
+	for _, col := range captureResultColumns {
+		if _, skip := conflictSet[col]; skip {
+			continue
+		}
+		updateAssignments = append(updateAssignments,
+			fmt.Sprintf("%s=excluded.%s", quoteIdent(col), quoteIdent(col)))
+	}
+	updateAssignments = append(updateAssignments,
+		fmt.Sprintf("%s=%d", quoteIdent(reportedColumn), reportStatusPending),
+		fmt.Sprintf("%s=NULL", quoteIdent(reportedAtColumn)),
+		fmt.Sprintf("%s=NULL", quoteIdent(reportErrorColumn)),
+	)
+	conflictClause := make([]string, len(conflictCols))
+	for i, col := range conflictCols {
+		conflictClause[i] = quoteIdent(col)
+	}
+	return fmt.Sprintf(`INSERT INTO %s (%s) VALUES (%s) ON CONFLICT(%s) DO UPDATE SET %s`,
+		quoteIdent(table),
+		strings.Join(quotedCols, ", "),
+		strings.Join(placeholders, ", "),
+		strings.Join(conflictClause, ", "),
+		strings.Join(updateAssignments, ", "))
 }
 
 func newFeishuStorage() (*feishu.ResultStorage, error) {
