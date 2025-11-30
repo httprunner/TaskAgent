@@ -403,6 +403,18 @@ type targetTableClient interface {
 
 const (
 	maxFeishuTasksPerApp = 5
+	sceneGeneralSearch   = "综合页搜索"
+	sceneProfileSearch   = "个人页搜索"
+	sceneCollection      = "合集视频采集"
+	sceneAnchorCapture   = "视频锚点采集"
+)
+
+// Exported scene identifiers for downstream agents.
+const (
+	SceneGeneralSearch = sceneGeneralSearch
+	SceneProfileSearch = sceneProfileSearch
+	SceneCollection    = sceneCollection
+	SceneAnchorCapture = sceneAnchorCapture
 )
 
 func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient, bitableURL, app string, limit int) ([]*FeishuTask, error) {
@@ -424,14 +436,14 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient,
 		scene  string
 		status string
 	}{
-		{scene: "综合页搜索", status: feishu.StatusPending},
-		{scene: "个人页搜索", status: feishu.StatusPending},
-		{scene: "合集页采集", status: feishu.StatusPending},
-		{scene: "视频锚点采集", status: feishu.StatusPending},
-		{scene: "综合页搜索", status: feishu.StatusFailed},
-		{scene: "个人页搜索", status: feishu.StatusFailed},
-		{scene: "合集页采集", status: feishu.StatusFailed},
-		{scene: "视频锚点采集", status: feishu.StatusFailed},
+		{scene: sceneGeneralSearch, status: feishu.StatusPending},
+		{scene: sceneProfileSearch, status: feishu.StatusPending},
+		{scene: sceneCollection, status: feishu.StatusPending},
+		{scene: sceneAnchorCapture, status: feishu.StatusPending},
+		{scene: sceneGeneralSearch, status: feishu.StatusFailed},
+		{scene: sceneProfileSearch, status: feishu.StatusFailed},
+		{scene: sceneCollection, status: feishu.StatusFailed},
+		{scene: sceneAnchorCapture, status: feishu.StatusFailed},
 	}
 
 	appendAndMaybeReturn := func(batch []*FeishuTask) {
@@ -455,9 +467,6 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient,
 			continue
 		}
 		appendAndMaybeReturn(batch)
-		if limit > 0 && len(result) >= limit {
-			break
-		}
 	}
 
 	if len(result) > limit && limit > 0 {
