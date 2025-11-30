@@ -73,3 +73,16 @@ type UserDramaInfo struct {
 	UserName string   // 用户名称
 	Dramas   []string // 短剧名称列表
 }
+
+// VideoDetail contains detailed information about a captured video.
+type VideoDetail struct {
+	ItemID      string // 视频 ID
+	Tags        string // 标签，枚举值：空值、合集、短剧
+	AnchorPoint string // JSON 格式，可能包含 appLink 字段
+}
+
+// MatchDetail contains a piracy match along with its associated video details.
+type MatchDetail struct {
+	Match  Match         // 盗版线索信息
+	Videos []VideoDetail // 该线索下的所有视频
+}

@@ -53,6 +53,7 @@ var DefaultTaskFields = TaskFields{
 	Datetime:         "Datetime",         // 任务执行时间配置
 	Status:           "Status",           // 任务状态
 	Webhook:          "Webhook",          // Webhook 同步状态
+	GroupID:          "GroupID",          // 任务分组ID，用于关联同一盗版线索的多场景任务
 	DeviceSerial:     "DeviceSerial",     // 目标执行设备
 	DispatchedDevice: "DispatchedDevice", // 实际派发设备
 	DispatchedAt:     "DispatchedAt",     // 任务派发时间

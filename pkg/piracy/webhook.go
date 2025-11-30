@@ -35,7 +35,6 @@ const (
 type WebhookOptions struct {
 	App        string
 	Params     string
-	Scene      string
 	UserID     string
 	UserName   string
 	WebhookURL string
@@ -127,7 +126,6 @@ func SendSummaryWebhook(ctx context.Context, opts WebhookOptions) (map[string]an
 	log.Info().
 		Str("params", params).
 		Str("app", strings.TrimSpace(opts.App)).
-		Str("scene", strings.TrimSpace(opts.Scene)).
 		Str("user_id", strings.TrimSpace(opts.UserID)).
 		Str("user_name", strings.TrimSpace(opts.UserName)).
 		Int("record_count", len(flattenedRecords)).

@@ -41,6 +41,7 @@ type TaskFields struct {
 	Status           string
 	Webhook          string
 	Extra            string
+	GroupID          string
 	DeviceSerial     string
 	DispatchedDevice string
 	DispatchedAt     string
@@ -63,6 +64,7 @@ type TaskRow struct {
 	UserID           string
 	UserName         string
 	Extra            string
+	GroupID          string
 	Datetime         *time.Time
 	DatetimeRaw      string
 	Status           string
@@ -93,6 +95,7 @@ type TaskRecordInput struct {
 	UserID           string
 	UserName         string
 	Extra            string
+	GroupID          string
 	DeviceSerial     string
 	DispatchedDevice string
 	DispatchedAt     *time.Time
@@ -859,6 +862,10 @@ func (fields TaskFields) merge(override TaskFields) TaskFields {
 		log.Warn().Str("new", override.Extra).Msg("overriding field Extra")
 		result.Extra = override.Extra
 	}
+	if strings.TrimSpace(override.GroupID) != "" {
+		log.Warn().Str("new", override.GroupID).Msg("overriding field GroupID")
+		result.GroupID = override.GroupID
+	}
 	if strings.TrimSpace(override.DeviceSerial) != "" {
 		log.Warn().Str("new", override.DeviceSerial).Msg("overriding field DeviceSerial")
 		result.DeviceSerial = override.DeviceSerial
@@ -986,6 +993,7 @@ func buildTaskRecordPayloads(records []TaskRecordInput, fields TaskFields) ([]ma
 		addOptionalField(row, fields.UserID, rec.UserID)
 		addOptionalField(row, fields.UserName, rec.UserName)
 		addOptionalField(row, fields.Extra, rec.Extra)
+		addOptionalField(row, fields.GroupID, rec.GroupID)
 		addOptionalField(row, fields.DeviceSerial, rec.DeviceSerial)
 		addOptionalField(row, fields.DispatchedDevice, rec.DispatchedDevice)
 		if strings.TrimSpace(fields.ElapsedSeconds) != "" && rec.ElapsedSeconds != nil {
@@ -1294,6 +1302,7 @@ func decodeTaskRow(rec bitableRecord, fields TaskFields) (TaskRow, error) {
 		UserID:           bitableOptionalString(rec.Fields, fields.UserID),
 		UserName:         bitableOptionalString(rec.Fields, fields.UserName),
 		Extra:            bitableOptionalString(rec.Fields, fields.Extra),
+		GroupID:          bitableOptionalString(rec.Fields, fields.GroupID),
 		DeviceSerial:     targetDevice,
 		DispatchedDevice: dispatchedDevice,
 	}

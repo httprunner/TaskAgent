@@ -67,6 +67,35 @@ func FilterReportByRatio(report *Report, threshold float64) *Report {
 	return report
 }
 
+// FindFirstCollectionVideo returns the ItemID of the first video with "合集" or "短剧" tag.
+// Returns empty string if no matching video is found.
+func FindFirstCollectionVideo(videos []VideoDetail) string {
+	for _, v := range videos {
+		tag := strings.TrimSpace(v.Tags)
+		if tag == "合集" || tag == "短剧" {
+			return v.ItemID
+		}
+	}
+	return ""
+}
+
+// ExtractAppLink extracts the appLink field from an AnchorPoint JSON string.
+// Returns empty string if AnchorPoint is empty or doesn't contain appLink.
+func ExtractAppLink(anchorPoint string) string {
+	trimmed := strings.TrimSpace(anchorPoint)
+	if trimmed == "" {
+		return ""
+	}
+	var data map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &data); err != nil {
+		return ""
+	}
+	if link, ok := data["appLink"].(string); ok {
+		return strings.TrimSpace(link)
+	}
+	return ""
+}
+
 // getFloat reads a field value as float64 if possible.
 func getFloat(fields map[string]any, name string) (float64, bool) {
 	if fields == nil || strings.TrimSpace(name) == "" {
