@@ -18,11 +18,7 @@ type sqliteResultSource struct {
 }
 
 func newSQLiteResultSource() (*sqliteResultSource, error) {
-	path, err := storage.ResolveDatabasePath()
-	if err != nil {
-		return nil, errors.Wrap(err, "piracy: resolve sqlite path failed")
-	}
-	db, err := sql.Open("sqlite", path)
+	db, err := storage.OpenCaptureResultsDB()
 	if err != nil {
 		return nil, errors.Wrap(err, "piracy: open sqlite database failed")
 	}

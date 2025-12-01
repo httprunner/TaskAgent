@@ -130,6 +130,10 @@ type Manager struct {
 	sinks    []Sink
 	name     string
 	reporter *resultReporter
+
+	readerOnce sync.Once
+	reader     *captureResultReader
+	readerErr  error
 }
 
 // NewManager builds a storage manager based on cfg.
@@ -374,6 +378,11 @@ func (m *Manager) Close() error {
 			errs = append(errs, pkgerrors.Wrap(err, "feishu reporter close failed"))
 		}
 	}
+	if m.reader != nil {
+		if err := m.reader.Close(); err != nil {
+			errs = append(errs, pkgerrors.Wrap(err, "capture result reader close failed"))
+		}
+	}
 	return errors.Join(errs...)
 }
 
@@ -385,6 +394,30 @@ func (m *Manager) Name() string {
 		return "storage"
 	}
 	return m.name
+}
+
+// LookupCaptureParamsByItemID returns the Params field of the latest capture_result row for the given ItemID.
+func (m *Manager) LookupCaptureParamsByItemID(ctx context.Context, itemID string) (string, error) {
+	if strings.TrimSpace(itemID) == "" {
+		log.Warn().Msg("storage: empty item ID provided to LookupCaptureParamsByItemID")
+		return "", nil
+	}
+	reader, err := m.ensureCaptureResultReader()
+	if err != nil {
+		log.Error().Err(err).Str("item_id", itemID).Msg("storage: ensure capture result reader failed")
+		return "", err
+	}
+	return reader.lookupParamsByItemID(ctx, itemID)
+}
+
+func (m *Manager) ensureCaptureResultReader() (*captureResultReader, error) {
+	if m == nil {
+		return nil, pkgerrors.New("storage: manager nil")
+	}
+	m.readerOnce.Do(func() {
+		m.reader, m.readerErr = newCaptureResultReader()
+	})
+	return m.reader, m.readerErr
 }
 
 type jsonlWriter struct {

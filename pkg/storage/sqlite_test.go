@@ -171,3 +171,45 @@ func TestSQLiteUpsertResetsReportedState(t *testing.T) {
 		t.Fatalf("expected extra payload to contain run flag, got %s", extraPayload)
 	}
 }
+
+func TestManagerLookupCaptureParamsByItemID(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "lookup_records.sqlite")
+	os.Setenv("TRACKING_STORAGE_DB_PATH", dbPath)
+	defer os.Unsetenv("TRACKING_STORAGE_DB_PATH")
+
+	mgr, err := NewManager(Config{})
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	defer mgr.Close()
+
+	record := ResultRecord{
+		DBRecord: Record{
+			ItemID:       "video-lookup",
+			Params:       "drama-lookup",
+			DeviceSerial: "device-lookup",
+			App:          "com.test.lookup",
+			Extra:        map[string]any{"source": "unit"},
+		},
+	}
+	if err := mgr.Write(context.Background(), record); err != nil {
+		t.Fatalf("write capture record failed: %v", err)
+	}
+
+	got, err := mgr.LookupCaptureParamsByItemID(context.Background(), record.DBRecord.ItemID)
+	if err != nil {
+		t.Fatalf("LookupCaptureParamsByItemID returned error: %v", err)
+	}
+	if got != record.DBRecord.Params {
+		t.Fatalf("expected %s, got %s", record.DBRecord.Params, got)
+	}
+
+	missing, err := mgr.LookupCaptureParamsByItemID(context.Background(), "missing")
+	if err != nil {
+		t.Fatalf("lookup missing item returned error: %v", err)
+	}
+	if missing != "" {
+		t.Fatalf("expected empty result for missing item, got %s", missing)
+	}
+}
