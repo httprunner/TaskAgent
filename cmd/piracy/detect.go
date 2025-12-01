@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	pool "github.com/httprunner/TaskAgent"
 	"github.com/httprunner/TaskAgent/pkg/feishu"
 	"github.com/httprunner/TaskAgent/pkg/piracy"
 	"github.com/rs/zerolog/log"
@@ -66,7 +67,9 @@ Example:
 					return err
 				}
 
-				params, err = piracy.FetchParamsFromTaskTable(cmd.Context(), client, reporter.TaskTableURL(), app, "综合页搜索", "success")
+				params, err = piracy.FetchParamsFromTaskTable(cmd.Context(),
+					client, reporter.TaskTableURL(),
+					app, pool.SceneGeneralSearch, "success")
 				if err != nil {
 					return err
 				}

@@ -10,8 +10,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-const DefaultProfileScene = "个人页搜索"
-
 // WorkflowConfig encapsulates the dependencies required to run the piracy workflow.
 type WorkflowConfig struct {
 	// TargetBitableURL points to the Feishu table that stores target tasks.
@@ -62,9 +60,6 @@ func NewWorkflow(cfg WorkflowConfig) (*Workflow, error) {
 		reporter:     reporter,
 		feishuClient: client,
 		profileScene: strings.TrimSpace(cfg.ProfileScene),
-	}
-	if workflow.profileScene == "" {
-		workflow.profileScene = DefaultProfileScene
 	}
 	return workflow, nil
 }

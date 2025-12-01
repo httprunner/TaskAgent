@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	pool "github.com/httprunner/TaskAgent"
 	"github.com/httprunner/TaskAgent/pkg/feishu"
 	"github.com/rs/zerolog/log"
 )
@@ -229,7 +230,7 @@ func (pr *Reporter) ReportMatches(ctx context.Context, app string, matches []Mat
 		}
 		records = append(records, feishu.TaskRecordInput{
 			App:      strings.TrimSpace(app),
-			Scene:    "个人页搜索",
+			Scene:    pool.SceneProfileSearch,
 			Params:   strings.TrimSpace(match.Params),
 			UserID:   strings.TrimSpace(match.UserID),
 			UserName: strings.TrimSpace(match.UserName),
@@ -436,7 +437,7 @@ func (pr *Reporter) CreateGroupTasksForPiracyMatches(ctx context.Context, app st
 		// 1. Create "个人页搜索" task
 		records = append(records, feishu.TaskRecordInput{
 			App:         strings.TrimSpace(app),
-			Scene:       "个人页搜索",
+			Scene:       pool.SceneProfileSearch,
 			Params:      strings.TrimSpace(detail.Match.Params),
 			UserID:      strings.TrimSpace(detail.Match.UserID),
 			UserName:    strings.TrimSpace(detail.Match.UserName),
@@ -452,15 +453,15 @@ func (pr *Reporter) CreateGroupTasksForPiracyMatches(ctx context.Context, app st
 		if collectionItemID := FindFirstCollectionVideo(detail.Videos); collectionItemID != "" {
 			records = append(records, feishu.TaskRecordInput{
 				App:         strings.TrimSpace(app),
-				Scene:       "合集视频采集",
+				Scene:       pool.SceneCollection,
 				ItemID:      collectionItemID,
 				UserID:      strings.TrimSpace(detail.Match.UserID),
 				UserName:    strings.TrimSpace(detail.Match.UserName),
 				GroupID:     groupID,
 				Datetime:    parentDatetime,
 				DatetimeRaw: inheritRaw,
-				Status:      feishu.StatusPending,
-				Webhook:     feishu.WebhookPending,
+				Status:      "",
+				Webhook:     "",
 			})
 		}
 
@@ -479,15 +480,15 @@ func (pr *Reporter) CreateGroupTasksForPiracyMatches(ctx context.Context, app st
 
 			records = append(records, feishu.TaskRecordInput{
 				App:         strings.TrimSpace(app),
-				Scene:       "视频锚点采集",
+				Scene:       pool.SceneAnchorCapture,
 				Params:      appLink,
 				UserID:      strings.TrimSpace(detail.Match.UserID),
 				UserName:    strings.TrimSpace(detail.Match.UserName),
 				GroupID:     groupID,
 				Datetime:    parentDatetime,
 				DatetimeRaw: inheritRaw,
-				Status:      feishu.StatusPending,
-				Webhook:     feishu.WebhookPending,
+				Status:      "",
+				Webhook:     "",
 			})
 		}
 	}

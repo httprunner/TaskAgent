@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	pool "github.com/httprunner/TaskAgent"
 	feishu "github.com/httprunner/TaskAgent/pkg/feishu"
 )
 
@@ -50,7 +51,7 @@ func main() {
 
 	record := feishu.TaskRecordInput{
 		App:     "com.smile.gifmaker",
-		Scene:   "视频录屏采集",
+		Scene:   pool.SceneVideoScreenCapture,
 		ItemID:  itemID,
 		Params:  string(payload),
 		Status:  "pending",

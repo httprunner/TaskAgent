@@ -78,15 +78,15 @@ func TestFetchTodayPendingFeishuTasksSceneStatusPriorityStopsAfterLimit(t *testi
 	client := &sceneStatusTargetClient{
 		rows: map[string][]feishusvc.TaskRow{
 			"个人页搜索|pending|with": {
-				{TaskID: 11, Params: "A", App: "com.app", Scene: "个人页搜索"},
-				{TaskID: 12, Params: "B", App: "com.app", Scene: "个人页搜索"},
-				{TaskID: 13, Params: "C", App: "com.app", Scene: "个人页搜索"},
+				{TaskID: 11, Params: "A", App: "com.app", Scene: SceneProfileSearch},
+				{TaskID: 12, Params: "B", App: "com.app", Scene: SceneProfileSearch},
+				{TaskID: 13, Params: "C", App: "com.app", Scene: SceneProfileSearch},
 			},
 			"个人页搜索|failed|with": {
-				{TaskID: 14, Params: "D", App: "com.app", Scene: "个人页搜索"},
+				{TaskID: 14, Params: "D", App: "com.app", Scene: SceneProfileSearch},
 			},
 			"综合页搜索|pending|with": {
-				{TaskID: 21, Params: "E", App: "com.app", Scene: "综合页搜索"},
+				{TaskID: 21, Params: "E", App: "com.app", Scene: SceneGeneralSearch},
 			},
 		},
 	}
