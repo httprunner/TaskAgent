@@ -25,7 +25,7 @@ func init() {
 	log.Logger = zerolog.New(output).With().Timestamp().Logger()
 	rootCmd.PersistentFlags().StringVar(&rootApp, "app", "", "App 包名覆盖 BUNDLE_ID")
 	rootCmd.PersistentFlags().StringVar(&rootTaskURL, "task-url", "", "任务状态表 URL 覆盖 TASK_BITABLE_URL")
-	rootCmd.AddCommand(newDetectCmd(), newWebhookCmd(), newReplayCmd())
+	rootCmd.AddCommand(newDetectCmd(), newWebhookCmd(), newReplayCmd(), newBackfillCmd())
 	_ = internal.Ensure()
 }
 

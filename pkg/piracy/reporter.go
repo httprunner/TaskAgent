@@ -411,7 +411,12 @@ func (pr *Reporter) fetchVideosFromFeishu(ctx context.Context, client *feishu.Cl
 //   - N "视频锚点采集" tasks for each video with appLink in AnchorPoint
 //
 // All tasks in the same group share the GroupID for webhook aggregation.
-func (pr *Reporter) CreateGroupTasksForPiracyMatches(ctx context.Context, app string, parentTaskID int64, parentDatetime *time.Time, parentDatetimeRaw string, details []MatchDetail) error {
+func (pr *Reporter) CreateGroupTasksForPiracyMatches(
+	ctx context.Context,
+	app string, parentTaskID int64,
+	parentDatetime *time.Time, parentDatetimeRaw string,
+	details []MatchDetail) error {
+
 	if len(details) == 0 {
 		log.Info().Msg("No match details provided, nothing to report")
 		return nil
@@ -454,6 +459,7 @@ func (pr *Reporter) CreateGroupTasksForPiracyMatches(ctx context.Context, app st
 			records = append(records, feishu.TaskRecordInput{
 				App:         strings.TrimSpace(app),
 				Scene:       pool.SceneCollection,
+				Params:      strings.TrimSpace(detail.Match.Params),
 				ItemID:      collectionItemID,
 				UserID:      strings.TrimSpace(detail.Match.UserID),
 				UserName:    strings.TrimSpace(detail.Match.UserName),
@@ -481,9 +487,10 @@ func (pr *Reporter) CreateGroupTasksForPiracyMatches(ctx context.Context, app st
 			records = append(records, feishu.TaskRecordInput{
 				App:         strings.TrimSpace(app),
 				Scene:       pool.SceneAnchorCapture,
-				Params:      appLink,
+				Params:      strings.TrimSpace(detail.Match.Params),
 				UserID:      strings.TrimSpace(detail.Match.UserID),
 				UserName:    strings.TrimSpace(detail.Match.UserName),
+				Extra:       appLink,
 				GroupID:     groupID,
 				Datetime:    parentDatetime,
 				DatetimeRaw: inheritRaw,

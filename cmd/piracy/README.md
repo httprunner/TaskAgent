@@ -1,6 +1,6 @@
 # Piracy CLI（盗版检测辅助工具）
 
-基于 Feishu 多维表格 + 本地 sqlite 采集结果的检测与（可选）上报工具，提供 `detect`、`replay`、`webhook-worker` 三个子命令。
+基于 Feishu 多维表格 + 本地 sqlite 采集结果的检测与（可选）上报工具，提供 `detect`、`replay`、`backfill`、`webhook-worker` 四个子命令。
 
 ## Subcommands
 
@@ -71,6 +71,33 @@ go run ./cmd/piracy replay \
 - `--task-id`（必填）：要重放的 TaskID。
 - `--db-path`：自定义 sqlite 路径；留空时自动解析 tracking DB（`storage.ResolveDatabasePath`）。
 - 全局 `--app`：覆盖任务行里的 App 值（当任务表缺失 App 或需要临时切换包名时使用）。
+
+### backfill（批量扫描综合页成功任务，按需补写子任务）
+- 场景：综合页任务已成功但未生成个人页/合集/锚点子任务，可离线重新检测并（在确认后）写回。
+- 数据来源：本地 `capture_tasks` sqlite（默认 `~/.eval/records.sqlite`），Scene 固定综合页搜（`SceneGeneralSearch`），Status 固定 `success`。可用 `--date` 按 `YYYY-MM-DD` 过滤。
+- 行为：对每个父任务调用 `DetectMatchesWithDetails`，默认只打印匹配结果；传入 `--sync` 时会调用 `CreateGroupTasksForPiracyMatches` 写回任务表，`--skip-existing` 可避免重复写入（通过 `GroupID = {TaskID}_1` 判断）。
+
+示例：
+```bash
+# 仅检测（不写表）
+go run ./cmd/piracy backfill --date 2025-12-01
+
+# 过滤指定日期并写回，写前若检测到已有子任务则跳过
+go run ./cmd/piracy backfill \
+  --date 2025-12-01 \
+  --sync \
+  --skip-existing
+
+# 使用自定义 sqlite 路径
+go run ./cmd/piracy backfill --db-path /path/to/records.sqlite --sync
+```
+
+常用参数：
+- `--date`：仅处理指定日期（本地时区）的综合页成功任务。
+- `--sync`：开启写表；不指定时仅检测不写入。
+- `--skip-existing`：与 `--sync` 一起使用，若已存在 `GroupID={TaskID}_1` 的子任务则跳过。
+- `--db-path`：自定义 `capture_tasks` sqlite 路径，默认自动解析。
+- 全局 `--task-url` / `--app`：覆盖任务表 URL 与 App 过滤/回填（缺省时使用环境变量）。
 
 ### webhook-worker（重试 webhook 汇总）
 - 功能：轮询任务状态表中挂起/失败的 webhook 汇总任务，重新发送到 SUMMARY_WEBHOOK_URL。
