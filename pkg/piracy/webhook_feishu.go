@@ -102,6 +102,9 @@ func (s *feishuSummarySource) buildRecordFilter(query recordQuery) *feishu.Filte
 	if trimmed := strings.TrimSpace(query.UserID); trimmed != "" {
 		filters = append(filters, EqFilter(s.fields.Result.UserID, trimmed))
 	}
+	if trimmed := strings.TrimSpace(query.ItemID); trimmed != "" {
+		filters = append(filters, EqFilter(s.fields.Result.ItemID, trimmed))
+	}
 	return CombineFiltersAND(filters...)
 }
 

@@ -188,6 +188,129 @@ func TestSendSummaryWebhookSQLite(t *testing.T) {
 	}
 }
 
+func TestSendSummaryWebhookSkipDramaLookup(t *testing.T) {
+	t.Cleanup(feishu.RefreshFieldMappings)
+	t.Setenv("DRAMA_SQLITE_TABLE", "drama_catalog")
+	t.Setenv("RESULT_SQLITE_TABLE", "capture_results")
+	t.Setenv("DRAMA_FIELD_NAME", "Params")
+	t.Setenv("DRAMA_FIELD_ID", "DramaID")
+	t.Setenv("RESULT_FIELD_PARAMS", "Params")
+	t.Setenv("RESULT_FIELD_APP", "App")
+	t.Setenv("RESULT_FIELD_USERID", "UserID")
+	t.Setenv("RESULT_FIELD_USERNAME", "UserName")
+	t.Setenv("RESULT_FIELD_ITEMID", "ItemID")
+	feishu.RefreshFieldMappings()
+
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "records.sqlite")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite failed: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	createSQL := []string{
+		`CREATE TABLE drama_catalog (
+	            DramaID TEXT,
+	            Params TEXT
+	        );`,
+		`CREATE TABLE capture_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            Params TEXT,
+            DeviceSerial TEXT,
+            App TEXT,
+            ItemID TEXT,
+            ItemCaption TEXT,
+            ItemDuration REAL,
+            UserName TEXT,
+            UserID TEXT,
+            Tags TEXT,
+            TaskID INTEGER,
+            Datetime INTEGER,
+            Extra TEXT
+        );`,
+	}
+	for _, stmt := range createSQL {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("create table failed: %v", err)
+		}
+	}
+
+	params := `{"aid":"111234","eid":"3x59ziqfkfu3rya","type":"auto_additional_crawl"}`
+	if _, err := db.Exec(`INSERT INTO capture_results
+        (Params, DeviceSerial, App, ItemID, ItemCaption, ItemDuration, UserName, UserID, Tags, TaskID, Datetime, Extra)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"", "device-02", "com.smile.gifmaker", "3x59ziqfkfu3rya", "短剧截屏", 60.0,
+		"捕捉者", "user-002", "", 99, time.Now().UnixMilli(), "{}"); err != nil {
+		t.Fatalf("insert capture row failed: %v", err)
+	}
+
+	payloadCh := make(chan map[string]any, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		payloadCh <- payload
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	// Ensure the call would fail without SkipDramaLookup for missing drama rows.
+	noSkipOpts := WebhookOptions{
+		Params:     params,
+		App:        "com.smile.gifmaker",
+		UserID:     "user-002",
+		UserName:   "捕捉者",
+		Source:     WebhookSourceSQLite,
+		SQLitePath: dbPath,
+		WebhookURL: server.URL,
+	}
+	if _, err := SendSummaryWebhook(context.Background(), noSkipOpts); err == nil {
+		t.Fatalf("expected error without SkipDramaLookup")
+	}
+
+	opts := WebhookOptions{
+		Params:          params,
+		App:             "com.smile.gifmaker",
+		UserID:          "user-002",
+		UserName:        "捕捉者",
+		Source:          WebhookSourceSQLite,
+		SQLitePath:      dbPath,
+		WebhookURL:      server.URL,
+		SkipDramaLookup: true,
+	}
+
+	payload, err := SendSummaryWebhook(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("SendSummaryWebhook with SkipDramaLookup failed: %v", err)
+	}
+
+	select {
+	case <-payloadCh:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("webhook server did not receive payload")
+	}
+
+	if payload["DramaName"] != params {
+		t.Fatalf("expected DramaName to fallback to params, got %#v", payload["DramaName"])
+	}
+	records, ok := payload["records"].([]map[string]any)
+	if !ok || len(records) != 1 {
+		t.Fatalf("unexpected records payload: %#v", payload["records"])
+	}
+	if records[0]["ItemID"] != "3x59ziqfkfu3rya" {
+		t.Fatalf("unexpected ItemID %#v", records[0]["ItemID"])
+	}
+}
+
 func TestSendSummaryWebhookNoRecords(t *testing.T) {
 	t.Cleanup(feishu.RefreshFieldMappings)
 	t.Setenv("DRAMA_SQLITE_TABLE", "drama_catalog")

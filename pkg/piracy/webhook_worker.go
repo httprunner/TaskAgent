@@ -10,6 +10,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 
+	pool "github.com/httprunner/TaskAgent"
 	"github.com/httprunner/TaskAgent/pkg/feishu"
 )
 
@@ -201,7 +202,7 @@ func (w *WebhookWorker) processOnce(ctx context.Context) error {
 			errs = append(errs, fmt.Sprintf("task %d missing app", row.TaskID))
 			continue
 		}
-		if err := w.sendSummary(ctx, app, params, strings.TrimSpace(row.UserID), strings.TrimSpace(row.UserName)); err != nil {
+		if err := w.sendSummary(ctx, app, params, strings.TrimSpace(row.UserID), strings.TrimSpace(row.UserName), strings.TrimSpace(row.Scene)); err != nil {
 			if stdErrors.Is(err, ErrNoCaptureRecords) {
 				log.Warn().
 					Int64("task_id", row.TaskID).
@@ -367,7 +368,11 @@ func (w *WebhookWorker) sendGroupWebhook(ctx context.Context, app, groupID strin
 		Msg("sending group webhook")
 
 	// TODO(droid): 组装所有场景的详细信息并通过单次 webhook 统一下发
-	err := w.sendSummary(ctx, app, params, userID, userName)
+	var scene string
+	if len(scenes) == 1 {
+		scene = scenes[0]
+	}
+	err := w.sendSummary(ctx, app, params, userID, userName, scene)
 	if err != nil && !stdErrors.Is(err, ErrNoCaptureRecords) {
 		return err
 	}
@@ -515,13 +520,17 @@ func (w *WebhookWorker) resolveApp(taskApp string) string {
 	return w.app
 }
 
-func (w *WebhookWorker) sendSummary(ctx context.Context, app, params, userID, userName string) error {
+func (w *WebhookWorker) sendSummary(ctx context.Context, app, params, userID, userName, scene string) error {
 	baseOpts := WebhookOptions{
 		App:        app,
 		Params:     params,
 		UserID:     userID,
 		UserName:   userName,
 		WebhookURL: w.webhookURL,
+	}
+	if itemID, skip := deriveCaptureLookupHints(scene, params); skip {
+		baseOpts.SkipDramaLookup = true
+		baseOpts.ItemIDHint = itemID
 	}
 
 	sqliteErr := w.sendSummaryWithSource(ctx, baseOpts, WebhookSourceSQLite)
@@ -549,6 +558,13 @@ func (w *WebhookWorker) sendSummaryWithSource(ctx context.Context, opts WebhookO
 	opts.Source = source
 	_, err := SendSummaryWebhook(ctx, opts)
 	return err
+}
+
+func deriveCaptureLookupHints(scene, params string) (itemID string, skip bool) {
+	if strings.TrimSpace(scene) != pool.SceneVideoScreenCapture {
+		return "", false
+	}
+	return extractItemIDFromParams(params), true
 }
 
 func isContextError(err error) bool {

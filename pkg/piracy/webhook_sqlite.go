@@ -142,6 +142,12 @@ func (s *sqliteSummarySource) FetchRecords(ctx context.Context, query recordQuer
 		builder.WriteString(" = ?")
 		args = append(args, params)
 	}
+	if itemID := strings.TrimSpace(query.ItemID); itemID != "" {
+		builder.WriteString(" AND ")
+		builder.WriteString(s.column(s.fields.Result.ItemID))
+		builder.WriteString(" = ?")
+		args = append(args, itemID)
+	}
 	if app := strings.TrimSpace(query.App); app != "" {
 		builder.WriteString(" AND ")
 		builder.WriteString(quoteIdentifier(s.fields.Result.App))

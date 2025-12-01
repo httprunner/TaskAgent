@@ -39,6 +39,12 @@ type WebhookOptions struct {
 	UserName   string
 	WebhookURL string
 
+	// SkipDramaLookup bypasses drama table queries (e.g. for video capture tasks whose Params are JSON payloads).
+	SkipDramaLookup bool
+
+	// ItemIDHint optionally narrows capture record queries when Params don't match stored values.
+	ItemIDHint string
+
 	// Source controls where drama and record data are retrieved from.
 	Source WebhookSource
 
@@ -103,16 +109,35 @@ func SendSummaryWebhook(ctx context.Context, opts WebhookOptions) (map[string]an
 		}
 	}()
 
-	drama, err := ds.FetchDrama(ctx, params)
-	if err != nil {
-		return nil, fmt.Errorf("fetch drama info failed: %w", err)
+	var drama *dramaInfo
+	if opts.SkipDramaLookup {
+		log.Debug().
+			Str("params", params).
+			Str("app", strings.TrimSpace(opts.App)).
+			Msg("skip drama lookup for summary webhook")
+		drama = fallbackDramaInfoFromParams(params, fields)
+	} else {
+		var err error
+		drama, err = ds.FetchDrama(ctx, params)
+		if err != nil {
+			return nil, fmt.Errorf("fetch drama info failed: %w", err)
+		}
 	}
 
+	itemID := strings.TrimSpace(opts.ItemIDHint)
+	if itemID == "" && opts.SkipDramaLookup {
+		itemID = extractItemIDFromParams(params)
+	}
+	queryParams := params
+	if opts.SkipDramaLookup && itemID != "" {
+		queryParams = ""
+	}
 	records, err := ds.FetchRecords(ctx, recordQuery{
-		Params:      params,
+		Params:      queryParams,
 		UserID:      strings.TrimSpace(opts.UserID),
 		Limit:       limit,
 		ExtraFilter: opts.ResultFilter,
+		ItemID:      itemID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("fetch capture records failed: %w", err)
@@ -282,6 +307,35 @@ func flattenRecordsAndCollectItemIDs(records []CaptureRecordPayload, schema feis
 	return result, itemIDs
 }
 
+func fallbackDramaInfoFromParams(params string, fields summaryFieldConfig) *dramaInfo {
+	trimmed := strings.TrimSpace(params)
+	if trimmed == "" {
+		return nil
+	}
+	raw := map[string]any{}
+	if key := strings.TrimSpace(fields.Drama.DramaName); key != "" {
+		raw[key] = trimmed
+	}
+	return &dramaInfo{
+		Name:      trimmed,
+		RawFields: raw,
+	}
+}
+
+func extractItemIDFromParams(params string) string {
+	trimmed := strings.TrimSpace(params)
+	if trimmed == "" || !strings.HasPrefix(trimmed, "{") {
+		return ""
+	}
+	var payload struct {
+		EID string `json:"eid"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(payload.EID)
+}
+
 const vedemSignatureExpiration = 1800
 
 // buildVedemAgwTokenSigned signs the actual request payload.
@@ -384,6 +438,7 @@ type recordQuery struct {
 	Params      string
 	UserID      string
 	UserName    string
+	ItemID      string
 	Limit       int
 	ExtraFilter *feishu.FilterInfo
 }
