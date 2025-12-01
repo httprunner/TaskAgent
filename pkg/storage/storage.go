@@ -115,7 +115,6 @@ type Record struct {
 type ResultRecord struct {
 	JSONPayload interface{}
 	DBRecord    Record
-	FeishuInput *feishu.ResultRecordInput
 }
 
 // Sink defines the contract for each storage implementation.
