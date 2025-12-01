@@ -42,8 +42,8 @@ type WebhookOptions struct {
 	// SkipDramaLookup bypasses drama table queries (e.g. for video capture tasks whose Params are JSON payloads).
 	SkipDramaLookup bool
 
-	// ItemIDHint optionally narrows capture record queries when Params don't match stored values.
-	ItemIDHint string
+	// ItemID narrows capture record queries when Params 不匹配存储值，SkipDramaLookup 为 true 时必填。
+	ItemID string
 
 	// Source controls where drama and record data are retrieved from.
 	Source WebhookSource
@@ -124,12 +124,12 @@ func SendSummaryWebhook(ctx context.Context, opts WebhookOptions) (map[string]an
 		}
 	}
 
-	itemID := strings.TrimSpace(opts.ItemIDHint)
-	if itemID == "" && opts.SkipDramaLookup {
-		itemID = extractItemIDFromParams(params)
-	}
+	itemID := strings.TrimSpace(opts.ItemID)
 	queryParams := params
-	if opts.SkipDramaLookup && itemID != "" {
+	if opts.SkipDramaLookup {
+		if itemID == "" {
+			return nil, errors.New("item id hint required when skipping drama lookup")
+		}
 		queryParams = ""
 	}
 	records, err := ds.FetchRecords(ctx, recordQuery{
@@ -320,20 +320,6 @@ func fallbackDramaInfoFromParams(params string, fields summaryFieldConfig) *dram
 		Name:      trimmed,
 		RawFields: raw,
 	}
-}
-
-func extractItemIDFromParams(params string) string {
-	trimmed := strings.TrimSpace(params)
-	if trimmed == "" || !strings.HasPrefix(trimmed, "{") {
-		return ""
-	}
-	var payload struct {
-		EID string `json:"eid"`
-	}
-	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(payload.EID)
 }
 
 const vedemSignatureExpiration = 1800

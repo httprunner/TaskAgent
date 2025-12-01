@@ -19,6 +19,7 @@ const (
 type TaskStatus struct {
 	TaskID           int64
 	Params           string
+	ItemID           string
 	App              string
 	Scene            string
 	StartAt          *time.Time
@@ -96,6 +97,7 @@ func buildTaskColumnOrder(fields feishu.TaskFields) []string {
 	return []string{
 		fields.TaskID,
 		fields.Params,
+		fields.ItemID,
 		fields.App,
 		fields.Scene,
 		fields.StartAt,
@@ -117,6 +119,7 @@ func ensureTaskSchema(db *sql.DB, table string, fields feishu.TaskFields, column
 	defs := []string{
 		fmt.Sprintf("%s INTEGER PRIMARY KEY", quoteIdent(fields.TaskID)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.Params)),
+		fmt.Sprintf("%s TEXT", quoteIdent(fields.ItemID)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.App)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.Scene)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.StartAt)),
@@ -138,6 +141,9 @@ func ensureTaskSchema(db *sql.DB, table string, fields feishu.TaskFields, column
 );`, quoteIdent(table), strings.Join(defs, ",\n"))
 	if _, err := db.Exec(createStmt); err != nil {
 		return errors.Wrap(err, "create capture targets table failed")
+	}
+	if err := ensureColumnExists(db, table, fields.ItemID, "TEXT"); err != nil {
+		return err
 	}
 	if err := ensureColumnExists(db, table, fields.StartAt, "TEXT"); err != nil {
 		return err
@@ -229,6 +235,7 @@ func (m *TaskMirror) upsert(task *TaskStatus) error {
 	_, err := m.stmt.Exec(
 		task.TaskID,
 		nullableString(task.Params),
+		nullableString(task.ItemID),
 		nullableString(task.App),
 		nullableString(task.Scene),
 		formatDatetime(task.StartAtRaw, task.StartAt),

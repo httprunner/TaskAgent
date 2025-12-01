@@ -286,6 +286,7 @@ func TestSendSummaryWebhookSkipDramaLookup(t *testing.T) {
 		SQLitePath:      dbPath,
 		WebhookURL:      server.URL,
 		SkipDramaLookup: true,
+		ItemID:          "3x59ziqfkfu3rya",
 	}
 
 	payload, err := SendSummaryWebhook(context.Background(), opts)
@@ -308,6 +309,11 @@ func TestSendSummaryWebhookSkipDramaLookup(t *testing.T) {
 	}
 	if records[0]["ItemID"] != "3x59ziqfkfu3rya" {
 		t.Fatalf("unexpected ItemID %#v", records[0]["ItemID"])
+	}
+
+	opts.ItemID = ""
+	if _, err := SendSummaryWebhook(context.Background(), opts); err == nil || !strings.Contains(err.Error(), "item id") {
+		t.Fatalf("expected error when SkipDramaLookup without ItemID, got %v", err)
 	}
 }
 

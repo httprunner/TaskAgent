@@ -337,6 +337,7 @@ func (c *FeishuTaskClient) now() time.Time {
 type FeishuTask struct {
 	TaskID           int64
 	Params           string
+	ItemID           string
 	App              string
 	Scene            string
 	Status           string
@@ -369,6 +370,7 @@ func toStorageTaskStatus(task *FeishuTask) *storage.TaskStatus {
 	return &storage.TaskStatus{
 		TaskID:           task.TaskID,
 		Params:           task.Params,
+		ItemID:           task.ItemID,
 		App:              task.App,
 		Scene:            task.Scene,
 		StartAt:          task.StartAt,
@@ -539,12 +541,17 @@ func fetchFeishuTasksWithFilter(ctx context.Context, client targetTableClient, b
 	tasks := make([]*FeishuTask, 0, len(table.Rows))
 	for _, row := range table.Rows {
 		params := strings.TrimSpace(row.Params)
-		if params == "" || row.TaskID == 0 {
+		itemID := strings.TrimSpace(row.ItemID)
+		if row.TaskID == 0 {
+			continue
+		}
+		if params == "" && itemID == "" {
 			continue
 		}
 		tasks = append(tasks, &FeishuTask{
 			TaskID:           row.TaskID,
 			Params:           params,
+			ItemID:           itemID,
 			App:              row.App,
 			Scene:            row.Scene,
 			Status:           row.Status,

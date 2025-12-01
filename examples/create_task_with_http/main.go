@@ -237,6 +237,7 @@ type TaskRecordInput struct {
 	Status, Webhook         string
 	UserID, UserName, Extra string
 	DeviceSerial            string
+	ItemID                  string
 }
 
 func main() {
@@ -255,15 +256,17 @@ func main() {
 		log.Fatal(err)
 	}
 
+	itemID := strings.TrimSpace(*eID)
 	params, _ := json.Marshal(map[string]string{
 		"type": "auto_additional_crawl",
 		"aid":  strings.TrimSpace(*aID),
-		"eid":  strings.TrimSpace(*eID),
+		"eid":  itemID,
 	})
 
 	record := TaskRecordInput{
 		App:     "com.smile.gifmaker",
 		Scene:   "视频录屏采集",
+		ItemID:  itemID,
 		Status:  "pending",
 		Webhook: "pending",
 		Params:  string(params),

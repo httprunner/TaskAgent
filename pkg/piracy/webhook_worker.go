@@ -202,7 +202,7 @@ func (w *WebhookWorker) processOnce(ctx context.Context) error {
 			errs = append(errs, fmt.Sprintf("task %d missing app", row.TaskID))
 			continue
 		}
-		if err := w.sendSummary(ctx, app, params, strings.TrimSpace(row.UserID), strings.TrimSpace(row.UserName), strings.TrimSpace(row.Scene)); err != nil {
+		if err := w.sendSummary(ctx, app, params, strings.TrimSpace(row.UserID), strings.TrimSpace(row.UserName), strings.TrimSpace(row.Scene), strings.TrimSpace(row.ItemID)); err != nil {
 			if stdErrors.Is(err, ErrNoCaptureRecords) {
 				log.Warn().
 					Int64("task_id", row.TaskID).
@@ -372,7 +372,7 @@ func (w *WebhookWorker) sendGroupWebhook(ctx context.Context, app, groupID strin
 	if len(scenes) == 1 {
 		scene = scenes[0]
 	}
-	err := w.sendSummary(ctx, app, params, userID, userName, scene)
+	err := w.sendSummary(ctx, app, params, userID, userName, scene, "")
 	if err != nil && !stdErrors.Is(err, ErrNoCaptureRecords) {
 		return err
 	}
@@ -520,7 +520,7 @@ func (w *WebhookWorker) resolveApp(taskApp string) string {
 	return w.app
 }
 
-func (w *WebhookWorker) sendSummary(ctx context.Context, app, params, userID, userName, scene string) error {
+func (w *WebhookWorker) sendSummary(ctx context.Context, app, params, userID, userName, scene, itemID string) error {
 	baseOpts := WebhookOptions{
 		App:        app,
 		Params:     params,
@@ -528,9 +528,16 @@ func (w *WebhookWorker) sendSummary(ctx context.Context, app, params, userID, us
 		UserName:   userName,
 		WebhookURL: w.webhookURL,
 	}
-	if itemID, skip := deriveCaptureLookupHints(scene, params); skip {
+	trimmedScene := strings.TrimSpace(scene)
+	trimmedItemID := strings.TrimSpace(itemID)
+	if trimmedScene == pool.SceneVideoScreenCapture {
 		baseOpts.SkipDramaLookup = true
-		baseOpts.ItemIDHint = itemID
+		if trimmedItemID == "" {
+			return fmt.Errorf("video capture webhook missing item id")
+		}
+	}
+	if trimmedItemID != "" {
+		baseOpts.ItemID = trimmedItemID
 	}
 
 	sqliteErr := w.sendSummaryWithSource(ctx, baseOpts, WebhookSourceSQLite)
@@ -558,13 +565,6 @@ func (w *WebhookWorker) sendSummaryWithSource(ctx context.Context, opts WebhookO
 	opts.Source = source
 	_, err := SendSummaryWebhook(ctx, opts)
 	return err
-}
-
-func deriveCaptureLookupHints(scene, params string) (itemID string, skip bool) {
-	if strings.TrimSpace(scene) != pool.SceneVideoScreenCapture {
-		return "", false
-	}
-	return extractItemIDFromParams(params), true
 }
 
 func isContextError(err error) bool {

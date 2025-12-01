@@ -59,6 +59,7 @@ var (
 		App:              "App",              // 平台名称
 		Scene:            "Scene",            // 场景名称
 		Params:           "Params",           // 查询参数
+		ItemID:           "ItemID",           // 单资源标识
 		UserID:           "UserID",           // 用户 ID
 		UserName:         "UserName",         // 用户名称
 		Datetime:         "Datetime",         // 任务执行时间配置
@@ -134,6 +135,7 @@ func applyTaskFieldEnvOverrides(fields *TaskFields) {
 	overrideFieldFromEnv("TASK_FIELD_APP", &fields.App)
 	overrideFieldFromEnv("TASK_FIELD_SCENE", &fields.Scene)
 	overrideFieldFromEnv("TASK_FIELD_PARAMS", &fields.Params)
+	overrideFieldFromEnv("TASK_FIELD_ITEMID", &fields.ItemID)
 	overrideFieldFromEnv("TASK_FIELD_USERID", &fields.UserID)
 	overrideFieldFromEnv("TASK_FIELD_USERNAME", &fields.UserName)
 	overrideFieldFromEnv("TASK_FIELD_DATETIME", &fields.Datetime)

@@ -35,10 +35,11 @@ func main() {
 		log.Fatalf("init Feishu client: %v", err)
 	}
 
+	itemID := strings.TrimSpace(*eID)
 	payload, err := json.Marshal(map[string]string{
 		"type": "auto_additional_crawl",
 		"aid":  strings.TrimSpace(*aID),
-		"eid":  strings.TrimSpace(*eID),
+		"eid":  itemID,
 	})
 	if err != nil {
 		log.Fatalf("encode Params JSON: %v", err)
@@ -50,6 +51,7 @@ func main() {
 	record := feishu.TaskRecordInput{
 		App:     "com.smile.gifmaker",
 		Scene:   "视频录屏采集",
+		ItemID:  itemID,
 		Params:  string(payload),
 		Status:  "pending",
 		Webhook: "pending",

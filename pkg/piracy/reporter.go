@@ -453,7 +453,7 @@ func (pr *Reporter) CreateGroupTasksForPiracyMatches(ctx context.Context, app st
 			records = append(records, feishu.TaskRecordInput{
 				App:         strings.TrimSpace(app),
 				Scene:       "合集视频采集",
-				Params:      collectionItemID,
+				ItemID:      collectionItemID,
 				UserID:      strings.TrimSpace(detail.Match.UserID),
 				UserName:    strings.TrimSpace(detail.Match.UserName),
 				GroupID:     groupID,

@@ -35,6 +35,7 @@ type TaskFields struct {
 	App              string
 	Scene            string
 	Params           string
+	ItemID           string
 	UserID           string
 	UserName         string
 	Datetime         string
@@ -55,6 +56,7 @@ type TaskRow struct {
 	RecordID         string
 	TaskID           int64
 	Params           string
+	ItemID           string
 	App              string
 	Scene            string
 	StartAt          *time.Time
@@ -82,6 +84,7 @@ type TaskRow struct {
 type TaskRecordInput struct {
 	TaskID           int64
 	Params           string
+	ItemID           string
 	App              string
 	Scene            string
 	StartAt          *time.Time
@@ -969,6 +972,7 @@ func buildTaskRecordPayloads(records []TaskRecordInput, fields TaskFields) ([]ma
 		if rec.TaskID != 0 {
 			row[fields.TaskID] = rec.TaskID
 		}
+		addOptionalField(row, fields.ItemID, rec.ItemID)
 		addOptionalField(row, fields.Params, rec.Params)
 		addOptionalField(row, fields.App, rec.App)
 		addOptionalField(row, fields.Scene, rec.Scene)
@@ -1306,6 +1310,7 @@ func decodeTaskRow(rec bitableRecord, fields TaskFields) (TaskRow, error) {
 		RecordID:         rec.RecordID,
 		TaskID:           taskID,
 		Params:           bitableOptionalString(rec.Fields, fields.Params),
+		ItemID:           bitableOptionalString(rec.Fields, fields.ItemID),
 		App:              bitableOptionalString(rec.Fields, fields.App),
 		Scene:            bitableOptionalString(rec.Fields, fields.Scene),
 		Status:           status,
