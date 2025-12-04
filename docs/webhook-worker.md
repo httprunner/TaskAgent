@@ -1,13 +1,52 @@
 ## 流程概览
 
-Webhook worker (`pkg/piracy/webhook_worker.go`) 以固定优先级轮询任务表，只处理两类场景：
+CLI 入口：
+
+```bash
+go run ./cmd/piracy webhook-worker \
+  --task-url "$TASK_BITABLE_URL" \
+  --result-url "$RESULT_BITABLE_URL" \
+  --app kwai \
+  --batch-limit 200 \
+  --source sqlite           # 或 feishu
+```
+
+主要参数：
+
+| Flag | 默认值 | 作用 |
+| --- | --- | --- |
+| `--task-url` | 读取 `TASK_BITABLE_URL` | 指定任务表，若省略则使用环境变量。 |
+| `--result-url` | 读取 `RESULT_BITABLE_URL` | 当 Source=feishu 时需要；SQLite 模式可为空。 |
+| `--app` | 空 | 仅处理匹配 App 列的行。 |
+| `--batch-limit` | 100 | 每次扫描最多处理的任务数量（pending+failed 总数）。 |
+| `--source` | `sqlite` | `sqlite` 先查本地 DB，`feishu` 直接访问多维表。 |
+
+流程示意：
+
+```
+任务表 (Status=success, Webhook in {pending,failed})
+        │
+        ▼
+WebhookWorker processOnce
+        │ fetchWebhookCandidates(scene priority)
+        ▼
+handleVideoCaptureRow / handleGroupRow / handleSingleRow
+        │
+        ▼
+sendSummary / sendGroupWebhook → Feishu 群机器人 or 内部 API
+        │
+        ▼
+Update Webhook 字段 (success/failed/error)
+```
+
+Webhook worker (`pkg/piracy/webhook_worker.go`) 以固定优先级轮询任务表，只处理以下场景（按顺序填满 `BatchLimit` 即停）：
 
 1. `视频录屏采集` + Webhook=pending
 2. `视频录屏采集` + Webhook=failed
 3. `个人页搜索` + Webhook=pending
 4. `个人页搜索` + Webhook=failed
 
-所有查询都会强制 `Status=success`，可选按照启动参数中的 App 过滤，并在达到 `BatchLimit` 后停止本轮扫描。
+所有查询都会强制 `Status=success`，并可选按照 `--app` 过滤。
 
 ## 行级派发逻辑
 
@@ -66,6 +105,15 @@ WebhookWorker.processOnce()
 - Group 任务：`RecordLimit=-1`（内部会被解释为“无限制”，即取全量记录）。
 - 其他任务：沿用默认配置，必要时可通过 `WebhookOptions` 继续扩展。
 
+## 故障排查速查表
+
+| 症状 | 常见原因 | 排查 & 解决 |
+| --- | --- | --- |
+| Webhook 长期 pending | 组内仍有任务未 success 或 `Scene`/`App` 为空 | 在任务表中按 GroupID 查看状态；补齐失败任务或清理脏数据。 |
+| Webhook=error | 缺少 `Params`/`ItemID` 等关键字段 | 修补缺失字段或使用 `--source feishu` 直接从结果表补数。 |
+| Webhook=failed 且不断重试 | 下游接口返回错误 | 查看 worker 日志中的 `webhook_error` 字段，修复下游或设置临时熔断后手动 `Webhook=pending` 重试。 |
+| 处理速度慢 | `--batch-limit` 太小或 SQLite 磁盘慢 | 调大 `--batch-limit`，确认 `TRACKING_STORAGE_DB_PATH` 所在磁盘性能，必要时切换到 Feishu source。 |
+
 ## 日志与测试
-- 日志统一带上 `scene`、`group_id`、`task_id` 等关键信息，方便观测调度流程。
-- 相关测试：`go test ./pkg/piracy/...`（覆盖 webhook worker、Feishu/SQLite 数据源等）。
+- 日志统一带上 `app`、`scene`、`group_id`、`task_id`、`webhook_status`，方便在 `zerolog` 输出中追踪一整个链路。
+- 相关测试：`go test ./pkg/piracy/...`（覆盖 webhook worker、Feishu/SQLite 数据源等）。修改 worker 逻辑时务必扩充这些测试用例。

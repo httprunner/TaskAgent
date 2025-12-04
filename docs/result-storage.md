@@ -10,8 +10,8 @@ Tracking runner → storage.Manager → [JSONL sink]* + SQLite sink
                            capture_results (reported=0)
                                       ↓ async
                               resultReporter goroutine
-                                      ↓
-                             Feishu ResultStorage
+                                      ↓           ↘ (FEISHU_REPORT_RPS limiter)
+                             Feishu ResultStorage   ← RESULT_STORAGE_ENABLE_FEISHU
 ```
 
 \* JSONL output is optional and controlled via `TRACKING_STORAGE_DISABLE_JSONL`. Every capture always lands in SQLite.
@@ -37,13 +37,28 @@ Tracking runner → storage.Manager → [JSONL sink]* + SQLite sink
 - Scans `reported IN (0, -1)` on each tick and uploads up to `RESULT_REPORT_BATCH` rows (default 30).
 - Poll interval defaults to 5 s (`RESULT_REPORT_POLL_INTERVAL`).
 - Each Feishu call has its own timeout (`RESULT_REPORT_HTTP_TIMEOUT`, default 30 s) so a slow API does not stall the entire cycle.
-- SQLite updates (`reported` flips, error text) use independent 5 s contexts to ensure bookkeeping always completes.
+- Uploads flow through the `FEISHU_REPORT_RPS` limiter (default 1 row/sec) to avoid 99991400 responses; raise this value only when Feishu确认更高频控。
+- SQLite updates (`reported` flips, error text) use independent 5 s contexts to ensure bookkeeping always completes。
 
 #### Failure handling
 
 - Success → `reported=1`, `report_error=NULL`, `reported_at` stamped.
 - Failure → `reported=-1`, `report_error` contains the Feishu error, record retried on the next tick.
 - Manual retry → `UPDATE capture_results SET reported=0 WHERE reported=-1;`
+
+### 常用排查 SQL
+```sql
+-- 查看最新失败的记录及错误原因
+SELECT TaskID, Params, report_error, reported_at
+FROM capture_results
+WHERE reported = -1
+ORDER BY reported_at DESC
+LIMIT 20;
+
+-- 强制重试所有失败记录
+UPDATE capture_results SET reported = 0 WHERE reported = -1;
+```
+调整 `RESULT_REPORT_BATCH`/`RESULT_REPORT_POLL_INTERVAL` 前，先观察 `report_error` 中的错误码，频控异常通常为 `99991400`。
 
 ## Piracy Detection
 
@@ -65,7 +80,8 @@ Tracking runner → storage.Manager → [JSONL sink]* + SQLite sink
 
 ## Operational Tips
 
-1. Query `reported=-1` regularly to watch for stuck rows; inspect `report_error` for the root cause (timeouts, `99991400`, etc.).
-2. Tune `RESULT_REPORT_*` and `FEISHU_REPORT_RPS` together when scaling device counts.
-3. Piracy workflows should pass the Params of interest so the SQLite source can filter efficiently.
-4. Tests: `go test ./pkg/storage` validates the storage pipeline; `go test ./pkg/piracy` exercises detection logic (requires Feishu tables under the hard row cap).
+1. Query `reported=-1` regularly to watch for stuck rows (示例 SQL 见上文)。
+2. 扩容时同步调整 `RESULT_REPORT_*` 与 `FEISHU_REPORT_RPS`，否则 reporter 可能在速率限制器前排队。
+3. 当 result 表暂不可用时，可仅依赖 SQLite（不要设置 `RESULT_STORAGE_ENABLE_FEISHU`），稍后再批量重投。
+4. Piracy 工作流（Group/Webhook）优先查询 SQLite，因此保持 `TRACKING_STORAGE_DB_PATH` 持久化，必要时用 `sqlite3` 导出 CSV 供调试。
+5. Tests: `go test ./pkg/storage` 验证 pipeline，`go test ./pkg/piracy` 覆盖检测/读取逻辑（Feishu Live 测试需要 `FEISHU_LIVE_TEST=1`）。

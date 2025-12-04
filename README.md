@@ -1,145 +1,154 @@
 # TaskAgent
 
-TaskAgent is a Go 1.24 module that keeps Android capture devices busy by polling Feishu Bitable tasks, dispatching them through a pluggable job runner, and feeding status back to Feishu. The library is designed to be embedded in internal agents or schedulers that already know how to execute tasks once a device serial and payload are provided.
+TaskAgent is a Go 1.24 module that polls Feishu Bitable queues, keeps Android capture devices busy, persists outcomes to Feishu/SQLite, and triggers piracy-specific workflows. It is designed to be embedded inside existing schedulers/agents so you only need to provide device implementations plus business-side runners.
 
-## Highlights
-- **Feishu-native task source** – `feishu` package parses Bitable links, fetches pending rows, and updates statuses without duplicating schemas in code.
-- **Device pool orchestration** – `pool.DevicePoolAgent` refreshes connected devices, batches tasks, and invokes your `JobRunner` implementation with cancelable contexts.
-- **Provider & manager interfaces** – swap in custom `DeviceProvider` or `TaskManager` implementations while the defaults cover ADB devices and Feishu queues.
-- **Lean dependency stack** – relies on `httprunner/v5`'s `gadb`, `zerolog`, and the official Lark Open Platform SDK only when needed.
-- **Lifecycle callbacks** – `TaskLifecycle` emits `OnTaskStarted` (pending/dispatched → running) and `OnTaskResult` (running → success/failed) so Feishu status rows and device tables stay consistent without business code rewiring.
+## Overview & Architecture
 
-## Repository Layout
-- `pool.go` / `pool_test.go` – device scheduling loop, job lifecycle hooks, and unit coverage.
-- `tasks.go` – Feishu-backed `TaskManager` plus helpers for query filters and status updates.
-- `feishu/` – API client, Bitable schema structs, spreadsheet helpers, and dedicated README for module-level details.
-- `providers/adb/` – thin wrapper over `gadb` that lists available Android serial numbers.
-- `AGENTS.md` – contributor-focused workflows, coding standards, and security guardrails.
+```
+Feishu Task Table ──> TaskManager (tasks.go)
+        │                  │
+        ▼                  ▼
+ DeviceProvider ──> DevicePoolAgent (pool.go) ──> JobRunner (your code)
+        │                  │                          │
+        ▼                  ▼                          ▼
+ Device recorder   TaskLifecycle hooks        Storage + webhook/piracy packages
+```
 
-## Requirements
-- Go 1.24 or newer (`go env GOVERSION` to verify).
-- A Feishu custom app with API access plus the following environment variables: `FEISHU_APP_ID`, `FEISHU_APP_SECRET`, optional `FEISHU_TENANT_KEY`, `FEISHU_BASE_URL`, and `FEISHU_LIVE_TEST` (toggles integration tests).
-- A Feishu task Bitable that stores pending tasks (surface its link via `TASK_BITABLE_URL` or inject it directly into `pool.Config.BitableURL`).
-- Optional observability tables: `DEVICE_BITABLE_URL` (设备信息表) and `DEVICE_TASK_BITABLE_URL` (设备任务表) for recording device heartbeat/dispatch snapshots. Leave empty to disable recording. Column names are customizable via `DEVICE_FIELD_*` / `DEVICE_TASK_FIELD_*`; defaults match the sample schemas below.
-- Result write throttling: Feishu结果表写入内置全局限速器，默认 1 RPS（可通过 `FEISHU_REPORT_RPS` 配置浮点值），避免多设备并发写表触发频控。
-- Access to the result Bitables you plan to push to, if any.
-- Android Debug Bridge (ADB) on the PATH when using the default provider.
+### Core building blocks
+- **DevicePoolAgent** & **TaskLifecycle**: orchestrate polling, dispatching, retrying, and lifecycle callbacks so Feishu status rows & device snapshots stay consistent.
+- **feishu package**: wraps Bitable APIs, exposes schema structs (`TaskFields`, `ResultFields`, `DeviceFields`) plus rate-limited result writers (`FEISHU_REPORT_RPS`).
+- **providers/adb**: default ADB-backed device provider; swap in custom providers without touching the pool.
+- **pkg/devrecorder** & **pkg/storage**: optional Feishu device heartbeats and SQLite-first capture storage with async reporting.
+- **cmd/piracy / pkg/piracy**: piracy detection CLI, webhook worker, backfill helpers, and group-task automation.
 
-## Quick Start
-1. Clone the repository and install dependencies:
+### Repository map
+- `pool.go`, `tasks.go`, `pool_test.go`: scheduling core and unit coverage.
+- `feishu/`: API client, schema definitions, spreadsheet helpers, rate limiter, and README.
+- `pkg/piracy/`, `cmd/piracy/`: CLI entry points plus detection/webhook logic.
+- `pkg/storage/`, `pkg/devrecorder/`: SQLite + Feishu sinks and device recorder helpers.
+- `docs/`: deep dives (Feishu API usage, piracy group tasks, webhook worker, result storage).
+
+## Getting Started
+1. **Clone & download modules**
    ```bash
-    git clone git@github.com:httprunner/TaskAgent.git
-    cd TaskAgent
-    go mod download
+   git clone git@github.com:httprunner/TaskAgent.git
+   cd TaskAgent
+   go mod download
    ```
-2. Create a `.env` file (loaded by `godotenv`) and populate Feishu credentials plus Bitable URLs such as `TASK_BITABLE_URL`.
-3. Run tests to validate the setup:
+2. **Provide credentials** – Create a `.env` (loaded via `internal/envload`) with at least `FEISHU_APP_ID`, `FEISHU_APP_SECRET`, `TASK_BITABLE_URL`, and any recorder/storage URLs. See [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) for the full matrix.
+3. **Validate toolchain** – Run the standard gate before making changes:
    ```bash
-    go test ./...
-    # Run Feishu live tests only when you have real tables configured
-    FEISHU_LIVE_TEST=1 go test ./feishu -run Live
+   go fmt ./...
+   go vet ./...
+   go test ./...
+   # Optional: live API validation (requires production tables)
+   FEISHU_LIVE_TEST=1 go test ./feishu -run Live
    ```
-4. Embed the agent by implementing `pool.JobRunner` (import the module with an alias to match its package name):
+4. **Implement a JobRunner** – supply how tasks execute once TaskAgent hands you a device serial + payload:
    ```go
-    package main
+   package main
 
-    import (
-        "context"
-        "log"
-        "os"
-        "time"
+   import (
+       "context"
+       "log"
+       "os"
+       "time"
 
-        pool "github.com/httprunner/TaskAgent"
-        "github.com/httprunner/TaskAgent/pkg/feishu"
-    )
+       pool "github.com/httprunner/TaskAgent"
+       "github.com/httprunner/TaskAgent/pkg/feishu"
+   )
 
-    type MyRunner struct{}
+   type CaptureRunner struct{}
 
-    var _ pool.JobRunner = (*MyRunner)(nil)
+   func (CaptureRunner) RunJob(ctx context.Context, req pool.JobRequest) error {
+       for _, task := range req.Tasks {
+           if req.Lifecycle != nil && req.Lifecycle.OnTaskStarted != nil {
+               req.Lifecycle.OnTaskStarted(task)
+           }
+           // TODO: execute capture logic with task.Payload / req.DeviceSerial
+           if req.Lifecycle != nil && req.Lifecycle.OnTaskResult != nil {
+               req.Lifecycle.OnTaskResult(task, nil)
+           }
+       }
+       return nil
+   }
 
-    func (MyRunner) RunJob(ctx context.Context, req pool.JobRequest) error {
-        // Operate on req.DeviceSerial and req.Tasks.
-        for _, task := range req.Tasks {
-            if req.Lifecycle != nil && req.Lifecycle.OnTaskStarted != nil {
-                req.Lifecycle.OnTaskStarted(task) // optional if you need custom side effects
-            }
-            // TODO: execute payload...
-            if req.Lifecycle != nil && req.Lifecycle.OnTaskResult != nil {
-                req.Lifecycle.OnTaskResult(task, nil)
-            }
-        }
-        return nil
-    }
-
-    func main() {
-        cfg := pool.Config{
-            PollInterval:   30 * time.Second,
-            MaxTasksPerJob: 2,
-            BitableURL:     os.Getenv(feishu.EnvTaskBitableURL),
-            DeviceRecorder: mustRecorder, // optional: write device info / job rows to Feishu
-            AgentVersion:   "v0.0.0",     // propagate to recorder rows
-        }
-        if cfg.BitableURL == "" {
-            log.Fatal("set TASK_BITABLE_URL before starting the pool agent")
-        }
-
-        runner := &MyRunner{}
-        agent, err := pool.NewDevicePoolAgent(cfg, runner)
-        if err != nil {
-            log.Fatal(err)
-        }
-        ctx, cancel := context.WithCancel(context.Background())
-        defer cancel()
-        if err := agent.Start(ctx, "capture-app"); err != nil {
-            log.Fatal(err)
-        }
-    }
+   func main() {
+       cfg := pool.Config{
+           PollInterval:   30 * time.Second,
+           MaxTasksPerJob: 2,
+           BitableURL:     os.Getenv(feishu.EnvTaskBitableURL),
+           AgentVersion:   "capture-agent",
+       }
+       runner := CaptureRunner{}
+       agent, err := pool.NewDevicePoolAgent(cfg, runner)
+       if err != nil {
+           log.Fatal(err)
+       }
+       ctx, cancel := context.WithCancel(context.Background())
+       defer cancel()
+       if err := agent.Start(ctx, "capture-app"); err != nil {
+           log.Fatal(err)
+       }
+   }
    ```
-   If you configure `DEVICE_BITABLE_URL` / `DEVICE_TASK_BITABLE_URL`, the pool will upsert device heartbeats (Status/LastSeenAt) and create one row per dispatch (JobID `${serial}-YYMMDDHHMM`, AssignedTasks, Start/End, State, ErrorMessage). Leave the URLs empty to skip recording.
-   `MyRunner` must satisfy `pool.JobRunner` so the agent can call `RunJob` per device batch; decode the Feishu payload from `req.Tasks[n].Payload`. Pass the `app` argument that matches the Feishu target-table `App` column so the built-in `FeishuTaskClient` filters and updates the correct rows (statuses transition through `dispatched`, `success`, and `failed`).
+   Add `DeviceRecorder` (Feishu tables) or custom providers as needed; leave URLs empty to disable recorder writes.
 
-## Task Lifecycle & Status Flow
+## Usage Patterns
 
-TaskAgent keeps Feishu task rows and device snapshots in sync via a four-step lifecycle:
+### Embed TaskAgent in your scheduler
+1. Implement `pool.DeviceProvider` if you are not using the bundled ADB provider.
+2. Implement `pool.JobRunner` to translate Feishu payloads into device-specific actions.
+3. Optionally wire a `TaskManager` alternative if tasks are not Feishu-backed.
+4. Configure device & task recorders (`DEVICE_BITABLE_URL`, `DEVICE_TASK_BITABLE_URL`) to observe fleet health and dispatch history.
+
+### Piracy CLI (`cmd/piracy`)
+- **Detect**: `go run ./cmd/piracy detect --result-filter='{"conjunction":"and","conditions":[...]}' --output-csv result.csv`
+- **Auto workflow**: `go run ./cmd/piracy auto --task-url "$TASK_BITABLE_URL" --result-url "$RESULT_BITABLE_URL"`
+- **Webhook worker**: `go run ./cmd/piracy webhook-worker --app kwai --task-url "$TASK_BITABLE_URL"`
+  The CLI reuses the same Feishu/SQLite helpers as the agent; see [`docs/webhook-worker.md`](docs/webhook-worker.md) and [`docs/piracy-group-tasks.md`](docs/piracy-group-tasks.md) for behavior details.
+
+### Storage & observability
+- `pkg/storage` writes every capture to SQLite (`TRACKING_STORAGE_DB_PATH`) and optionally Feishu (`RESULT_STORAGE_ENABLE_FEISHU=1`).
+- Async reporter knobs (`RESULT_REPORT_*`, `FEISHU_REPORT_RPS`) keep uploads within Feishu rate-limits.
+- `pkg/devrecorder` mirrors device state (`DeviceSerial`, `Status`, `RunningTask`, etc.) to Feishu tables; override column names via `DEVICE_FIELD_*` env vars.
+- Consult [`docs/result-storage.md`](docs/result-storage.md) for schema diagrams and failure playbooks.
+
+## Configuration quick reference
+- Credentials & Feishu endpoints: `FEISHU_APP_ID`, `FEISHU_APP_SECRET`, `FEISHU_TENANT_KEY`, `FEISHU_BASE_URL`.
+- Task/result/device tables: `TASK_BITABLE_URL`, `RESULT_BITABLE_URL`, `DEVICE_BITABLE_URL`, `DEVICE_TASK_BITABLE_URL`.
+- Field overrides: `TASK_FIELD_*`, `RESULT_FIELD_*`, `DRAMA_FIELD_*`, `DEVICE_FIELD_*`, `DEVICE_TASK_FIELD_*`.
+- Storage knobs: `TRACKING_STORAGE_DISABLE_JSONL`, `TRACKING_STORAGE_DB_PATH`, `RESULT_STORAGE_ENABLE_FEISHU`, `RESULT_SQLITE_TABLE`, `DRAMA_SQLITE_TABLE`.
+- Reporter throttles: `RESULT_REPORT_POLL_INTERVAL`, `RESULT_REPORT_BATCH`, `RESULT_REPORT_HTTP_TIMEOUT`, `FEISHU_REPORT_RPS`.
+Refer to [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) for the authoritative table describing defaults, requirements, and consuming packages.
+
+## Task lifecycle & priority
 
 ```
-pending / failed (Feishu filter)
-        ↓ (FetchAvailableTasks)
-dispatched (OnTasksDispatched)
-        ↓ (TaskLifecycle.OnTaskStarted)
-running  + device RunningTask/PendingTasks updated
-        ↓ (TaskLifecycle.OnTaskResult + OnTasksCompleted)
-success / failed
+pending/failed (Feishu filter)
+        │ FetchAvailableTasks
+        ▼
+dispatched ──> TaskLifecycle.OnTaskStarted (Status=running, recorder updates)
+        │
+        ▼
+running ──> TaskLifecycle.OnTaskResult (success/failed)
+        │
+        ▼
+OnTasksCompleted → Feishu updates + recorder cleanup
 ```
 
-- `TaskLifecycle.OnTaskStarted` fires the moment a `JobRunner` begins a specific task; the default `FeishuTaskClient` implementation writes the `running` status, while the built-in recorder updates the device table so a TaskID never appears in both `RunningTask` and `PendingTasks`.
-- `TaskLifecycle.OnTaskResult` fires right after each task finishes. DevicePoolAgent sets `task.ResultStatus = success/failed` based on the error and later calls `TaskManager.OnTasksCompleted` so Feishu reflects the final state.
-- Device recorder hooks (`pkg/devrecorder`) continue to upsert device heartbeats (`idle/running/offline`) and pending queues even if you disable Feishu tables (simply point the URLs to empty strings).
+`FeishuTaskClient` fetches tasks in prioritized bands (个人页搜索 before 综合页搜索, same-day before backlog, failed before untouched) and only fills the shortfall to `MaxTasksPerJob`. See [`tasks.go`](tasks.go) for the full prioritization table.
 
-By centralizing these hooks in TaskAgent, embedded agents (such as fox search) no longer need to manage per-task status transitions themselves—plug in a `JobRunner`, and the lifecycle wiring happens automatically.
+## Troubleshooting
+- **Missing tasks** – verify `TASK_BITABLE_URL` points to a view with Status=`pending/failed`, App matches the `Start` argument, and the service account has permission to read.
+- **Recorder errors** – leave `DEVICE_BITABLE_URL`/`DEVICE_TASK_BITABLE_URL` empty to disable, or double-check field overrides align with your schema.
+- **Result uploads throttled** – increase `RESULT_REPORT_BATCH`, relax `RESULT_REPORT_POLL_INTERVAL`, or scale `FEISHU_REPORT_RPS` to avoid 99991400 responses.
+- **Webhook retries** – inspect `Webhook` column (pending/failed/error) and run `cmd/piracy webhook-worker` with the same App filter; see [`docs/webhook-worker.md`](docs/webhook-worker.md) for retry semantics.
 
-## Feishu Task Pull Priority
-
-`FeishuTaskClient.FetchAvailableTasks` / `fetchTodayPendingFeishuTasks` 会按如下优先级逐段拉取，**每段只补足当前剩余缺口（limit-len(result)），凑满即停**，并忽略 `Scene` 为空的任务：
-
-1) Scene=个人页搜索，Status=pending，带 Datetime（Today）
-2) Scene=个人页搜索，Status=pending，未带 Datetime
-3) Scene=个人页搜索，Status=failed，带 Datetime（Today）
-4) Scene=个人页搜索，Status=failed，未带 Datetime
-5) Scene=综合页搜索，Status=pending，带 Datetime（Today）
-6) Scene=综合页搜索，Status=pending，未带 Datetime
-7) Scene=综合页搜索，Status=failed，带 Datetime（Today）
-8) Scene=综合页搜索，Status=pending，未带 Datetime
-
-这样可以确保“当天任务”先被分配，同一优先级不足时才用下一段补齐。
-
-## Development & Testing
-- Format/lint: `go fmt ./...` and `go vet ./...` to keep style consistent.
-- Unit tests: `go test ./...` covers pool orchestration and Feishu helpers via mocks.
-- Live integration: enable `FEISHU_LIVE_TEST=1` before running `go test ./feishu -run Live`; these tests will touch real Bitables, so only run them in disposable environments.
-
-## Documentation & Support
-- Contributor guide: see `AGENTS.md` for coding standards, testing expectations, and security notes.
-- Feishu integration: `feishu/README.md` details schema expectations, sample payloads, and troubleshooting steps.
-- Search result storage: `docs/RESULT_STORAGE.md` explains the SQLite-first workflow, async Feishu reporter knobs, and piracy detection data source.
-- Issues & ideas: open a GitHub issue with logs (scrub secrets) and the command/output you ran (`go test`, `go build`, etc.).
+## Further reading
+- [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) – comprehensive list of configuration keys.
+- [`docs/result-storage.md`](docs/result-storage.md) – SQLite + async reporter internals.
+- [`docs/piracy-group-tasks.md`](docs/piracy-group-tasks.md) – how group child tasks and webhooks are derived.
+- [`docs/webhook-worker.md`](docs/webhook-worker.md) – webhook lifecycle and CLI usage.
+- [`docs/feishu-api-summary.md`](docs/feishu-api-summary.md) – Bitable API reference for this repo.
+- [`AGENTS.md`](AGENTS.md) – contributor workflow and coding standards.

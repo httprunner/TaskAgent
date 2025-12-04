@@ -41,6 +41,10 @@
 │  ├─ 合集视频采集 (Params=3xz7ghufhmggzfy) [可选]         │
 │  └─ 视频锚点采集 (Params=kwai://...) [可选, 可多个]      │
 └─────────────────────────────────────────────────────────┘
+    │
+    ▼
+Webhook worker (见 `docs/webhook-worker.md`) 监控 GroupID，全部任务
+`Status=success` 后触发一次 webhook。
 ```
 
 ## 4. GroupID 格式
@@ -60,10 +64,10 @@
 
 ### 5.1 数据源优先级
 
-1. **SQLite（优先）**: 本地 `capture_results` 表，数据采集后立即可用
-2. **飞书多维表格（fallback）**: 当 sqlite 查询失败或返回空时使用
+1. **SQLite（优先）**: 本地 `capture_results` 表，数据采集后立即可用，查询条件 = `Params` + `UserID`，延迟最小。
+2. **飞书多维表格（fallback）**: 当 SQLite 查询失败或结果为空时，使用 `feishu.FetchBitableRows` 再次尝试。
 
-> 优先使用 sqlite 的原因：飞书多维表格的上报是异步的且有频率控制，采集完成后数据可能还未上报完成，导致读取不到或读取不完整。
+> SQLite 写入与飞书上报解耦：`pkg/storage/sqlite_reporter` 异步推送 `RESULT_BITABLE_URL`，因此即时数据一定先出现在 SQLite。保持数据库在线即可避免“刚采集完但飞书尚未可见”的窗口。
 
 ### 5.2 数据结构
 
@@ -110,7 +114,7 @@ for idx, detail := range matchDetails {
 
 **去重规则**:
 - 合集视频采集：同一 GroupID 只创建 1 个（取第一个匹配的视频）
-- 视频锚点采集：按 appLink 去重
+- 视频锚点采集：按 appLink 去重，同一锚点不重复建任务
 
 ## 7. 任务表字段
 
@@ -136,9 +140,23 @@ for idx, detail := range matchDetails {
 | 检测+获取视频详情 | pkg/piracy/reporter.go | `DetectMatchesWithDetails` |
 | 创建子任务 | pkg/piracy/reporter.go | `CreateGroupTasksForPiracyMatches` |
 | 工作流调度 | biz/fox/search/piracy_workflow.go | `handleGeneralSearch` |
-| Webhook 处理 | pkg/piracy/webhook_worker.go | `processOnce` |
+| Webhook 处理 | pkg/piracy/webhook_worker.go | `processOnce`、`handleGroupRow` |
+| SQLite/飞书查询 | pkg/piracy/sqlite_source.go / pkg/feishu/bitable.go | `FetchFromSQLite`, `FetchBitableRows` |
 | 辅助函数 | pkg/piracy/helpers.go | `FindFirstCollectionVideo`, `ExtractAppLink` |
 
 ## 9. 飞书表配置
 
 需在任务表中添加 `GroupID` 字段（文本类型）用于任务分组。
+
+## 10. 端到端示例
+
+| 步骤 | 输入/状态 | 说明 |
+| --- | --- | --- |
+| 1 | 综合页搜索任务 TaskID=123，Params="短剧A"，用户=U1 | 任务完成后将结果写入 SQLite + Feishu。 |
+| 2 | `DetectMatchesWithDetails` 返回 2 条嫌疑线索 (ItemID=I1/I2) | 同时包含 Tags、AnchorPoint。 |
+| 3 | `CreateGroupTasksForPiracyMatches` 生成 | group `123_1`: 个人页搜索 + 合集视频(I1) + 两个锚点任务；group `123_2`: 个人页搜索 + 合集视频(I2)；appLink 重复会被丢弃。 |
+| 4 | 设备执行子任务 | `TaskLifecycle` 驱动状态从 pending→dispatched→running→success。 |
+| 5 | Webhook worker (`cmd/piracy webhook-worker`) 轮询 | 发现 GroupID=`123_1` 下所有任务 `Status=success` 且 `Webhook` 仍为 pending。 |
+| 6 | `sendGroupWebhook` 汇总 SQLite/Feishu 结果 | `RecordLimit=-1`，推送完整线索；成功后整组 `Webhook=success`，失败则 `Webhook=failed` 并等待下一轮重试。 |
+
+这样一来，同一盗版线索只会触发一次 webhook，且数据来源优先使用 SQLite 保证实时性。

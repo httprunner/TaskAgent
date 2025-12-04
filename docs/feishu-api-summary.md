@@ -1,6 +1,19 @@
 # TaskAgent 飞书 API 使用文档
 
-本文档总结了 TaskAgent 中使用的飞书多维表格（Bitable）API 接口。
+本文档总结了 TaskAgent 中使用的飞书多维表格（Bitable）API，并解释了对应的代码入口、鉴权方式、分页策略以及频控/错误处理技巧。
+
+## 鉴权与基础配置
+- TaskAgent 通过 `pkg/feishu.Client` 统一封装鉴权，所有请求都会使用 `.env` 中的 `FEISHU_APP_ID` / `FEISHU_APP_SECRET` 获取 tenant access token，可选 `FEISHU_TENANT_KEY` / `FEISHU_BASE_URL`。
+- `internal/envload.Ensure` 会自动加载 `.env`，无需在命令行手动 `export`。
+- 结果表写入存在全局限速器（`FEISHU_REPORT_RPS`，默认 1 RPS），位于 `pkg/feishu/storage.go`，用来避免频繁触发 99991400 频控错误。
+
+## 分页、筛选与重试策略
+- `Client.listBitableRecords` 封装了分页逻辑：传入 `page_size`（TaskAgent 默认 200）、`page_token`，并在 `has_more` 为真时继续抓取。
+- 查询接口统一支持 filter/sort/view 参数，`pkg/feishu/filters.go` 提供了构建过滤表达式的 helpers。
+- 所有请求都会带上 `context.Context`，设备离线或 CLI 退出时可立即取消未完成的 HTTP 调用。
+- 网络抖动或 5xx 会由上层调用（如 `pkg/storage/sqlite_reporter.go`）捕获并记录，失败记录设置 `reported=-1`，下次重试。
+
+## 1. 新增记录 (Create Record)
 
 ## 1. 新增记录 (Create Record)
 
@@ -12,7 +25,7 @@
     - `fields`: (Map) 记录的字段内容，Key 为字段名，Value 为字段值。
 - **关键响应数据**:
     - `record`: (Object) 创建成功的记录信息，包含 `record_id` 和 `fields`。
-- **接口频率限制**: 50 次/秒
+- **接口频率限制**: 50 次/秒（受全局 RPS 限制器保护）
 - **代码实现**: `Client.CreateBitableRecord` (内部方法), `Client.CreateTaskRecord`, `Client.CreateResultRecord`
 
 ## 2. 更新记录 (Update Record)
@@ -45,7 +58,7 @@
     - `has_more`: (Boolean) 是否还有更多记录。
     - `page_token`: (String) 下一页的分页标记。
     - `total`: (Integer) 总记录数。
-- **接口频率限制**: 20 次/秒
+- **接口频率限制**: 20 次/秒；配合 `page_token` 逐页拉取
 - **代码实现**: `Client.listBitableRecords` (内部方法), `Client.FetchTaskTable`, `Client.FetchBitableRows`
 
 ## 4. 新增多条记录 (Batch Create Records)
@@ -89,3 +102,21 @@
     - `forbidden_record_ids`: (Array) 无权限的记录 ID。
 - **接口频率限制**: 20 次/秒
 - **代码实现**: `Client.BatchGetBitableRecords`, `Client.getBitableRecord` (内部方法，基于此接口封装)
+
+## 错误处理与排查
+- **鉴权失败**：确认 `.env` 中 `FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_TENANT_KEY` 是否正确，或刷新凭证。
+- **频控 (99991400)**：调低 `FEISHU_REPORT_RPS`、增加 `RESULT_REPORT_POLL_INTERVAL`、或减小 `RESULT_REPORT_BATCH`。
+- **字段不匹配**：检查 `TASK_FIELD_* / RESULT_FIELD_* / DEVICE_FIELD_*` 是否覆盖为自定义列名，并调用 `feishu.RefreshFieldMappings()` 重新加载。
+- **分页缺失**：确保消费 `has_more` 和 `page_token`，TaskAgent 的 helper 已自动完成，但自定义脚本需自行循环。
+
+## 代码入口速查表
+
+| 功能 | 文件 | 函数 |
+| --- | --- | --- |
+| 获取 Client | `pkg/feishu/client.go` | `NewClientFromEnv` |
+| 任务表 CRUD | `pkg/feishu/bitable.go` | `CreateTaskRecord(s)`, `UpdateTaskStatus`, `FetchTaskTable` |
+| 结果表写入 | `pkg/feishu/storage.go` | `NewResultStorage`, `CreateResultRecord`, RPS 限速器 |
+| 设备表写入 | `pkg/feishu/device_info.go` | `UpsertDevice`, `DeviceFieldsFromEnv` |
+| 设备任务表 | `pkg/devrecorder/feishu_recorder.go` / `pkg/storage/storage.go` | 通过 `DEVICE_TASK_BITABLE_URL` 记录派发历史 |
+
+更多字段/环境变量说明见 [`ENVIRONMENT.md`](ENVIRONMENT.md)。
