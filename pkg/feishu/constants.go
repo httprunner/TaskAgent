@@ -17,6 +17,8 @@ const (
 	EnvResultBitableURL = "RESULT_BITABLE_URL"
 	// EnvDeviceBitableURL indicates where to pull/push Feishu device status rows.
 	EnvDeviceBitableURL = "DEVICE_BITABLE_URL"
+	// EnvCookieBitableURL points to the dedicated cookies table for SingleURLWorker.
+	EnvCookieBitableURL = "COOKIE_BITABLE_URL"
 
 	// StatusPending marks a task row as pending execution.
 	StatusPending = "pending"
@@ -28,6 +30,10 @@ const (
 	StatusDispatched = "dispatched"
 	// StatusRunning marks a task row as currently executing.
 	StatusRunning = "running"
+	// CookieStatusValid marks a cookie row as usable.
+	CookieStatusValid = "valid"
+	// CookieStatusInvalid marks a cookie row as unusable.
+	CookieStatusInvalid = "invalid"
 	// WebhookPending marks a task that requires webhook synchronization.
 	WebhookPending = "pending"
 	// WebhookSuccess marks a task whose webhook synchronization succeeded.
@@ -60,6 +66,8 @@ var (
 		Scene:            "Scene",            // 场景名称
 		Params:           "Params",           // 查询参数
 		ItemID:           "ItemID",           // 单资源标识
+		BookID:           "BookID",           // 短剧 Book ID
+		URL:              "URL",              // 视频 URL
 		UserID:           "UserID",           // 用户 ID
 		UserName:         "UserName",         // 用户名称
 		Datetime:         "Datetime",         // 任务执行时间配置
@@ -75,6 +83,15 @@ var (
 		Extra:            "Extra",            // 额外信息
 	}
 	DefaultTaskFields = baseTaskFields
+)
+
+var (
+	baseCookieFields = CookieFields{
+		Cookies:  "Cookies",
+		Platform: "Platform",
+		Status:   "Status",
+	}
+	DefaultCookieFields = baseCookieFields
 )
 
 // DefaultResultFields matches the schema required by the capture result table.
@@ -122,9 +139,11 @@ func RefreshFieldMappings() {
 	DefaultTaskFields = baseTaskFields
 	DefaultResultFields = baseResultFields
 	DefaultDramaFields = baseDramaFields
+	DefaultCookieFields = baseCookieFields
 	applyTaskFieldEnvOverrides(&DefaultTaskFields)
 	applyResultFieldEnvOverrides(&DefaultResultFields)
 	applyDramaFieldEnvOverrides(&DefaultDramaFields)
+	applyCookieFieldEnvOverrides(&DefaultCookieFields)
 }
 
 func applyTaskFieldEnvOverrides(fields *TaskFields) {
@@ -136,6 +155,8 @@ func applyTaskFieldEnvOverrides(fields *TaskFields) {
 	overrideFieldFromEnv("TASK_FIELD_SCENE", &fields.Scene)
 	overrideFieldFromEnv("TASK_FIELD_PARAMS", &fields.Params)
 	overrideFieldFromEnv("TASK_FIELD_ITEMID", &fields.ItemID)
+	overrideFieldFromEnv("TASK_FIELD_BOOKID", &fields.BookID)
+	overrideFieldFromEnv("TASK_FIELD_URL", &fields.URL)
 	overrideFieldFromEnv("TASK_FIELD_USERID", &fields.UserID)
 	overrideFieldFromEnv("TASK_FIELD_USERNAME", &fields.UserName)
 	overrideFieldFromEnv("TASK_FIELD_DATETIME", &fields.Datetime)
@@ -194,6 +215,15 @@ func applyDramaFieldEnvOverrides(fields *DramaFields) {
 	overrideFieldFromEnv("DRAMA_FIELD_EPISODE_COUNT", &fields.EpisodeCount)
 	overrideFieldFromEnv("DRAMA_FIELD_PRIORITY", &fields.Priority)
 	overrideFieldFromEnv("DRAMA_FIELD_RIGHTS_SCENARIO", &fields.RightsProtectionScenario)
+}
+
+func applyCookieFieldEnvOverrides(fields *CookieFields) {
+	if fields == nil {
+		return
+	}
+	overrideFieldFromEnv("COOKIE_FIELD_COOKIES", &fields.Cookies)
+	overrideFieldFromEnv("COOKIE_FIELD_PLATFORM", &fields.Platform)
+	overrideFieldFromEnv("COOKIE_FIELD_STATUS", &fields.Status)
 }
 
 func overrideFieldFromEnv(env string, target *string) {

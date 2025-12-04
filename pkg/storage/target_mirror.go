@@ -20,6 +20,8 @@ type TaskStatus struct {
 	TaskID           int64
 	Params           string
 	ItemID           string
+	BookID           string
+	URL              string
 	App              string
 	Scene            string
 	StartAt          *time.Time
@@ -98,6 +100,8 @@ func buildTaskColumnOrder(fields feishu.TaskFields) []string {
 		fields.TaskID,
 		fields.Params,
 		fields.ItemID,
+		fields.BookID,
+		fields.URL,
 		fields.App,
 		fields.Scene,
 		fields.StartAt,
@@ -120,6 +124,8 @@ func ensureTaskSchema(db *sql.DB, table string, fields feishu.TaskFields, column
 		fmt.Sprintf("%s INTEGER PRIMARY KEY", quoteIdent(fields.TaskID)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.Params)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.ItemID)),
+		fmt.Sprintf("%s TEXT", quoteIdent(fields.BookID)),
+		fmt.Sprintf("%s TEXT", quoteIdent(fields.URL)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.App)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.Scene)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.StartAt)),
@@ -143,6 +149,12 @@ func ensureTaskSchema(db *sql.DB, table string, fields feishu.TaskFields, column
 		return errors.Wrap(err, "create capture targets table failed")
 	}
 	if err := ensureColumnExists(db, table, fields.ItemID, "TEXT"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(db, table, fields.BookID, "TEXT"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(db, table, fields.URL, "TEXT"); err != nil {
 		return err
 	}
 	if err := ensureColumnExists(db, table, fields.StartAt, "TEXT"); err != nil {
@@ -236,6 +248,8 @@ func (m *TaskMirror) upsert(task *TaskStatus) error {
 		task.TaskID,
 		nullableString(task.Params),
 		nullableString(task.ItemID),
+		nullableString(task.BookID),
+		nullableString(task.URL),
 		nullableString(task.App),
 		nullableString(task.Scene),
 		formatDatetime(task.StartAtRaw, task.StartAt),

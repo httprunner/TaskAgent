@@ -22,6 +22,18 @@
 | `DEVICE_BITABLE_URL` | Optional | empty | `pkg/devrecorder` | Device heartbeat table; leave blank to disable recorder writes. |
 | `DEVICE_TASK_BITABLE_URL` | Optional | empty | `pkg/devrecorder`, `pkg/storage` | Device-dispatch history table (one row per job). |
 
+## 资源下载服务
+
+| Variable | Required | Default | Used by | Description |
+| --- | --- | --- | --- | --- |
+| `CRAWLER_SERVICE_BASE_URL` | Optional | `http://localhost:8080` | `pool/single_url_worker` | Base URL for `content_web_crawler` 的 `/download/tasks` API，SingleURLWorker 始终携带 `sync_to_hive=true` 并轮询 Redis 持久化的 job 状态。 |
+| `COOKIE_BITABLE_URL` | Optional | – | `pool/single_url_worker` | Feishu bitable storing account cookies（字段：`Cookies`、`Platform`、`Status`），worker 会轮询 `Status=valid` 的 cookies 并随机/轮流使用。 |
+
+Cookies 表字段要求：
+- `Cookies`：账号 Web 登录态字符串；
+- `Platform`：平台名称；
+- `Status`：`valid` / `invalid`，SingleURLWorker 仅挑选 `valid` 行，后续会在验证失败时写回 `invalid`（预留能力）。
+
 ## Field overrides
 
 TaskAgent exposes per-table override knobs so you can align with custom schemas without recompiling. Leave them unset to keep the defaults defined in `pkg/feishu/constants.go`.
@@ -31,13 +43,15 @@ TaskAgent exposes per-table override knobs so you can align with custom schemas 
 | --- | --- | --- |
 | `TASK_FIELD_TASKID` | `TaskID` | Primary identifier column. |
 | `TASK_FIELD_APP` | `App` | App/platform name used for filtering by `agent.Start(ctx, app)`. |
-| `TASK_FIELD_SCENE` | `Scene` | Scene name (个人页搜索、综合页搜索、视频录屏采集等). |
+| `TASK_FIELD_SCENE` | `Scene` | Scene name (个人页搜索、综合页搜索、视频录屏采集、单个链接采集等). |
 | `TASK_FIELD_PARAMS` | `Params` | Parameters/payload column consumed by runners. |
 | `TASK_FIELD_ITEMID` | `ItemID` | Single-resource identifier for specialized scenes. |
+| `TASK_FIELD_BOOKID` | `BookID` | Drama identifier required by “单个链接采集”任务。|
+| `TASK_FIELD_URL` | `URL` | 视频分享链接地址，单个链接采集 worker 会直接使用。|
 | `TASK_FIELD_USERID` | `UserID` | User identifier. |
 | `TASK_FIELD_USERNAME` | `UserName` | User display name. |
 | `TASK_FIELD_DATETIME` | `Datetime` | Optional scheduling field. |
-| `TASK_FIELD_STATUS` | `Status` | Task lifecycle status (pending/dispatched/running/success/failed). |
+| `TASK_FIELD_STATUS` | `Status` | Task lifecycle status (pending/queued/dispatched/running/success/failed). |
 | `TASK_FIELD_WEBHOOK` | `Webhook` | Webhook dispatch state (pending/success/failed/error). |
 | `TASK_FIELD_GROUPID` | `GroupID` | Piracy group-task identifier. |
 | `TASK_FIELD_DEVICE_SERIAL` | `DeviceSerial` | Target device serial (optional pre-allocation). |

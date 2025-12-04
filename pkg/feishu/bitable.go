@@ -36,6 +36,8 @@ type TaskFields struct {
 	Scene            string
 	Params           string
 	ItemID           string
+	BookID           string
+	URL              string
 	UserID           string
 	UserName         string
 	Datetime         string
@@ -51,12 +53,21 @@ type TaskFields struct {
 	ElapsedSeconds   string
 }
 
+// CookieFields lists the expected columns for the cookies table.
+type CookieFields struct {
+	Cookies  string
+	Platform string
+	Status   string
+}
+
 // TaskRow represents a single task row stored inside the task status table.
 type TaskRow struct {
 	RecordID         string
 	TaskID           int64
 	Params           string
 	ItemID           string
+	BookID           string
+	URL              string
 	App              string
 	Scene            string
 	StartAt          *time.Time
@@ -78,6 +89,14 @@ type TaskRow struct {
 	ElapsedSeconds   int64
 }
 
+// CookieRow represents a single row stored inside the cookies table.
+type CookieRow struct {
+	RecordID string
+	Cookies  string
+	Platform string
+	Status   string
+}
+
 // TaskRecordInput describes the payload needed to create a new record.
 // If TaskID is zero, the field is omitted so Feishu can auto-increment it.
 // DatetimeRaw takes precedence if both it and Datetime are set.
@@ -85,6 +104,8 @@ type TaskRecordInput struct {
 	TaskID           int64
 	Params           string
 	ItemID           string
+	BookID           string
+	URL              string
 	App              string
 	Scene            string
 	StartAt          *time.Time
@@ -194,6 +215,71 @@ type TaskStatusUpdate struct {
 type TaskRowError struct {
 	RecordID string
 	Err      error
+}
+
+// FetchCookieRows loads cookie rows filtered by platform/status.
+func (c *Client) FetchCookieRows(ctx context.Context, rawURL string, override *CookieFields, platform string) ([]CookieRow, error) {
+	if c == nil {
+		return nil, errors.New("feishu: client is nil")
+	}
+	if strings.TrimSpace(rawURL) == "" {
+		return nil, errors.New("feishu: cookie table url is empty")
+	}
+	fields := DefaultCookieFields
+	if override != nil {
+		fields = *override
+	}
+	ref, err := ParseBitableURL(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.ensureBitableAppToken(ctx, &ref); err != nil {
+		return nil, err
+	}
+	f := NewFilterInfo("and")
+	if trimmed := strings.TrimSpace(platform); trimmed != "" {
+		if cond := NewCondition(fields.Platform, "is", trimmed); cond != nil {
+			f.Conditions = append(f.Conditions, cond)
+		}
+	}
+	opts := &TaskQueryOptions{Filter: f}
+	records, err := c.listBitableRecords(ctx, ref, defaultBitablePageSize, opts)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]CookieRow, 0, len(records))
+	for _, rec := range records {
+		if rec.Fields == nil {
+			continue
+		}
+		value := strings.TrimSpace(bitableOptionalString(rec.Fields, fields.Cookies))
+		if value == "" {
+			continue
+		}
+		status := strings.TrimSpace(bitableOptionalString(rec.Fields, fields.Status))
+		if isCookieStatusInvalid(status) {
+			continue
+		}
+		row := CookieRow{
+			RecordID: rec.RecordID,
+			Cookies:  value,
+			Platform: strings.TrimSpace(bitableOptionalString(rec.Fields, fields.Platform)),
+			Status:   status,
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
+func isCookieStatusInvalid(status string) bool {
+	trimmed := strings.ToLower(strings.TrimSpace(status))
+	if trimmed == "" {
+		return false
+	}
+	if trimmed == strings.ToLower(CookieStatusInvalid) {
+		return true
+	}
+	return trimmed != strings.ToLower(CookieStatusValid)
 }
 
 // TaskTable contains decoded rows alongside a quick lookup index.
@@ -973,6 +1059,8 @@ func buildTaskRecordPayloads(records []TaskRecordInput, fields TaskFields) ([]ma
 			row[fields.TaskID] = rec.TaskID
 		}
 		addOptionalField(row, fields.ItemID, rec.ItemID)
+		addOptionalField(row, fields.BookID, rec.BookID)
+		addOptionalField(row, fields.URL, rec.URL)
 		addOptionalField(row, fields.Params, rec.Params)
 		addOptionalField(row, fields.App, rec.App)
 		addOptionalField(row, fields.Scene, rec.Scene)
@@ -1311,6 +1399,8 @@ func decodeTaskRow(rec bitableRecord, fields TaskFields) (TaskRow, error) {
 		TaskID:           taskID,
 		Params:           bitableOptionalString(rec.Fields, fields.Params),
 		ItemID:           bitableOptionalString(rec.Fields, fields.ItemID),
+		BookID:           bitableOptionalString(rec.Fields, fields.BookID),
+		URL:              bitableOptionalString(rec.Fields, fields.URL),
 		App:              bitableOptionalString(rec.Fields, fields.App),
 		Scene:            bitableOptionalString(rec.Fields, fields.Scene),
 		Status:           status,

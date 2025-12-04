@@ -338,6 +338,8 @@ type FeishuTask struct {
 	TaskID           int64
 	Params           string
 	ItemID           string
+	BookID           string
+	URL              string
 	App              string
 	Scene            string
 	Status           string
@@ -346,6 +348,7 @@ type FeishuTask struct {
 	UserID           string
 	UserName         string
 	Extra            string
+	GroupID          string
 	DeviceSerial     string
 	DispatchedDevice string
 	StartAt          *time.Time
@@ -371,6 +374,8 @@ func toStorageTaskStatus(task *FeishuTask) *storage.TaskStatus {
 		TaskID:           task.TaskID,
 		Params:           task.Params,
 		ItemID:           task.ItemID,
+		BookID:           task.BookID,
+		URL:              task.URL,
 		App:              task.App,
 		Scene:            task.Scene,
 		StartAt:          task.StartAt,
@@ -410,6 +415,7 @@ const (
 	SceneCollection         = "合集视频采集"
 	SceneAnchorCapture      = "视频锚点采集"
 	SceneVideoScreenCapture = "视频录屏采集"
+	SceneSingleURLCapture   = "单个链接采集"
 )
 
 func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient, bitableURL, app string, limit int) ([]*FeishuTask, error) {
@@ -433,6 +439,8 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient,
 	}{
 		{scene: SceneVideoScreenCapture, status: feishu.StatusPending},
 		{scene: SceneVideoScreenCapture, status: feishu.StatusFailed},
+		{scene: SceneSingleURLCapture, status: feishu.StatusPending},
+		{scene: SceneSingleURLCapture, status: feishu.StatusFailed},
 		{scene: SceneGeneralSearch, status: feishu.StatusPending},
 		{scene: SceneProfileSearch, status: feishu.StatusPending},
 		{scene: SceneCollection, status: feishu.StatusPending},
@@ -552,6 +560,9 @@ func fetchFeishuTasksWithFilter(ctx context.Context, client targetTableClient, b
 			TaskID:           row.TaskID,
 			Params:           params,
 			ItemID:           itemID,
+			BookID:           strings.TrimSpace(row.BookID),
+			URL:              strings.TrimSpace(row.URL),
+			GroupID:          strings.TrimSpace(row.GroupID),
 			App:              row.App,
 			Scene:            row.Scene,
 			Status:           row.Status,
