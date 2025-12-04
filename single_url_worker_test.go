@@ -21,6 +21,7 @@ func TestSingleURLWorkerQueuesTaskAfterCreatingCrawlerJob(t *testing.T) {
 					Params: "capture",
 					BookID: "B001",
 					UserID: "U001",
+					App:    "kuaishou",
 					URL:    "https://example.com/video",
 				},
 			},
@@ -47,6 +48,16 @@ func TestSingleURLWorkerQueuesTaskAfterCreatingCrawlerJob(t *testing.T) {
 	if got := crawler.createdURLs[0]; got != "https://example.com/video" {
 		t.Fatalf("unexpected url %s", got)
 	}
+	meta := crawler.createdMeta[0]
+	if got := meta["platform"]; got != "kuaishou" {
+		t.Fatalf("unexpected platform %s", got)
+	}
+	if got := meta["bid"]; got != "B001" {
+		t.Fatalf("unexpected bid %s", got)
+	}
+	if got := meta["uid"]; got != "U001" {
+		t.Fatalf("unexpected uid %s", got)
+	}
 	if len(client.updateCalls) == 0 {
 		t.Fatalf("no update calls recorded")
 	}
@@ -71,6 +82,7 @@ func TestSingleURLWorkerUsesCookiesWhenAvailable(t *testing.T) {
 					Params: "capture",
 					BookID: "B010",
 					UserID: "U010",
+					App:    "kuaishou",
 					URL:    "https://example.com/cookie",
 				},
 			},
@@ -158,7 +170,7 @@ func TestSingleURLWorkerMarksCrawlerFailure(t *testing.T) {
 	client := &singleURLTestClient{
 		rows: map[string][]feishusvc.TaskRow{
 			feishusvc.StatusPending: {
-				{TaskID: 3, Scene: SceneSingleURLCapture, Status: feishusvc.StatusPending, Params: "capture", BookID: "B003", UserID: "U003", URL: "https://example.com/3"},
+				{TaskID: 3, Scene: SceneSingleURLCapture, Status: feishusvc.StatusPending, Params: "capture", BookID: "B003", UserID: "U003", App: "kuaishou", URL: "https://example.com/3"},
 			},
 		},
 	}
@@ -267,13 +279,19 @@ type stubCrawlerClient struct {
 	statuses       map[string]*crawlerTaskStatus
 	createdURLs    []string
 	createdCookies [][]string
+	createdMeta    []map[string]string
 	queriedJobID   []string
 }
 
-func (c *stubCrawlerClient) CreateTask(_ context.Context, url string, cookies []string) (string, error) {
+func (c *stubCrawlerClient) CreateTask(_ context.Context, url string, cookies []string, meta map[string]string) (string, error) {
 	c.createdURLs = append(c.createdURLs, url)
 	copyCookies := append([]string(nil), cookies...)
 	c.createdCookies = append(c.createdCookies, copyCookies)
+	copyMeta := make(map[string]string, len(meta))
+	for k, v := range meta {
+		copyMeta[k] = v
+	}
+	c.createdMeta = append(c.createdMeta, copyMeta)
 	if c.createErr != nil {
 		return "", c.createErr
 	}

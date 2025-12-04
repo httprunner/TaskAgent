@@ -258,7 +258,17 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 		return nil
 	}
 	cookies := w.collectCookies(ctx)
-	jobID, err := w.crawler.CreateTask(ctx, url, cookies)
+	metaPayload := make(map[string]string, 3)
+	if platform := strings.TrimSpace(task.App); platform != "" {
+		metaPayload["platform"] = platform
+	}
+	if bookID != "" {
+		metaPayload["bid"] = bookID
+	}
+	if userID != "" {
+		metaPayload["uid"] = userID
+	}
+	jobID, err := w.crawler.CreateTask(ctx, url, cookies, metaPayload)
 	if err != nil {
 		return w.failSingleURLTask(ctx, task, fmt.Sprintf("create job failed: %v", err), nil)
 	}

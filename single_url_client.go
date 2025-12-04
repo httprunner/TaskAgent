@@ -15,7 +15,7 @@ import (
 )
 
 type crawlerTaskClient interface {
-	CreateTask(ctx context.Context, url string, cookies []string) (string, error)
+	CreateTask(ctx context.Context, url string, cookies []string, meta map[string]string) (string, error)
 	GetTask(ctx context.Context, jobID string) (*crawlerTaskStatus, error)
 }
 
@@ -45,12 +45,26 @@ func newRESTCrawlerTaskClient(baseURL string, httpClient *http.Client) (crawlerT
 	return &restCrawlerTaskClient{baseURL: baseURL, httpClient: httpClient}, nil
 }
 
-func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, cookies []string) (string, error) {
-	log.Debug().Str("url", url).Int("cookies", len(cookies)).Msg("creating crawler task")
+func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, cookies []string, meta map[string]string) (string, error) {
+	logEvent := log.Debug().Str("url", url).Int("cookies", len(cookies))
+	cleanMeta := make(map[string]string, len(meta))
+	for k, v := range meta {
+		trimmedKey := strings.TrimSpace(k)
+		trimmedVal := strings.TrimSpace(v)
+		if trimmedKey == "" || trimmedVal == "" {
+			continue
+		}
+		cleanMeta[trimmedKey] = trimmedVal
+		logEvent = logEvent.Str(trimmedKey, trimmedVal)
+	}
+	logEvent.Msg("creating crawler task")
 	payload := map[string]any{
 		"url":          strings.TrimSpace(url),
 		"cookies":      normalizeCookies(cookies),
 		"sync_to_hive": true,
+	}
+	for k, v := range cleanMeta {
+		payload[k] = v
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
