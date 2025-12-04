@@ -53,3 +53,54 @@ func TestEligibleForWebhook(t *testing.T) {
 		})
 	}
 }
+
+func TestFilterTasksWithStatus(t *testing.T) {
+	rows := []feishu.TaskRow{
+		{TaskID: 1, Status: ""},
+		{TaskID: 2, Status: feishu.StatusSuccess},
+		{TaskID: 3, Status: " success "},
+	}
+	filtered := filterTasksWithStatus(rows)
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2 filtered rows, got %d", len(filtered))
+	}
+	if filtered[0].TaskID != 2 || filtered[1].TaskID != 3 {
+		t.Fatalf("unexpected filtered task ids: %+v", filtered)
+	}
+}
+
+func TestAllGroupTasksSuccessIgnoresEmptyStatus(t *testing.T) {
+	cases := []struct {
+		name  string
+		rows  []feishu.TaskRow
+		ready bool
+	}{
+		{
+			name:  "all success",
+			rows:  []feishu.TaskRow{{Status: feishu.StatusSuccess}, {Status: " success "}},
+			ready: true,
+		},
+		{
+			name:  "includes empty statuses",
+			rows:  []feishu.TaskRow{{Status: ""}, {Status: feishu.StatusSuccess}},
+			ready: true,
+		},
+		{
+			name:  "missing evaluated",
+			rows:  []feishu.TaskRow{{Status: ""}},
+			ready: false,
+		},
+		{
+			name:  "contains failure",
+			rows:  []feishu.TaskRow{{Status: feishu.StatusSuccess}, {Status: feishu.StatusFailed}},
+			ready: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := allGroupTasksSuccess(tc.rows); got != tc.ready {
+				t.Fatalf("allGroupTasksSuccess()=%v, want %v", got, tc.ready)
+			}
+		})
+	}
+}

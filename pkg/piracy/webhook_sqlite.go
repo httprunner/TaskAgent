@@ -154,6 +154,12 @@ func (s *sqliteSummarySource) FetchRecords(ctx context.Context, query recordQuer
 		builder.WriteString(" = ?")
 		args = append(args, app)
 	}
+	if scene := strings.TrimSpace(query.Scene); scene != "" {
+		builder.WriteString(" AND ")
+		builder.WriteString(s.column(s.fields.Result.Scene))
+		builder.WriteString(" = ?")
+		args = append(args, scene)
+	}
 	if userID := strings.TrimSpace(query.UserID); userID != "" {
 		builder.WriteString(" AND ")
 		builder.WriteString(quoteIdentifier(s.fields.Result.UserID))
@@ -168,9 +174,13 @@ func (s *sqliteSummarySource) FetchRecords(ctx context.Context, query recordQuer
 	}
 
 	builder.WriteString(" ORDER BY Datetime DESC")
-	if query.Limit > 0 {
+	limit := query.Limit
+	if query.PreferLatest && (limit <= 0 || limit > 1) {
+		limit = 1
+	}
+	if limit > 0 {
 		builder.WriteString(" LIMIT ?")
-		args = append(args, query.Limit)
+		args = append(args, limit)
 	}
 
 	rows, err := s.db.QueryContext(ctx, builder.String(), args...)

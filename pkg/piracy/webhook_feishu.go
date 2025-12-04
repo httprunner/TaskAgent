@@ -71,6 +71,9 @@ func (s *feishuSummarySource) FetchRecords(ctx context.Context, query recordQuer
 			Fields:   cloneFields(row.Fields),
 		})
 	}
+	if query.PreferLatest {
+		records = pickLatestRecords(records, s.fields.Result.Datetime)
+	}
 	return records, nil
 }
 
@@ -96,16 +99,32 @@ func (s *feishuSummarySource) buildRecordFilter(query recordQuery) *feishu.Filte
 	if query.ExtraFilter != nil {
 		filters = append(filters, query.ExtraFilter)
 	}
+	if trimmed := strings.TrimSpace(query.App); trimmed != "" {
+		filters = append(filters, EqFilter(s.fields.Result.App, trimmed))
+	}
+	if trimmed := strings.TrimSpace(query.Scene); trimmed != "" {
+		filters = append(filters, EqFilter(s.fields.Result.Scene, trimmed))
+	}
 	if trimmed := strings.TrimSpace(query.Params); trimmed != "" {
 		filters = append(filters, BuildParamsFilter([]string{trimmed}, s.fields.Result.Params))
 	}
 	if trimmed := strings.TrimSpace(query.UserID); trimmed != "" {
 		filters = append(filters, EqFilter(s.fields.Result.UserID, trimmed))
 	}
+	if trimmed := strings.TrimSpace(query.UserName); trimmed != "" {
+		filters = append(filters, EqFilter(s.fields.Result.UserName, trimmed))
+	}
 	if trimmed := strings.TrimSpace(query.ItemID); trimmed != "" {
 		filters = append(filters, EqFilter(s.fields.Result.ItemID, trimmed))
 	}
 	return CombineFiltersAND(filters...)
+}
+
+func pickLatestRecords(records []CaptureRecordPayload, datetimeField string) []CaptureRecordPayload {
+	if len(records) <= 1 {
+		return records
+	}
+	return []CaptureRecordPayload{records[len(records)-1]}
 }
 
 func cloneFields(fields map[string]any) map[string]any {

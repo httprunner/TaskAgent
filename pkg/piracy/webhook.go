@@ -37,6 +37,7 @@ type WebhookOptions struct {
 	Params     string
 	UserID     string
 	UserName   string
+	Scene      string
 	WebhookURL string
 
 	// SkipDramaLookup bypasses drama table queries (e.g. for video capture tasks whose Params are JSON payloads).
@@ -44,6 +45,9 @@ type WebhookOptions struct {
 
 	// ItemID narrows capture record queries when Params 不匹配存储值，SkipDramaLookup 为 true 时必填。
 	ItemID string
+
+	// PreferLatest forces the data source to return the newest capture record only.
+	PreferLatest bool
 
 	// Source controls where drama and record data are retrieved from.
 	Source WebhookSource
@@ -133,11 +137,15 @@ func SendSummaryWebhook(ctx context.Context, opts WebhookOptions) (map[string]an
 		queryParams = ""
 	}
 	records, err := ds.FetchRecords(ctx, recordQuery{
-		Params:      queryParams,
-		UserID:      strings.TrimSpace(opts.UserID),
-		Limit:       limit,
-		ExtraFilter: opts.ResultFilter,
-		ItemID:      itemID,
+		App:          strings.TrimSpace(opts.App),
+		Scene:        strings.TrimSpace(opts.Scene),
+		Params:       queryParams,
+		UserID:       strings.TrimSpace(opts.UserID),
+		UserName:     strings.TrimSpace(opts.UserName),
+		ItemID:       itemID,
+		Limit:        limit,
+		PreferLatest: opts.PreferLatest,
+		ExtraFilter:  opts.ResultFilter,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("fetch capture records failed: %w", err)
@@ -420,13 +428,15 @@ type dramaInfo struct {
 
 // recordQuery represents the generic filters used across data sources.
 type recordQuery struct {
-	App         string
-	Params      string
-	UserID      string
-	UserName    string
-	ItemID      string
-	Limit       int
-	ExtraFilter *feishu.FilterInfo
+	App          string
+	Params       string
+	UserID       string
+	UserName     string
+	ItemID       string
+	Scene        string
+	Limit        int
+	PreferLatest bool
+	ExtraFilter  *feishu.FilterInfo
 }
 
 // summaryDataSource fetches drama metadata and capture records from a backend.

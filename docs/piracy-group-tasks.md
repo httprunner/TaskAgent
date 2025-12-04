@@ -1,6 +1,6 @@
 # 盗版检测子任务创建与 Webhook 机制
 
-本文档描述盗版检测工作流中子任务的创建逻辑和 Webhook 触发机制。
+本文档描述盗版检测工作流中子任务的创建逻辑。Webhook 触发与分发流程详见 `docs/webhook-worker.md`。
 
 ## 1. 概述
 
@@ -112,42 +112,7 @@ for idx, detail := range matchDetails {
 - 合集视频采集：同一 GroupID 只创建 1 个（取第一个匹配的视频）
 - 视频锚点采集：按 appLink 去重
 
-## 7. Webhook 触发机制
-
-### 7.1 触发条件
-
-Webhook 仅在以下条件全部满足时触发：
-
-1. 任务状态为 `success`
-2. Webhook 状态为 `pending`
-3. 同一 GroupID 下**所有任务**状态均为 `success`
-
-### 7.2 处理流程
-
-```
-WebhookWorker.processOnce()
-    │
-    ▼
-查询 Status=success & Webhook=pending 的任务
-    │
-    ▼
-按 GroupID 分组
-    │
-    ▼
-┌─────────────────────────────────┐
-│  对每个 GroupID:                 │
-│  1. 查询该 GroupID 下所有任务     │
-│  2. 检查是否全部 success         │
-│  3. 若是，发送 Webhook           │
-│  4. 更新 Webhook 状态            │
-└─────────────────────────────────┘
-```
-
-### 7.3 GroupID 为空的任务
-
-若任务无 GroupID（旧任务或独立任务），按原有逻辑单独触发 Webhook。
-
-## 8. 任务表字段
+## 7. 任务表字段
 
 子任务创建时设置的字段：
 
@@ -164,7 +129,7 @@ WebhookWorker.processOnce()
 | Webhook | pending |
 | Extra | ratio=xx.xx%（仅个人页搜索） |
 
-## 9. 代码入口
+## 8. 代码入口
 
 | 组件 | 文件 | 函数/方法 |
 |------|------|----------|
@@ -174,6 +139,6 @@ WebhookWorker.processOnce()
 | Webhook 处理 | pkg/piracy/webhook_worker.go | `processOnce` |
 | 辅助函数 | pkg/piracy/helpers.go | `FindFirstCollectionVideo`, `ExtractAppLink` |
 
-## 10. 飞书表配置
+## 9. 飞书表配置
 
 需在任务表中添加 `GroupID` 字段（文本类型）用于任务分组。

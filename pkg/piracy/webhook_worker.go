@@ -34,6 +34,22 @@ type WebhookWorker struct {
 	batchLimit   int
 }
 
+type webhookOutcome struct {
+	successIDs []int64
+	failedIDs  []int64
+	errorIDs   []int64
+}
+
+var webhookCandidatePriority = []struct {
+	scene        string
+	webhookState string
+}{
+	{scene: pool.SceneVideoScreenCapture, webhookState: feishu.WebhookPending},
+	{scene: pool.SceneVideoScreenCapture, webhookState: feishu.WebhookFailed},
+	{scene: pool.SceneProfileSearch, webhookState: feishu.WebhookPending},
+	{scene: pool.SceneProfileSearch, webhookState: feishu.WebhookFailed},
+}
+
 // NewWebhookWorker builds a webhook worker from the provided configuration.
 func NewWebhookWorker(cfg WebhookWorkerConfig) (*WebhookWorker, error) {
 	trimmedURL := strings.TrimSpace(cfg.TaskBitableURL)
@@ -81,10 +97,6 @@ func (w *WebhookWorker) Run(ctx context.Context) error {
 		Int("batch_limit", w.batchLimit).
 		Msg("webhook worker started")
 
-	if err := w.processOnce(ctx); err != nil {
-		log.Error().Err(err).Msg("webhook worker initial scan failed")
-	}
-
 	ticker := time.NewTicker(w.pollInterval)
 	defer ticker.Stop()
 
@@ -125,120 +137,18 @@ func (w *WebhookWorker) processOnce(ctx context.Context) error {
 		if !eligibleForWebhook(row) {
 			continue
 		}
-		params := strings.TrimSpace(row.Params)
-		if params == "" || row.TaskID == 0 {
-			log.Warn().
-				Int64("task_id", row.TaskID).
-				Str("params", params).
-				Msg("skip task missing params or task_id")
-			continue
+		outcome, err := w.processRow(ctx, table, row, processedGroups)
+		if len(outcome.successIDs) > 0 {
+			successIDs = append(successIDs, outcome.successIDs...)
 		}
-
-		groupID := strings.TrimSpace(row.GroupID)
-
-		// Handle grouped tasks
-		if groupID != "" {
-			if processedGroups[groupID] {
-				continue // Already processed this group
-			}
-
-			// Fetch all tasks in the same group
-			groupTasks, err := w.fetchTasksByGroupID(ctx, groupID)
-			if err != nil {
-				errs = append(errs, fmt.Sprintf("fetch group %s tasks failed: %v", groupID, err))
-				continue
-			}
-
-			// Check if all tasks in the group are successful
-			if !allGroupTasksSuccess(groupTasks) {
-				log.Debug().
-					Str("group_id", groupID).
-					Int("total", len(groupTasks)).
-					Int("success", countSuccessTasks(groupTasks)).
-					Msg("group not ready, waiting for all tasks to succeed")
-				continue
-			}
-
-			// All tasks succeeded, send grouped webhook
-			app := w.resolveApp(row.App)
-			if app == "" {
-				errs = append(errs, fmt.Sprintf("group %s missing app", groupID))
-				processedGroups[groupID] = true
-				continue
-			}
-
-			if err := w.sendGroupWebhook(ctx, app, groupID, groupTasks); err != nil {
-				log.Error().Err(err).
-					Str("group_id", groupID).
-					Str("app", app).
-					Int("task_count", len(groupTasks)).
-					Msg("group webhook delivery failed")
-				// Update all tasks in the group as failed
-				taskIDs := extractTaskIDs(groupTasks)
-				failedIDs = append(failedIDs, taskIDs...)
-				if err := w.updateWebhookState(ctx, table, taskIDs, feishu.WebhookFailed); err != nil {
-					errs = append(errs, err.Error())
-				}
-			} else {
-				log.Info().
-					Str("group_id", groupID).
-					Str("app", app).
-					Int("task_count", len(groupTasks)).
-					Msg("group webhook delivered")
-				taskIDs := extractTaskIDs(groupTasks)
-				successIDs = append(successIDs, taskIDs...)
-				if err := w.updateWebhookState(ctx, table, taskIDs, feishu.WebhookSuccess); err != nil {
-					errs = append(errs, err.Error())
-				}
-			}
-
-			processedGroups[groupID] = true
-			continue
+		if len(outcome.failedIDs) > 0 {
+			failedIDs = append(failedIDs, outcome.failedIDs...)
 		}
-
-		// Handle single task (no GroupID) - original logic
-		app := w.resolveApp(row.App)
-		if app == "" {
-			errs = append(errs, fmt.Sprintf("task %d missing app", row.TaskID))
-			continue
+		if len(outcome.errorIDs) > 0 {
+			errorIDs = append(errorIDs, outcome.errorIDs...)
 		}
-		if err := w.sendSummary(ctx, app, params, strings.TrimSpace(row.UserID), strings.TrimSpace(row.UserName), strings.TrimSpace(row.Scene), strings.TrimSpace(row.ItemID)); err != nil {
-			if stdErrors.Is(err, ErrNoCaptureRecords) {
-				log.Warn().
-					Int64("task_id", row.TaskID).
-					Str("params", params).
-					Str("app", app).
-					Str("scene", strings.TrimSpace(row.Scene)).
-					Str("user_id", strings.TrimSpace(row.UserID)).
-					Msg("webhook skipped: no capture records")
-				errorIDs = append(errorIDs, row.TaskID)
-				if err := w.updateWebhookState(ctx, table, []int64{row.TaskID}, feishu.WebhookError); err != nil {
-					errs = append(errs, err.Error())
-				}
-			} else {
-				log.Error().Err(err).
-					Str("webhook_url", w.webhookURL).
-					Int64("task_id", row.TaskID).
-					Str("params", params).
-					Msg("webhook delivery failed")
-				failedIDs = append(failedIDs, row.TaskID)
-				if err := w.updateWebhookState(ctx, table, []int64{row.TaskID}, feishu.WebhookFailed); err != nil {
-					errs = append(errs, err.Error())
-				}
-			}
-		} else {
-			log.Info().
-				Int64("task_id", row.TaskID).
-				Str("params", params).
-				Str("app", app).
-				Str("scene", strings.TrimSpace(row.Scene)).
-				Str("user_id", strings.TrimSpace(row.UserID)).
-				Str("user_name", strings.TrimSpace(row.UserName)).
-				Msg("webhook delivered")
-			successIDs = append(successIDs, row.TaskID)
-			if err := w.updateWebhookState(ctx, table, []int64{row.TaskID}, feishu.WebhookSuccess); err != nil {
-				errs = append(errs, err.Error())
-			}
+		if err != nil {
+			errs = append(errs, err.Error())
 		}
 	}
 
@@ -255,6 +165,200 @@ func (w *WebhookWorker) processOnce(ctx context.Context) error {
 		return errors.New(strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+func (w *WebhookWorker) processRow(ctx context.Context, table *feishu.TaskTable, row feishu.TaskRow, processedGroups map[string]bool) (webhookOutcome, error) {
+	var outcome webhookOutcome
+	params := strings.TrimSpace(row.Params)
+	scene := strings.TrimSpace(row.Scene)
+	groupID := strings.TrimSpace(row.GroupID)
+	app := strings.TrimSpace(row.App)
+
+	if app == "" {
+		log.Warn().
+			Str("scene", scene).
+			Str("group_id", groupID).
+			Int64("task_id", row.TaskID).
+			Msg("skip task due to empty app")
+		if groupID != "" {
+			processedGroups[groupID] = true
+		}
+		return outcome, nil
+	}
+	if scene == "" {
+		log.Warn().
+			Str("group_id", groupID).
+			Int64("task_id", row.TaskID).
+			Msg("skip task due to empty scene")
+		return outcome, nil
+	}
+
+	switch {
+	case scene == pool.SceneProfileSearch && groupID != "":
+		return w.handleGroupRow(ctx, table, row, app, processedGroups)
+	case scene == pool.SceneVideoScreenCapture:
+		return w.handleVideoCaptureRow(ctx, table, row, app)
+	default:
+		if params == "" {
+			log.Warn().
+				Str("scene", scene).
+				Int64("task_id", row.TaskID).
+				Msg("skip task due to empty params")
+			return outcome, nil
+		}
+		return w.handleSingleRow(ctx, table, row, app, params)
+	}
+}
+
+func (w *WebhookWorker) handleGroupRow(ctx context.Context, table *feishu.TaskTable, row feishu.TaskRow, app string, processedGroups map[string]bool) (webhookOutcome, error) {
+	var outcome webhookOutcome
+	groupID := strings.TrimSpace(row.GroupID)
+	if processedGroups[groupID] {
+		return outcome, nil
+	}
+
+	groupTasks, err := w.fetchTasksByGroupID(ctx, groupID)
+	if err != nil {
+		return outcome, fmt.Errorf("fetch group %s tasks failed: %w", groupID, err)
+	}
+	readyTasks := filterTasksWithStatus(groupTasks)
+	if len(readyTasks) == 0 || !allGroupTasksSuccess(readyTasks) {
+		log.Debug().
+			Str("scene", row.Scene).
+			Str("group_id", groupID).
+			Int("total", len(groupTasks)).
+			Int("evaluated", len(readyTasks)).
+			Int("success", countSuccessTasks(readyTasks)).
+			Msg("group not ready, waiting for success statuses")
+		return outcome, nil
+	}
+
+	processedGroups[groupID] = true
+	taskIDs := extractTaskIDs(readyTasks)
+	if err := w.sendGroupWebhook(ctx, app, groupID, readyTasks); err != nil {
+		log.Error().Err(err).
+			Str("scene", row.Scene).
+			Str("group_id", groupID).
+			Str("app", app).
+			Int("task_count", len(readyTasks)).
+			Msg("group webhook delivery failed")
+		outcome.failedIDs = append(outcome.failedIDs, taskIDs...)
+		if updErr := w.updateWebhookState(ctx, table, taskIDs, feishu.WebhookFailed); updErr != nil {
+			return outcome, updErr
+		}
+		return outcome, nil
+	}
+
+	log.Info().
+		Str("scene", row.Scene).
+		Str("group_id", groupID).
+		Str("app", app).
+		Int("task_count", len(readyTasks)).
+		Msg("group webhook delivered")
+	outcome.successIDs = append(outcome.successIDs, taskIDs...)
+	return outcome, w.updateWebhookState(ctx, table, taskIDs, feishu.WebhookSuccess)
+}
+
+func (w *WebhookWorker) handleVideoCaptureRow(ctx context.Context, table *feishu.TaskTable, row feishu.TaskRow, app string) (webhookOutcome, error) {
+	var outcome webhookOutcome
+	itemID := strings.TrimSpace(row.ItemID)
+	if itemID == "" {
+		log.Warn().
+			Str("scene", row.Scene).
+			Int64("task_id", row.TaskID).
+			Msg("video capture task missing item id, marking as error")
+		outcome.errorIDs = append(outcome.errorIDs, row.TaskID)
+		return outcome, w.updateWebhookState(ctx, table, []int64{row.TaskID}, feishu.WebhookError)
+	}
+
+	opts := WebhookOptions{
+		App:             app,
+		Params:          strings.TrimSpace(row.Params),
+		UserID:          strings.TrimSpace(row.UserID),
+		UserName:        strings.TrimSpace(row.UserName),
+		Scene:           row.Scene,
+		ItemID:          itemID,
+		SkipDramaLookup: true,
+		RecordLimit:     1,
+		PreferLatest:    true,
+	}
+
+	sendErr := w.sendSummary(ctx, opts)
+	switch {
+	case sendErr == nil:
+		log.Info().
+			Str("scene", row.Scene).
+			Int64("task_id", row.TaskID).
+			Str("app", app).
+			Str("item_id", itemID).
+			Msg("webhook delivered")
+		outcome.successIDs = append(outcome.successIDs, row.TaskID)
+		return outcome, w.updateWebhookState(ctx, table, []int64{row.TaskID}, feishu.WebhookSuccess)
+	case stdErrors.Is(sendErr, ErrNoCaptureRecords):
+		log.Warn().
+			Str("scene", row.Scene).
+			Int64("task_id", row.TaskID).
+			Str("app", app).
+			Str("item_id", itemID).
+			Msg("webhook skipped: no capture records")
+		outcome.errorIDs = append(outcome.errorIDs, row.TaskID)
+		return outcome, w.updateWebhookState(ctx, table, []int64{row.TaskID}, feishu.WebhookError)
+	default:
+		log.Error().Err(sendErr).
+			Str("scene", row.Scene).
+			Str("webhook_url", w.webhookURL).
+			Int64("task_id", row.TaskID).
+			Str("item_id", itemID).
+			Msg("video capture webhook delivery failed")
+		outcome.failedIDs = append(outcome.failedIDs, row.TaskID)
+		return outcome, w.updateWebhookState(ctx, table, []int64{row.TaskID}, feishu.WebhookFailed)
+	}
+}
+
+func (w *WebhookWorker) handleSingleRow(ctx context.Context, table *feishu.TaskTable, row feishu.TaskRow, app, params string) (webhookOutcome, error) {
+	var outcome webhookOutcome
+	opts := WebhookOptions{
+		App:      app,
+		Params:   params,
+		UserID:   strings.TrimSpace(row.UserID),
+		UserName: strings.TrimSpace(row.UserName),
+		Scene:    row.Scene,
+		ItemID:   strings.TrimSpace(row.ItemID),
+	}
+
+	sendErr := w.sendSummary(ctx, opts)
+	switch {
+	case sendErr == nil:
+		log.Info().
+			Str("scene", row.Scene).
+			Int64("task_id", row.TaskID).
+			Str("params", params).
+			Str("app", app).
+			Str("user_id", strings.TrimSpace(row.UserID)).
+			Str("user_name", strings.TrimSpace(row.UserName)).
+			Msg("webhook delivered")
+		outcome.successIDs = append(outcome.successIDs, row.TaskID)
+		return outcome, w.updateWebhookState(ctx, table, []int64{row.TaskID}, feishu.WebhookSuccess)
+	case stdErrors.Is(sendErr, ErrNoCaptureRecords):
+		log.Warn().
+			Str("scene", row.Scene).
+			Int64("task_id", row.TaskID).
+			Str("params", params).
+			Str("app", app).
+			Str("user_id", strings.TrimSpace(row.UserID)).
+			Msg("webhook skipped: no capture records")
+		outcome.errorIDs = append(outcome.errorIDs, row.TaskID)
+		return outcome, w.updateWebhookState(ctx, table, []int64{row.TaskID}, feishu.WebhookError)
+	default:
+		log.Error().Err(sendErr).
+			Str("scene", row.Scene).
+			Str("webhook_url", w.webhookURL).
+			Int64("task_id", row.TaskID).
+			Str("params", params).
+			Msg("webhook delivery failed")
+		outcome.failedIDs = append(outcome.failedIDs, row.TaskID)
+		return outcome, w.updateWebhookState(ctx, table, []int64{row.TaskID}, feishu.WebhookFailed)
+	}
 }
 
 // fetchTasksByGroupID retrieves all tasks that share the same GroupID.
@@ -292,25 +396,48 @@ func (w *WebhookWorker) fetchTasksByGroupID(ctx context.Context, groupID string)
 	return table.Rows, nil
 }
 
+func filterTasksWithStatus(tasks []feishu.TaskRow) []feishu.TaskRow {
+	if len(tasks) == 0 {
+		return nil
+	}
+	filtered := make([]feishu.TaskRow, 0, len(tasks))
+	for _, t := range tasks {
+		if strings.TrimSpace(t.Status) == "" {
+			continue
+		}
+		filtered = append(filtered, t)
+	}
+	return filtered
+}
+
 // allGroupTasksSuccess checks if all tasks in the group have Status = "success".
 func allGroupTasksSuccess(tasks []feishu.TaskRow) bool {
 	if len(tasks) == 0 {
 		return false
 	}
+	found := false
 	for _, t := range tasks {
 		status := strings.ToLower(strings.TrimSpace(t.Status))
+		if status == "" {
+			continue
+		}
+		found = true
 		if status != feishu.StatusSuccess {
 			return false
 		}
 	}
-	return true
+	return found
 }
 
 // countSuccessTasks counts how many tasks have Status = "success".
 func countSuccessTasks(tasks []feishu.TaskRow) int {
 	count := 0
 	for _, t := range tasks {
-		if strings.ToLower(strings.TrimSpace(t.Status)) == feishu.StatusSuccess {
+		status := strings.ToLower(strings.TrimSpace(t.Status))
+		if status == "" {
+			continue
+		}
+		if status == feishu.StatusSuccess {
 			count++
 		}
 	}
@@ -334,7 +461,6 @@ func (w *WebhookWorker) sendGroupWebhook(ctx context.Context, app, groupID strin
 		return errors.New("no tasks in group")
 	}
 
-	// Use the first task's params, userID, userName as they should be the same within a group
 	var params, userID, userName string
 	for _, t := range tasks {
 		if params == "" {
@@ -346,12 +472,11 @@ func (w *WebhookWorker) sendGroupWebhook(ctx context.Context, app, groupID strin
 		if userName == "" {
 			userName = strings.TrimSpace(t.UserName)
 		}
-		if params != "" && userID != "" {
+		if params != "" && userID != "" && userName != "" {
 			break
 		}
 	}
 
-	// Collect all scenes in the group
 	scenes := make([]string, 0, len(tasks))
 	for _, t := range tasks {
 		if scene := strings.TrimSpace(t.Scene); scene != "" {
@@ -360,6 +485,7 @@ func (w *WebhookWorker) sendGroupWebhook(ctx context.Context, app, groupID strin
 	}
 
 	log.Info().
+		Str("scenario", "group").
 		Str("group_id", groupID).
 		Str("app", app).
 		Str("params", params).
@@ -367,12 +493,14 @@ func (w *WebhookWorker) sendGroupWebhook(ctx context.Context, app, groupID strin
 		Strs("scenes", scenes).
 		Msg("sending group webhook")
 
-	// TODO(droid): 组装所有场景的详细信息并通过单次 webhook 统一下发
-	var scene string
-	if len(scenes) == 1 {
-		scene = scenes[0]
+	opts := WebhookOptions{
+		App:         app,
+		Params:      params,
+		UserID:      userID,
+		UserName:    userName,
+		RecordLimit: -1,
 	}
-	err := w.sendSummary(ctx, app, params, userID, userName, scene, "")
+	err := w.sendSummary(ctx, opts)
 	if err != nil && !stdErrors.Is(err, ErrNoCaptureRecords) {
 		return err
 	}
@@ -413,11 +541,10 @@ func (w *WebhookWorker) fetchWebhookCandidates(ctx context.Context) (*feishu.Tas
 		totalLimit = 20
 	}
 
-	webhookStates := []string{feishu.WebhookPending, feishu.WebhookFailed}
 	var combined *feishu.TaskTable
 	totalSkipped := 0
 
-	for _, state := range webhookStates {
+	for _, spec := range webhookCandidatePriority {
 		remaining := totalLimit
 		if combined != nil {
 			remaining -= len(combined.Rows)
@@ -425,7 +552,7 @@ func (w *WebhookWorker) fetchWebhookCandidates(ctx context.Context) (*feishu.Tas
 				break
 			}
 		}
-		table, skipped, err := w.fetchWebhookBatch(ctx, state, remaining)
+		table, skipped, err := w.fetchWebhookBatch(ctx, spec.scene, spec.webhookState, remaining)
 		if err != nil {
 			return nil, err
 		}
@@ -459,7 +586,7 @@ func (w *WebhookWorker) fetchWebhookCandidates(ctx context.Context) (*feishu.Tas
 	return combined, nil
 }
 
-func (w *WebhookWorker) fetchWebhookBatch(ctx context.Context, webhookState string, need int) (*feishu.TaskTable, int, error) {
+func (w *WebhookWorker) fetchWebhookBatch(ctx context.Context, scene, webhookState string, need int) (*feishu.TaskTable, int, error) {
 	if need <= 0 {
 		return nil, 0, nil
 	}
@@ -471,12 +598,13 @@ func (w *WebhookWorker) fetchWebhookBatch(ctx context.Context, webhookState stri
 		requestLimit = 200
 	}
 	opts := &feishu.TaskQueryOptions{
-		Filter: w.buildFilterInfo(webhookState),
+		Filter: w.buildFilterInfo(scene, webhookState),
 		Limit:  requestLimit,
 	}
 	if opts.Filter != nil {
 		log.Debug().
 			Str("filter", FilterToJSON(opts.Filter)).
+			Str("scene", scene).
 			Str("webhook_state", webhookState).
 			Int("limit", requestLimit).
 			Msg("webhook worker query filter")
@@ -493,7 +621,7 @@ func (w *WebhookWorker) fetchWebhookBatch(ctx context.Context, webhookState stri
 	return table, skipped, nil
 }
 
-func (w *WebhookWorker) buildFilterInfo(webhookState string) *feishu.FilterInfo {
+func (w *WebhookWorker) buildFilterInfo(scene, webhookState string) *feishu.FilterInfo {
 	fields := feishu.DefaultTaskFields
 	filter := feishu.NewFilterInfo("and")
 	if appRef := strings.TrimSpace(fields.App); appRef != "" && strings.TrimSpace(w.app) != "" {
@@ -507,40 +635,48 @@ func (w *WebhookWorker) buildFilterInfo(webhookState string) *feishu.FilterInfo 
 			filter.Conditions = append(filter.Conditions, feishu.NewCondition(webhookRef, "is", strings.TrimSpace(webhookState)))
 		}
 	}
+	if sceneRef := strings.TrimSpace(fields.Scene); sceneRef != "" && strings.TrimSpace(scene) != "" {
+		filter.Conditions = append(filter.Conditions, feishu.NewCondition(sceneRef, "is", strings.TrimSpace(scene)))
+	}
 	if EmptyFilter(filter) {
 		return nil
 	}
 	return filter
 }
 
-func (w *WebhookWorker) resolveApp(taskApp string) string {
-	if trimmed := strings.TrimSpace(taskApp); trimmed != "" {
-		return trimmed
+func (w *WebhookWorker) sendSummary(ctx context.Context, opts WebhookOptions) error {
+	if strings.TrimSpace(opts.WebhookURL) == "" {
+		opts.WebhookURL = w.webhookURL
 	}
-	return w.app
-}
-
-func (w *WebhookWorker) sendSummary(ctx context.Context, app, params, userID, userName, scene, itemID string) error {
-	baseOpts := WebhookOptions{
-		App:        app,
-		Params:     params,
-		UserID:     userID,
-		UserName:   userName,
-		WebhookURL: w.webhookURL,
-	}
-	trimmedScene := strings.TrimSpace(scene)
-	trimmedItemID := strings.TrimSpace(itemID)
+	trimmedScene := strings.TrimSpace(opts.Scene)
+	trimmedItemID := strings.TrimSpace(opts.ItemID)
 	if trimmedScene == pool.SceneVideoScreenCapture {
-		baseOpts.SkipDramaLookup = true
-		if trimmedItemID == "" {
+		if strings.TrimSpace(opts.ItemID) == "" {
 			return fmt.Errorf("video capture webhook missing item id")
+		}
+		if !opts.SkipDramaLookup {
+			opts.SkipDramaLookup = true
+		}
+		if !opts.PreferLatest {
+			opts.PreferLatest = true
+		}
+		if opts.RecordLimit == 0 {
+			opts.RecordLimit = 1
 		}
 	}
 	if trimmedItemID != "" {
-		baseOpts.ItemID = trimmedItemID
+		opts.ItemID = trimmedItemID
 	}
+	limit := opts.RecordLimit
+	switch {
+	case limit < 0:
+		limit = 0
+	case limit == 0:
+		limit = defaultRecordLimit
+	}
+	opts.RecordLimit = limit
 
-	sqliteErr := w.sendSummaryWithSource(ctx, baseOpts, WebhookSourceSQLite)
+	sqliteErr := w.sendSummaryWithSource(ctx, opts, WebhookSourceSQLite)
 	if sqliteErr == nil {
 		return nil
 	}
@@ -550,11 +686,11 @@ func (w *WebhookWorker) sendSummary(ctx context.Context, app, params, userID, us
 
 	log.Warn().
 		Err(sqliteErr).
-		Str("params", params).
-		Str("app", app).
+		Str("params", strings.TrimSpace(opts.Params)).
+		Str("app", strings.TrimSpace(opts.App)).
 		Msg("sqlite summary lookup failed, falling back to feishu")
 
-	feishuErr := w.sendSummaryWithSource(ctx, baseOpts, WebhookSourceFeishu)
+	feishuErr := w.sendSummaryWithSource(ctx, opts, WebhookSourceFeishu)
 	if feishuErr != nil {
 		return errors.Wrapf(feishuErr, "send summary webhook via feishu failed after sqlite error: %v", sqliteErr)
 	}

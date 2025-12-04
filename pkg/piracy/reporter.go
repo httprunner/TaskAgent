@@ -466,7 +466,7 @@ func (pr *Reporter) CreateGroupTasksForPiracyMatches(
 				GroupID:     groupID,
 				Datetime:    parentDatetime,
 				DatetimeRaw: inheritRaw,
-				Status:      "",
+				Status:      "", // TODO: set pending status
 				Webhook:     "",
 			})
 		}
@@ -494,7 +494,7 @@ func (pr *Reporter) CreateGroupTasksForPiracyMatches(
 				GroupID:     groupID,
 				Datetime:    parentDatetime,
 				DatetimeRaw: inheritRaw,
-				Status:      "",
+				Status:      "", // TODO: set pending status
 				Webhook:     "",
 			})
 		}
