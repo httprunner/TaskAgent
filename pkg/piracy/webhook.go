@@ -186,7 +186,7 @@ func postWebhook(ctx context.Context, url string, payload map[string]any, client
 
 	httpClient := client
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 15 * time.Second}
+		httpClient = &http.Client{Timeout: 60 * time.Second}
 	}
 
 	// Use signed payload authentication

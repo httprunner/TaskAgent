@@ -267,7 +267,7 @@ type kuaishouCookieValidator struct {
 
 func newKuaishouCookieValidator(client *http.Client) *kuaishouCookieValidator {
 	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
+		client = &http.Client{Timeout: 20 * time.Second}
 	}
 	return &kuaishouCookieValidator{
 		client:      client,

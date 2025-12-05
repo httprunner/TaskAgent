@@ -8,11 +8,11 @@
 
 ## 2. 子任务类型
 
-| 场景 | 创建条件 | Params 值 |
-|------|----------|-----------|
-| 个人页搜索 | 每个盗版线索必创建 | 短剧名称（与父任务相同） |
-| 合集视频采集 | 视频 Tags 包含「合集」或「短剧」 | 视频 ItemID |
-| 视频锚点采集 | 视频 AnchorPoint 包含 appLink | appLink (kwai:// URL) |
+| 场景 | 创建条件 | 主要字段写入 |
+|------|----------|----------------|
+| 个人页搜索 | 每个盗版线索必创建 | `Params`=短剧名称、`Extra`=ratio=xx.xx%、`Status`=`pending`、`Webhook`=`pending` |
+| 合集视频采集 | 视频 Tags 包含「合集」或「短剧」 | `Params`=短剧名称、`ItemID`=匹配视频 ID、`Status`/`Webhook`留空，等待后续调度更新 |
+| 视频锚点采集 | 视频 AnchorPoint 包含 appLink | `Params`=短剧名称、`Extra`=appLink、`Status`/`Webhook`留空 |
 
 ## 3. 数据流程
 
@@ -38,8 +38,8 @@
 ┌─────────────────────────────────────────────────────────┐
 │  子任务 (GroupID=123_1)                                  │
 │  ├─ 个人页搜索 (Params=短剧X)                            │
-│  ├─ 合集视频采集 (Params=3xz7ghufhmggzfy) [可选]         │
-│  └─ 视频锚点采集 (Params=kwai://...) [可选, 可多个]      │
+│  ├─ 合集视频采集 (Params=短剧X, ItemID=3xz7ghufhmggzfy) [可选] │
+│  └─ 视频锚点采集 (Params=短剧X, Extra=kwai://...) [可选, 可多个] │
 └─────────────────────────────────────────────────────────┘
     │
     ▼
@@ -94,19 +94,45 @@ type VideoDetail struct {
 ```go
 for idx, detail := range matchDetails {
     groupID := fmt.Sprintf("%d_%d", parentTaskID, idx+1)
+    params := detail.Match.Params
+    userID := detail.Match.UserID
+    userName := detail.Match.UserName
 
-    // 1. 必创建：个人页搜索
-    createTask("个人页搜索", detail.Params, groupID)
+    // 1. 必创建：个人页搜索（带 ratio 信息，初始状态 pending）
+    createTask(TaskInput{
+        Scene:    "个人页搜索",
+        Params:   params,
+        Extra:    fmt.Sprintf("ratio=%.2f%%", detail.Match.Ratio*100),
+        Status:   "pending",
+        Webhook:  "pending",
+        GroupID:  groupID,
+        UserID:   userID,
+        UserName: userName,
+    })
 
-    // 2. 条件创建：合集视频采集
+    // 2. 条件创建：合集视频采集（只写 ItemID，状态留空）
     if itemID := FindFirstCollectionVideo(detail.Videos); itemID != "" {
-        createTask("合集视频采集", itemID, groupID)
+        createTask(TaskInput{
+            Scene:  "合集视频采集",
+            Params: params,
+            ItemID: itemID,
+            GroupID: groupID,
+            UserID: userID,
+            UserName: userName,
+        })
     }
 
-    // 3. 条件创建：视频锚点采集（可能多个）
+    // 3. 条件创建：视频锚点采集（Extra 保存 appLink，状态留空）
     for _, video := range detail.Videos {
         if appLink := ExtractAppLink(video.AnchorPoint); appLink != "" {
-            createTask("视频锚点采集", appLink, groupID)
+            createTask(TaskInput{
+                Scene:  "视频锚点采集",
+                Params: params,
+                Extra:  appLink,
+                GroupID: groupID,
+                UserID: userID,
+                UserName: userName,
+            })
         }
     }
 }
@@ -124,14 +150,14 @@ for idx, detail := range matchDetails {
 |------|-----|
 | App | 继承父任务 |
 | Scene | 个人页搜索 / 合集视频采集 / 视频锚点采集 |
-| Params | 根据场景类型设置 |
+| Params | 始终沿用父任务短剧名称 |
 | UserID | 继承盗版线索的用户 ID |
 | UserName | 继承盗版线索的用户名 |
 | GroupID | `{parentTaskID}_{index}` |
 | Datetime | 继承父任务 |
-| Status | pending |
-| Webhook | pending |
-| Extra | ratio=xx.xx%（仅个人页搜索） |
+| Status | 个人页搜索=`pending`；其他场景留空等待调度后更新 |
+| Webhook | 个人页搜索=`pending`；其他场景留空 |
+| Extra | 个人页搜索=ratio=xx.xx%；视频锚点采集=appLink；合集视频为空 |
 
 ## 8. 代码入口
 

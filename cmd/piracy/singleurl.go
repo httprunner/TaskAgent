@@ -14,8 +14,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const defaultSingleURLFetchLimit = 20
-
 func newSingleURLCmd() *cobra.Command {
 	var (
 		flagTaskURL        string
@@ -49,7 +47,7 @@ func newSingleURLCmd() *cobra.Command {
 			}
 			limit := flagFetchLimit
 			if limit <= 0 {
-				limit = defaultSingleURLFetchLimit
+				limit = pool.DefaultSingleURLWorkerLimit
 			}
 			worker, err := pool.NewSingleURLWorkerFromEnv(taskURL, limit, poll)
 			if err != nil {
@@ -77,7 +75,7 @@ func newSingleURLCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flagTaskURL, "task-url", "", "Task status table URL overriding $TASK_BITABLE_URL")
 	cmd.Flags().StringVar(&flagCrawlerBaseURL, "crawler-base-url", "", "Crawler service endpoint overriding $CRAWLER_SERVICE_BASE_URL")
 	cmd.Flags().DurationVar(&flagPollInterval, "poll-interval", 30*time.Second, "Polling interval when running continuously")
-	cmd.Flags().IntVar(&flagFetchLimit, "fetch-limit", defaultSingleURLFetchLimit, "Maximum tasks to fetch per cycle")
+	cmd.Flags().IntVar(&flagFetchLimit, "fetch-limit", pool.DefaultSingleURLWorkerLimit, "Maximum tasks to fetch per cycle")
 	cmd.Flags().BoolVar(&flagOnce, "once", false, "Run only one ProcessOnce cycle and exit")
 
 	return cmd

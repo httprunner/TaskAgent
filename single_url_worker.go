@@ -20,6 +20,8 @@ const (
 	defaultCrawlerServiceBaseURL = "http://localhost:8000"
 	singleURLStatusQueued        = "queued"
 	singleURLGroupFetchLimit     = 200
+	// DefaultSingleURLWorkerLimit caps each fetch cycle when no explicit limit is provided.
+	DefaultSingleURLWorkerLimit = 20
 )
 
 type singleURLMetadata struct {
@@ -88,7 +90,7 @@ func NewSingleURLWorker(cfg SingleURLWorkerConfig) (*SingleURLWorker, error) {
 	}
 	limit := cfg.Limit
 	if limit <= 0 {
-		limit = maxFeishuTasksPerApp
+		limit = DefaultSingleURLWorkerLimit
 	}
 	poll := cfg.PollInterval
 	if poll <= 0 {
@@ -202,12 +204,12 @@ func (w *SingleURLWorker) fetchSingleURLTasks(ctx context.Context, statuses []st
 		limit = w.limit
 	}
 	if limit <= 0 {
-		limit = maxFeishuTasksPerApp
+		limit = DefaultSingleURLWorkerLimit
 	}
 	result := make([]*FeishuTask, 0, limit)
 	seen := make(map[int64]struct{}, limit)
 	fields := feishu.DefaultTaskFields
-	for idx, status := range statuses {
+	for _, status := range statuses {
 		if limit > 0 && len(result) >= limit {
 			break
 		}
@@ -218,7 +220,7 @@ func (w *SingleURLWorker) fetchSingleURLTasks(ctx context.Context, statuses []st
 				break
 			}
 		}
-		subset, err := fetchFeishuTasksWithStrategy(ctx, w.client, w.bitableURL, fields, "", []string{status}, remaining, SceneSingleURLCapture, idx)
+		subset, err := fetchFeishuTasksWithStrategy(ctx, w.client, w.bitableURL, fields, "", []string{status}, remaining, SceneSingleURLCapture)
 		if err != nil {
 			log.Warn().Err(err).
 				Str("status", status).

@@ -30,7 +30,7 @@ func TestFetchFeishuTasksWithStrategyFiltersInvalidTasks(t *testing.T) {
 		},
 	}
 
-	tasks, err := fetchFeishuTasksWithStrategy(ctx, client, "https://example.com/bitable/abc", feishusvc.DefaultTaskFields, "com.app", []string{""}, 5, "", 0)
+	tasks, err := fetchFeishuTasksWithStrategy(ctx, client, "https://example.com/bitable/abc", feishusvc.DefaultTaskFields, "com.app", []string{""}, 5, "")
 	if err != nil {
 		t.Fatalf("fetchFeishuTasksWithStrategy returned error: %v", err)
 	}
@@ -45,24 +45,29 @@ func TestFetchFeishuTasksWithStrategyFiltersInvalidTasks(t *testing.T) {
 	}
 }
 
-func TestFetchFeishuTasksWithStrategyDropsMismatchedScene(t *testing.T) {
+func TestFetchFeishuTasksWithFilterAllowsBookOrURLOnlyRows(t *testing.T) {
 	ctx := context.Background()
 	client := &stubTargetClient{
 		tables: []*feishusvc.TaskTable{
 			{
+				Fields: feishusvc.DefaultTaskFields,
 				Rows: []feishusvc.TaskRow{
-					{TaskID: 101, Params: "foo", Scene: SceneGeneralSearch},
-					{TaskID: 102, Params: "bar", Scene: SceneSingleURLCapture},
+					{TaskID: 101, BookID: "book-only"},
+					{TaskID: 102, URL: "https://example.com/item"},
+					{TaskID: 103, UserID: "uid-only"},
+					{TaskID: 104},
 				},
 			},
 		},
 	}
-	tasks, err := fetchFeishuTasksWithStrategy(ctx, client, "https://example.com/bitable/scene", feishusvc.DefaultTaskFields, "", []string{feishusvc.StatusPending}, 5, SceneSingleURLCapture, 1)
+	tasks, err := fetchFeishuTasksWithFilter(ctx, client, "https://example.com/bitable/rows", nil, 10)
 	if err != nil {
-		t.Fatalf("fetchFeishuTasksWithStrategy returned error: %v", err)
+		t.Fatalf("fetchFeishuTasksWithFilter returned error: %v", err)
 	}
-	if len(tasks) != 1 || tasks[0].TaskID != 102 {
-		t.Fatalf("expected only scene-matching task to remain, got %+v", collectTaskIDs(tasks))
+	got := collectTaskIDs(tasks)
+	want := []int64{101, 102, 103}
+	if !equalIDs(got, want) {
+		t.Fatalf("unexpected ids: got %v want %v", got, want)
 	}
 }
 
@@ -238,6 +243,107 @@ func (r *recordingTargetClient) UpdateTaskFields(ctx context.Context, table *fei
 	}
 	r.updates = append(r.updates, cp)
 	return nil
+}
+
+func TestBuildFeishuFilterInfoWithStatusesEmbedsBaseConditions(t *testing.T) {
+	fields := feishusvc.DefaultTaskFields
+	filter := buildFeishuFilterInfo(fields, "com.app", []string{feishusvc.StatusPending, feishusvc.StatusPending}, SceneSingleURLCapture)
+	if filter == nil {
+		t.Fatalf("expected filter, got nil")
+	}
+	if len(filter.Conditions) != 0 {
+		t.Fatalf("expected no top-level conditions when statuses present, got %d", len(filter.Conditions))
+	}
+	if len(filter.Children) != 1 {
+		t.Fatalf("expected single child for deduped statuses, got %d", len(filter.Children))
+	}
+	child := filter.Children[0]
+	assertConditionValue(t, child.Conditions, fields.App, "com.app")
+	assertConditionValue(t, child.Conditions, fields.Scene, SceneSingleURLCapture)
+	assertConditionValue(t, child.Conditions, fields.Datetime, "Today")
+	assertConditionValue(t, child.Conditions, fields.Status, feishusvc.StatusPending)
+}
+
+func TestBuildFeishuFilterInfoBlankStatusAddsVariants(t *testing.T) {
+	fields := feishusvc.DefaultTaskFields
+	filter := buildFeishuFilterInfo(fields, "", []string{""}, SceneSingleURLCapture)
+	if filter == nil {
+		t.Fatalf("expected filter, got nil")
+	}
+	if len(filter.Children) != 2 {
+		t.Fatalf("expected two children for blank status variants, got %d", len(filter.Children))
+	}
+	opSeen := map[string]struct{}{}
+	for _, child := range filter.Children {
+		conds := findConditions(child.Conditions, fields.Status)
+		if len(conds) != 1 {
+			t.Fatalf("expected single status condition per child, got %d", len(conds))
+		}
+		if cond := conds[0]; cond.Operator == nil {
+			t.Fatalf("status condition missing operator")
+		} else {
+			opSeen[strings.ToLower(strings.TrimSpace(*cond.Operator))] = struct{}{}
+		}
+		assertConditionValue(t, child.Conditions, fields.Scene, SceneSingleURLCapture)
+		assertConditionValue(t, child.Conditions, fields.Datetime, "Today")
+	}
+	if len(opSeen) != 2 {
+		t.Fatalf("expected both isEmpty and is operators, got %v", opSeen)
+	}
+	if _, ok := opSeen["isempty"]; !ok {
+		t.Fatalf("missing isEmpty operator")
+	}
+	if _, ok := opSeen["is"]; !ok {
+		t.Fatalf("missing is operator")
+	}
+}
+
+func TestBuildFeishuFilterInfoWithoutStatusesUsesBaseConditions(t *testing.T) {
+	fields := feishusvc.DefaultTaskFields
+	filter := buildFeishuFilterInfo(fields, "com.app", nil, SceneSingleURLCapture)
+	if filter == nil {
+		t.Fatalf("expected filter, got nil")
+	}
+	if len(filter.Children) != 0 {
+		t.Fatalf("expected no children without statuses, got %d", len(filter.Children))
+	}
+	if len(filter.Conditions) != 3 {
+		t.Fatalf("expected three base conditions, got %d", len(filter.Conditions))
+	}
+	assertConditionValue(t, filter.Conditions, fields.App, "com.app")
+	assertConditionValue(t, filter.Conditions, fields.Scene, SceneSingleURLCapture)
+	assertConditionValue(t, filter.Conditions, fields.Datetime, "Today")
+}
+
+func assertConditionValue(t *testing.T, conds []*feishusvc.Condition, field, want string) {
+	t.Helper()
+	matched := findConditions(conds, field)
+	if len(matched) != 1 {
+		t.Fatalf("expected exactly one condition for field %s, got %d", field, len(matched))
+	}
+	cond := matched[0]
+	if want == "" {
+		return
+	}
+	if len(cond.Value) == 0 {
+		t.Fatalf("condition for field %s missing value", field)
+	}
+	if cond.Value[0] != want {
+		t.Fatalf("unexpected value for field %s: got %q want %q", field, cond.Value[0], want)
+	}
+}
+
+func findConditions(conds []*feishusvc.Condition, field string) []*feishusvc.Condition {
+	result := make([]*feishusvc.Condition, 0)
+	for _, cond := range conds {
+		if cond == nil || cond.FieldName == nil {
+			continue
+		}
+		if *cond.FieldName == field {
+			result = append(result, cond)
+		}
+	}
+	return result
 }
 
 func TestUpdateFeishuTaskStatusesAssignsDispatchedDevice(t *testing.T) {

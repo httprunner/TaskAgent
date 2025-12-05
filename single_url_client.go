@@ -59,7 +59,7 @@ func newRESTCrawlerTaskClient(baseURL string, httpClient *http.Client) (crawlerT
 	}
 	baseURL = strings.TrimSuffix(baseURL, "/")
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 15 * time.Second}
+		httpClient = &http.Client{Timeout: 60 * time.Second}
 	}
 	return &restCrawlerTaskClient{baseURL: baseURL, httpClient: httpClient}, nil
 }

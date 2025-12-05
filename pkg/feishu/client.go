@@ -26,7 +26,7 @@ func init() {
 
 const (
 	defaultBaseURL      = "https://open.feishu.cn"
-	defaultHTTPTimeout  = 30 * time.Second
+	defaultHTTPTimeout  = 60 * time.Second
 	tokenExpiryFallback = 60 * time.Minute
 )
 

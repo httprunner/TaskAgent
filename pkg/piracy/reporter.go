@@ -508,7 +508,7 @@ func buildPiracyGroupTaskRecords(
 				GroupID:     groupID,
 				Datetime:    parentDatetime,
 				DatetimeRaw: inheritRaw,
-				Status:      "",
+				Status:      "", // TODO
 				Webhook:     "",
 				BookID:      bookID,
 			})
@@ -535,7 +535,7 @@ func buildPiracyGroupTaskRecords(
 				GroupID:     groupID,
 				Datetime:    parentDatetime,
 				DatetimeRaw: inheritRaw,
-				Status:      "",
+				Status:      "", // TODO
 				Webhook:     "",
 				BookID:      bookID,
 			})

@@ -11,6 +11,21 @@ import (
 	feishusvc "github.com/httprunner/TaskAgent/pkg/feishu"
 )
 
+func TestSingleURLWorkerDefaultLimit(t *testing.T) {
+	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
+		Client:        &singleURLTestClient{},
+		CrawlerClient: &stubCrawlerClient{createJobID: "noop"},
+		BitableURL:    "https://bitable.example",
+		Limit:         0,
+	})
+	if err != nil {
+		t.Fatalf("new worker: %v", err)
+	}
+	if worker.limit != DefaultSingleURLWorkerLimit {
+		t.Fatalf("expected limit %d, got %d", DefaultSingleURLWorkerLimit, worker.limit)
+	}
+}
+
 func TestSingleURLWorkerQueuesTaskAfterCreatingCrawlerJob(t *testing.T) {
 	client := &singleURLTestClient{
 		rows: map[string][]feishusvc.TaskRow{

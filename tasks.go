@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -53,23 +52,13 @@ func (c *FeishuTaskClient) FetchAvailableTasks(ctx context.Context, app string, 
 	}
 	result := make([]*Task, 0, len(feishuTasks))
 	for _, t := range feishuTasks {
-		result = append(result, &Task{ID: strconv.FormatInt(t.TaskID, 10), Payload: t, DeviceSerial: strings.TrimSpace(t.DeviceSerial)})
+		result = append(result, &Task{
+			ID:           strconv.FormatInt(t.TaskID, 10),
+			Payload:      t,
+			DeviceSerial: strings.TrimSpace(t.DeviceSerial),
+		})
 	}
 	return result, nil
-}
-
-func (c *FeishuTaskClient) FetchPendingTasks(ctx context.Context, app string, limit int) ([]*FeishuTask, error) {
-	if c == nil {
-		return nil, errors.New("feishu: task client is nil")
-	}
-	tasks, err := fetchTodayPendingFeishuTasks(ctx, c.client, c.bitableURL, app, limit)
-	if err != nil {
-		return nil, err
-	}
-	if err := c.syncTaskMirror(tasks); err != nil {
-		return nil, err
-	}
-	return tasks, nil
 }
 
 func (c *FeishuTaskClient) UpdateTaskStatuses(ctx context.Context, tasks []*FeishuTask, status string) error {
@@ -328,7 +317,6 @@ type FeishuTask struct {
 	ElapsedSeconds   int64
 	TargetCount      int
 	TaskRef          *Task `json:"-"`
-	priorityIndex    int
 
 	source *feishuTaskSource
 }
@@ -422,7 +410,7 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient,
 		result = appendUniqueFeishuTasks(result, batch, limit, seen)
 	}
 
-	for idx, combo := range priorityCombos {
+	for _, combo := range priorityCombos {
 		if limit > 0 && len(result) >= limit {
 			break
 		}
@@ -433,7 +421,7 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient,
 				break
 			}
 		}
-		batch, err := fetchFeishuTasksWithStrategy(ctx, client, bitableURL, fields, app, []string{combo.status}, remaining, combo.scene, idx)
+		batch, err := fetchFeishuTasksWithStrategy(ctx, client, bitableURL, fields, app, []string{combo.status}, remaining, combo.scene)
 		if err != nil {
 			log.Warn().Err(err).Str("scene", combo.scene).Msg("fetch feishu tasks failed for scene; skipping")
 			continue
@@ -444,24 +432,10 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient,
 	if len(result) > limit && limit > 0 {
 		result = result[:limit]
 	}
-	if len(result) > 1 {
-		sort.Slice(result, func(i, j int) bool {
-			if result[i] == nil {
-				return false
-			}
-			if result[j] == nil {
-				return true
-			}
-			if result[i].priorityIndex != result[j].priorityIndex {
-				return result[i].priorityIndex < result[j].priorityIndex
-			}
-			return result[i].TaskID < result[j].TaskID
-		})
-	}
 	return result, nil
 }
 
-func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient, bitableURL string, fields feishu.TaskFields, app string, statuses []string, limit int, scene string, priorityIndex int) ([]*FeishuTask, error) {
+func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient, bitableURL string, fields feishu.TaskFields, app string, statuses []string, limit int, scene string) ([]*FeishuTask, error) {
 	if len(statuses) == 0 {
 		return nil, nil
 	}
@@ -482,7 +456,6 @@ func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient,
 	if err != nil {
 		return nil, err
 	}
-	subset = filterFeishuTasksByScene(subset, scene)
 	if len(subset) > 0 {
 		log.Info().
 			Str("app", app).
@@ -492,12 +465,6 @@ func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient,
 			Int("selected", len(subset)).
 			Interface("tasks", summarizeFeishuTasks(subset)).
 			Msg("feishu tasks selected after filtering")
-		for _, task := range subset {
-			if task == nil {
-				continue
-			}
-			task.priorityIndex = priorityIndex
-		}
 	}
 	if limit > 0 && len(subset) > limit {
 		log.Info().
@@ -527,26 +494,30 @@ func fetchFeishuTasksWithFilter(ctx context.Context, client targetTableClient, b
 	for _, row := range table.Rows {
 		params := strings.TrimSpace(row.Params)
 		itemID := strings.TrimSpace(row.ItemID)
+		bookID := strings.TrimSpace(row.BookID)
+		url := strings.TrimSpace(row.URL)
+		userID := strings.TrimSpace(row.UserID)
+		userName := strings.TrimSpace(row.UserName)
 		if row.TaskID == 0 {
 			continue
 		}
-		if params == "" && itemID == "" {
+		if params == "" && itemID == "" && bookID == "" && url == "" && userID == "" && userName == "" {
 			continue
 		}
 		tasks = append(tasks, &FeishuTask{
 			TaskID:           row.TaskID,
 			Params:           params,
 			ItemID:           itemID,
-			BookID:           strings.TrimSpace(row.BookID),
-			URL:              strings.TrimSpace(row.URL),
+			BookID:           bookID,
+			URL:              url,
+			UserID:           userID,
+			UserName:         userName,
 			GroupID:          strings.TrimSpace(row.GroupID),
 			App:              row.App,
 			Scene:            row.Scene,
 			Status:           row.Status,
 			OriginalStatus:   row.Status,
 			Webhook:          row.Webhook,
-			UserID:           row.UserID,
-			UserName:         row.UserName,
 			Extra:            row.Extra,
 			DeviceSerial:     row.DeviceSerial,
 			DispatchedDevice: row.DispatchedDevice,
@@ -569,53 +540,121 @@ func fetchFeishuTasksWithFilter(ctx context.Context, client targetTableClient, b
 }
 
 func buildFeishuFilterInfo(fields feishu.TaskFields, app string, statuses []string, scene string) *feishu.FilterInfo {
-	filter := feishu.NewFilterInfo("and")
-	if field := strings.TrimSpace(fields.App); field != "" && strings.TrimSpace(app) != "" {
-		filter.Conditions = append(filter.Conditions, feishu.NewCondition(field, "is", strings.TrimSpace(app)))
+	baseSpecs := buildFeishuBaseConditionSpecs(fields, app, scene)
+	statusChildren := buildFeishuStatusChildren(fields, statuses, baseSpecs)
+	if len(statusChildren) > 0 {
+		filter := feishu.NewFilterInfo("or")
+		filter.Children = append(filter.Children, statusChildren...)
+		return filter
 	}
-	if field := strings.TrimSpace(fields.Scene); field != "" && strings.TrimSpace(scene) != "" {
-		filter.Conditions = append(filter.Conditions, feishu.NewCondition(field, "is", strings.TrimSpace(scene)))
-	}
-	if field := strings.TrimSpace(fields.Datetime); field != "" {
-		filter.Conditions = append(filter.Conditions, feishu.NewCondition(field, "is", "Today"))
-	}
-	if statusChild := buildFeishuStatusGroup(fields, statuses); statusChild != nil {
-		filter.Children = append(filter.Children, statusChild)
-	}
-	if len(filter.Conditions) == 0 && len(filter.Children) == 0 {
+	baseConds := appendConditionsFromSpecs(nil, baseSpecs)
+	if len(baseConds) == 0 {
 		return nil
 	}
+	filter := feishu.NewFilterInfo("and")
+	filter.Conditions = append(filter.Conditions, baseConds...)
 	return filter
 }
 
-func buildFeishuStatusGroup(fields feishu.TaskFields, statuses []string) *feishu.ChildrenFilter {
-	field := strings.TrimSpace(fields.Status)
-	if field == "" || len(statuses) == 0 {
+func buildFeishuStatusChildren(fields feishu.TaskFields, statuses []string, baseSpecs []*feishuConditionSpec) []*feishu.ChildrenFilter {
+	statusField := strings.TrimSpace(fields.Status)
+	if statusField == "" || len(statuses) == 0 {
 		return nil
 	}
-	conds := make([]*feishu.Condition, 0, len(statuses)+1)
-	seen := make(map[string]struct{})
-	blankAdded := false
+	children := make([]*feishu.ChildrenFilter, 0, len(statuses))
+	seen := make(map[string]struct{}, len(statuses))
 	for _, status := range statuses {
 		trimmed := strings.TrimSpace(status)
 		if trimmed == "" {
-			if !blankAdded {
-				conds = append(conds, feishu.NewCondition(field, "isEmpty"))
-				conds = append(conds, feishu.NewCondition(field, "is", ""))
-				blankAdded = true
-			}
+			children = append(children, newStatusChild(baseSpecs, newFeishuConditionSpec(statusField, "isEmpty")))
+			children = append(children, newStatusChild(baseSpecs, newFeishuConditionSpec(statusField, "is", "")))
 			continue
 		}
 		if _, ok := seen[trimmed]; ok {
 			continue
 		}
-		conds = append(conds, feishu.NewCondition(field, "is", trimmed))
 		seen[trimmed] = struct{}{}
+		children = append(children, newStatusChild(baseSpecs, newFeishuConditionSpec(statusField, "is", trimmed)))
 	}
-	if len(conds) == 0 {
+	result := make([]*feishu.ChildrenFilter, 0, len(children))
+	for _, child := range children {
+		if child == nil || len(child.Conditions) == 0 {
+			continue
+		}
+		result = append(result, child)
+	}
+	return result
+}
+
+func newStatusChild(baseSpecs []*feishuConditionSpec, statusSpec *feishuConditionSpec) *feishu.ChildrenFilter {
+	if statusSpec == nil {
 		return nil
 	}
-	return feishu.NewChildrenFilter("or", conds...)
+	child := feishu.NewChildrenFilter("and")
+	child.Conditions = appendConditionsFromSpecs(child.Conditions, baseSpecs)
+	child.Conditions = appendConditionsFromSpecs(child.Conditions, []*feishuConditionSpec{statusSpec})
+	if len(child.Conditions) == 0 {
+		return nil
+	}
+	return child
+}
+
+type feishuConditionSpec struct {
+	field    string
+	operator string
+	values   []string
+}
+
+func newFeishuConditionSpec(field, operator string, values ...string) *feishuConditionSpec {
+	trimmedField := strings.TrimSpace(field)
+	if trimmedField == "" {
+		return nil
+	}
+	op := strings.TrimSpace(operator)
+	if op == "" {
+		op = "is"
+	}
+	trimmedValues := make([]string, 0, len(values))
+	for _, val := range values {
+		trimmedValues = append(trimmedValues, strings.TrimSpace(val))
+	}
+	return &feishuConditionSpec{field: trimmedField, operator: op, values: trimmedValues}
+}
+
+func (s *feishuConditionSpec) build() *feishu.Condition {
+	if s == nil {
+		return nil
+	}
+	if len(s.values) == 0 {
+		return feishu.NewCondition(s.field, s.operator)
+	}
+	return feishu.NewCondition(s.field, s.operator, s.values...)
+}
+
+func appendConditionsFromSpecs(dst []*feishu.Condition, specs []*feishuConditionSpec) []*feishu.Condition {
+	for _, spec := range specs {
+		if spec == nil {
+			continue
+		}
+		if cond := spec.build(); cond != nil {
+			dst = append(dst, cond)
+		}
+	}
+	return dst
+}
+
+func buildFeishuBaseConditionSpecs(fields feishu.TaskFields, app, scene string) []*feishuConditionSpec {
+	specs := make([]*feishuConditionSpec, 0, 3)
+	if field := strings.TrimSpace(fields.App); field != "" && strings.TrimSpace(app) != "" {
+		specs = append(specs, newFeishuConditionSpec(field, "is", strings.TrimSpace(app)))
+	}
+	if field := strings.TrimSpace(fields.Scene); field != "" && strings.TrimSpace(scene) != "" {
+		specs = append(specs, newFeishuConditionSpec(field, "is", strings.TrimSpace(scene)))
+	}
+	if field := strings.TrimSpace(fields.Datetime); field != "" {
+		specs = append(specs, newFeishuConditionSpec(field, "is", "Today"))
+	}
+	return specs
 }
 
 func formatFilterForLog(filter *feishu.FilterInfo) string {
@@ -868,30 +907,4 @@ func appendUniqueFeishuTasks(dst []*FeishuTask, src []*FeishuTask, limit int, se
 		}
 	}
 	return dst
-}
-
-func filterFeishuTasksByScene(tasks []*FeishuTask, scene string) []*FeishuTask {
-	trimmedScene := strings.TrimSpace(scene)
-	if trimmedScene == "" || len(tasks) == 0 {
-		return tasks
-	}
-	filtered := make([]*FeishuTask, 0, len(tasks))
-	dropped := 0
-	for _, task := range tasks {
-		if task == nil {
-			continue
-		}
-		if strings.TrimSpace(task.Scene) != trimmedScene {
-			dropped++
-			continue
-		}
-		filtered = append(filtered, task)
-	}
-	if dropped > 0 {
-		log.Warn().
-			Int("dropped", dropped).
-			Str("expected_scene", trimmedScene).
-			Msg("feishu task filter skipped entries with mismatched scene")
-	}
-	return filtered
 }
