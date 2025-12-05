@@ -30,7 +30,7 @@ func TestFetchFeishuTasksWithStrategyFiltersInvalidTasks(t *testing.T) {
 		},
 	}
 
-	tasks, err := fetchFeishuTasksWithStrategy(ctx, client, "https://example.com/bitable/abc", feishusvc.DefaultTaskFields, "com.app", []string{""}, 5, "")
+	tasks, err := fetchFeishuTasksWithStrategy(ctx, client, "https://example.com/bitable/abc", feishusvc.DefaultTaskFields, "com.app", []string{""}, 5, "", 0)
 	if err != nil {
 		t.Fatalf("fetchFeishuTasksWithStrategy returned error: %v", err)
 	}
@@ -42,6 +42,27 @@ func TestFetchFeishuTasksWithStrategyFiltersInvalidTasks(t *testing.T) {
 		if tasks[i].TaskID != id {
 			t.Fatalf("unexpected task order: got %d at position %d, want %d", tasks[i].TaskID, i, id)
 		}
+	}
+}
+
+func TestFetchFeishuTasksWithStrategyDropsMismatchedScene(t *testing.T) {
+	ctx := context.Background()
+	client := &stubTargetClient{
+		tables: []*feishusvc.TaskTable{
+			{
+				Rows: []feishusvc.TaskRow{
+					{TaskID: 101, Params: "foo", Scene: SceneGeneralSearch},
+					{TaskID: 102, Params: "bar", Scene: SceneSingleURLCapture},
+				},
+			},
+		},
+	}
+	tasks, err := fetchFeishuTasksWithStrategy(ctx, client, "https://example.com/bitable/scene", feishusvc.DefaultTaskFields, "", []string{feishusvc.StatusPending}, 5, SceneSingleURLCapture, 1)
+	if err != nil {
+		t.Fatalf("fetchFeishuTasksWithStrategy returned error: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].TaskID != 102 {
+		t.Fatalf("expected only scene-matching task to remain, got %+v", collectTaskIDs(tasks))
 	}
 }
 
@@ -86,7 +107,7 @@ func TestFetchTodayPendingFeishuTasksSceneStatusPriorityStopsAfterLimit(t *testi
 				{TaskID: 14, Params: "D", App: "com.app", Scene: SceneProfileSearch},
 			},
 			"综合页搜索|pending|with": {
-				{TaskID: 21, Params: "E", App: "com.app", Scene: SceneGeneralSearch},
+				{TaskID: 1, Params: "E", App: "com.app", Scene: SceneGeneralSearch},
 			},
 		},
 	}
@@ -96,7 +117,7 @@ func TestFetchTodayPendingFeishuTasksSceneStatusPriorityStopsAfterLimit(t *testi
 		t.Fatalf("fetchTodayPendingFeishuTasks returned error: %v", err)
 	}
 	got := collectTaskIDs(tasks)
-	want := []int64{11, 12, 21}
+	want := []int64{1, 11, 12}
 	if !equalIDs(got, want) {
 		t.Fatalf("unexpected ids: got %v, want %v", got, want)
 	}

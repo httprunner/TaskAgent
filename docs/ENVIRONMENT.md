@@ -28,6 +28,7 @@
 | --- | --- | --- | --- | --- |
 | `CRAWLER_SERVICE_BASE_URL` | Optional | `http://localhost:8080` | `pool/single_url_worker` | Base URL for `content_web_crawler` 的 `/download/tasks` API，SingleURLWorker 始终携带 `sync_to_hive=true` 并轮询 Redis 持久化的 job 状态。 |
 | `COOKIE_BITABLE_URL` | Optional | – | `pool/single_url_worker` | Feishu bitable storing account cookies（字段：`Cookies`、`Platform`、`Status`），worker 会轮询 `Status=valid` 的 cookies 并随机/轮流使用。 |
+| `ENABLE_COOKIE_VALIDATION` | Optional | unset (`false`) | `pool/single_url_worker` | 设为 `true` 时才会对快手 cookies 发送首页请求校验登录态；默认跳过校验直接使用表里记录。 |
 
 Cookies 表字段要求：
 - `Cookies`：账号 Web 登录态字符串；

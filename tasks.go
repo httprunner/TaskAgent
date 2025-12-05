@@ -328,6 +328,7 @@ type FeishuTask struct {
 	ElapsedSeconds   int64
 	TargetCount      int
 	TaskRef          *Task `json:"-"`
+	priorityIndex    int
 
 	source *feishuTaskSource
 }
@@ -421,7 +422,7 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient,
 		result = appendUniqueFeishuTasks(result, batch, limit, seen)
 	}
 
-	for _, combo := range priorityCombos {
+	for idx, combo := range priorityCombos {
 		if limit > 0 && len(result) >= limit {
 			break
 		}
@@ -432,7 +433,7 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient,
 				break
 			}
 		}
-		batch, err := fetchFeishuTasksWithStrategy(ctx, client, bitableURL, fields, app, []string{combo.status}, remaining, combo.scene)
+		batch, err := fetchFeishuTasksWithStrategy(ctx, client, bitableURL, fields, app, []string{combo.status}, remaining, combo.scene, idx)
 		if err != nil {
 			log.Warn().Err(err).Str("scene", combo.scene).Msg("fetch feishu tasks failed for scene; skipping")
 			continue
@@ -451,13 +452,16 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client targetTableClient,
 			if result[j] == nil {
 				return true
 			}
+			if result[i].priorityIndex != result[j].priorityIndex {
+				return result[i].priorityIndex < result[j].priorityIndex
+			}
 			return result[i].TaskID < result[j].TaskID
 		})
 	}
 	return result, nil
 }
 
-func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient, bitableURL string, fields feishu.TaskFields, app string, statuses []string, limit int, scene string) ([]*FeishuTask, error) {
+func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient, bitableURL string, fields feishu.TaskFields, app string, statuses []string, limit int, scene string, priorityIndex int) ([]*FeishuTask, error) {
 	if len(statuses) == 0 {
 		return nil, nil
 	}
@@ -478,6 +482,7 @@ func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient,
 	if err != nil {
 		return nil, err
 	}
+	subset = filterFeishuTasksByScene(subset, scene)
 	if len(subset) > 0 {
 		log.Info().
 			Str("app", app).
@@ -487,6 +492,12 @@ func fetchFeishuTasksWithStrategy(ctx context.Context, client targetTableClient,
 			Int("selected", len(subset)).
 			Interface("tasks", summarizeFeishuTasks(subset)).
 			Msg("feishu tasks selected after filtering")
+		for _, task := range subset {
+			if task == nil {
+				continue
+			}
+			task.priorityIndex = priorityIndex
+		}
 	}
 	if limit > 0 && len(subset) > limit {
 		log.Info().
@@ -857,4 +868,30 @@ func appendUniqueFeishuTasks(dst []*FeishuTask, src []*FeishuTask, limit int, se
 		}
 	}
 	return dst
+}
+
+func filterFeishuTasksByScene(tasks []*FeishuTask, scene string) []*FeishuTask {
+	trimmedScene := strings.TrimSpace(scene)
+	if trimmedScene == "" || len(tasks) == 0 {
+		return tasks
+	}
+	filtered := make([]*FeishuTask, 0, len(tasks))
+	dropped := 0
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		if strings.TrimSpace(task.Scene) != trimmedScene {
+			dropped++
+			continue
+		}
+		filtered = append(filtered, task)
+	}
+	if dropped > 0 {
+		log.Warn().
+			Int("dropped", dropped).
+			Str("expected_scene", trimmedScene).
+			Msg("feishu task filter skipped entries with mismatched scene")
+	}
+	return filtered
 }

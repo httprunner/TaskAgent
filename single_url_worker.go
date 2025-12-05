@@ -207,7 +207,7 @@ func (w *SingleURLWorker) fetchSingleURLTasks(ctx context.Context, statuses []st
 	result := make([]*FeishuTask, 0, limit)
 	seen := make(map[int64]struct{}, limit)
 	fields := feishu.DefaultTaskFields
-	for _, status := range statuses {
+	for idx, status := range statuses {
 		if limit > 0 && len(result) >= limit {
 			break
 		}
@@ -218,7 +218,7 @@ func (w *SingleURLWorker) fetchSingleURLTasks(ctx context.Context, statuses []st
 				break
 			}
 		}
-		subset, err := fetchFeishuTasksWithStrategy(ctx, w.client, w.bitableURL, fields, "", []string{status}, remaining, SceneSingleURLCapture)
+		subset, err := fetchFeishuTasksWithStrategy(ctx, w.client, w.bitableURL, fields, "", []string{status}, remaining, SceneSingleURLCapture, idx)
 		if err != nil {
 			log.Warn().Err(err).
 				Str("status", status).
@@ -522,6 +522,7 @@ func (w *SingleURLWorker) maybeSendGroupSummary(ctx context.Context, task *Feish
 		UniqueCount:        len(combos),
 		CreatedAt:          clock.UTC().Unix(),
 		TaskName:           firstNonEmpty(nameCandidate, fallbackName, groupID),
+		Email:              "",
 	}
 	if err := w.crawler.SendTaskSummary(ctx, payload); err != nil {
 		return err
