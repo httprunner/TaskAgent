@@ -203,6 +203,8 @@ type DramaFields struct {
 	EpisodeCount             string
 	Priority                 string
 	RightsProtectionScenario string
+	SearchAlias              string
+	CaptureDate              string
 }
 
 // TaskStatusUpdate links a TaskID to the status value it should adopt.
@@ -269,6 +271,51 @@ func (c *Client) FetchCookieRows(ctx context.Context, rawURL string, override *C
 		rows = append(rows, row)
 	}
 	return rows, nil
+}
+
+// UpdateCookieStatus updates the Status column for a cookie record.
+func (c *Client) UpdateCookieStatus(ctx context.Context, rawURL, recordID, status string, override *CookieFields) (err error) {
+	defer func() {
+		if err != nil {
+			err = errors.Wrap(err, "feishu: update cookie status failed")
+		}
+	}()
+	if c == nil {
+		return errors.New("feishu: client is nil")
+	}
+	recordID = strings.TrimSpace(recordID)
+	if recordID == "" {
+		return errors.New("feishu: cookie record id is empty")
+	}
+	status = strings.TrimSpace(status)
+	if status == "" {
+		return errors.New("feishu: cookie status is empty")
+	}
+	ref, err := ParseBitableURL(rawURL)
+	if err != nil {
+		return err
+	}
+	if err := c.ensureBitableAppToken(ctx, &ref); err != nil {
+		return err
+	}
+	fields := DefaultCookieFields
+	if override != nil {
+		fields = *override
+	}
+	statusField := strings.TrimSpace(fields.Status)
+	if statusField == "" {
+		return errors.New("feishu: cookie status field is empty")
+	}
+	payload := []map[string]any{
+		{
+			"record_id": recordID,
+			"fields": map[string]any{
+				statusField: status,
+			},
+		},
+	}
+	_, err = c.BatchUpdateBitableRecords(ctx, ref, payload)
+	return err
 }
 
 func isCookieStatusInvalid(status string) bool {

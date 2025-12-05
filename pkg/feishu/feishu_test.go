@@ -392,6 +392,49 @@ func TestFetchTaskTableExampleMock(t *testing.T) {
 	t.Logf("decoded rows from example table (mock): %+v", table.Rows)
 }
 
+func TestUpdateCookieStatus(t *testing.T) {
+	ctx := context.Background()
+	wikiResponse := []byte(`{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnMockToken","obj_type":"bitable"}}}`)
+	updateResponse := []byte(`{"code":0,"msg":"success","data":{"records":[{"record_id":"recXYZ"}]}}`)
+	var capturedPayload map[string]any
+	client := &Client{
+		doJSONRequestFunc: func(ctx context.Context, method, path string, payload any) (*http.Response, []byte, error) {
+			switch {
+			case method == http.MethodGet && strings.Contains(path, "/wiki/v2/spaces/get_node"):
+				return nil, wikiResponse, nil
+			case method == http.MethodPost && strings.Contains(path, "/records/batch_update"):
+				var ok bool
+				capturedPayload, ok = payload.(map[string]any)
+				if !ok {
+					t.Fatalf("expected map payload, got %T", payload)
+				}
+				return nil, updateResponse, nil
+			default:
+				t.Fatalf("unexpected request %s %s", method, path)
+			}
+			return nil, nil, nil
+		},
+	}
+	if err := client.UpdateCookieStatus(ctx, liveWritableBitableURL, "recXYZ", CookieStatusInvalid, nil); err != nil {
+		t.Fatalf("UpdateCookieStatus returned error: %v", err)
+	}
+	records, ok := capturedPayload["records"].([]map[string]any)
+	if !ok || len(records) != 1 {
+		t.Fatalf("expected single record payload, got %#v", capturedPayload)
+	}
+	record := records[0]
+	if record["record_id"] != "recXYZ" {
+		t.Fatalf("record_id mismatch: %#v", record)
+	}
+	fields, ok := record["fields"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing fields payload: %#v", record)
+	}
+	if status := fields[DefaultCookieFields.Status]; status != CookieStatusInvalid {
+		t.Fatalf("status mismatch: got %#v", status)
+	}
+}
+
 func TestListBitableRecordsFilterConversion(t *testing.T) {
 	ctx := context.Background()
 	var capturedFilter *FilterInfo

@@ -54,6 +54,8 @@ var (
 		EpisodeCount:             "全剧集数",
 		Priority:                 "优先级",
 		RightsProtectionScenario: "维权场景",
+		SearchAlias:              "搜索别名",
+		CaptureDate:              "采集日期",
 	}
 	DefaultDramaFields = baseDramaFields
 )
@@ -215,6 +217,8 @@ func applyDramaFieldEnvOverrides(fields *DramaFields) {
 	overrideFieldFromEnv("DRAMA_FIELD_EPISODE_COUNT", &fields.EpisodeCount)
 	overrideFieldFromEnv("DRAMA_FIELD_PRIORITY", &fields.Priority)
 	overrideFieldFromEnv("DRAMA_FIELD_RIGHTS_SCENARIO", &fields.RightsProtectionScenario)
+	overrideFieldFromEnv("DRAMA_FIELD_SEARCH_ALIAS", &fields.SearchAlias)
+	overrideFieldFromEnv("DRAMA_FIELD_CAPTURE_DATE", &fields.CaptureDate)
 }
 
 func applyCookieFieldEnvOverrides(fields *CookieFields) {

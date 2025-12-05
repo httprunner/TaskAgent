@@ -31,6 +31,7 @@ func init() {
 		newReplayCmd(),
 		newBackfillCmd(),
 		newSingleURLCmd(),
+		newDramaTasksCmd(),
 	)
 	_ = internal.Ensure()
 }
