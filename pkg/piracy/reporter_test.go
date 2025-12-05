@@ -59,3 +59,34 @@ func TestInheritDatetimeRawEmptyWhenUnset(t *testing.T) {
 		t.Fatalf("expected empty string when no datetime available, got %q", got)
 	}
 }
+
+func TestBuildPiracyGroupTaskRecordsCopiesBookID(t *testing.T) {
+	now := time.Now()
+	details := []MatchDetail{
+		{
+			Match: Match{
+				Params:   "ParamA",
+				UserID:   "User123",
+				UserName: "昵称",
+				Ratio:    0.75,
+			},
+			Videos: []VideoDetail{
+				{ItemID: "video-collection", Tags: "合集"},
+				{ItemID: "video-anchor-1", AnchorPoint: `{"appLink":"kwai://video-anchor-1"}`},
+				{ItemID: "video-anchor-2", AnchorPoint: `{"appLink":"kwai://video-anchor-1"}`},
+			},
+		},
+	}
+	records := buildPiracyGroupTaskRecords("com.app.test", 321, &now, "", "  book-xyz  ", details)
+	if len(records) != 3 {
+		t.Fatalf("expected 3 records (profile, collection, anchor), got %d", len(records))
+	}
+	for idx, rec := range records {
+		if rec.BookID != "book-xyz" {
+			t.Fatalf("record %d expected bookID book-xyz, got %q", idx, rec.BookID)
+		}
+		if rec.GroupID != "321_1" {
+			t.Fatalf("record %d expected group id 321_1, got %q", idx, rec.GroupID)
+		}
+	}
+}

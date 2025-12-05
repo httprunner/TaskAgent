@@ -415,6 +415,7 @@ func (pr *Reporter) CreateGroupTasksForPiracyMatches(
 	ctx context.Context,
 	app string, parentTaskID int64,
 	parentDatetime *time.Time, parentDatetimeRaw string,
+	parentBookID string,
 	details []MatchDetail) error {
 
 	if len(details) == 0 {
@@ -432,73 +433,7 @@ func (pr *Reporter) CreateGroupTasksForPiracyMatches(
 		return fmt.Errorf("failed to create feishu client: %w", err)
 	}
 
-	var records []feishu.TaskRecordInput
-	inheritRaw := inheritDatetimeRaw(parentDatetimeRaw, parentDatetime)
-
-	for idx, detail := range details {
-		// GroupID format: {parentTaskID}_{index}, index starts from 1
-		groupID := fmt.Sprintf("%d_%d", parentTaskID, idx+1)
-
-		// 1. Create "个人页搜索" task
-		records = append(records, feishu.TaskRecordInput{
-			App:         strings.TrimSpace(app),
-			Scene:       pool.SceneProfileSearch,
-			Params:      strings.TrimSpace(detail.Match.Params),
-			UserID:      strings.TrimSpace(detail.Match.UserID),
-			UserName:    strings.TrimSpace(detail.Match.UserName),
-			Extra:       fmt.Sprintf("ratio=%.2f%%", detail.Match.Ratio*100),
-			GroupID:     groupID,
-			Datetime:    parentDatetime,
-			DatetimeRaw: inheritRaw,
-			Status:      feishu.StatusPending,
-			Webhook:     feishu.WebhookPending,
-		})
-
-		// 2. Create "合集视频采集" task if any video has collection tag
-		if collectionItemID := FindFirstCollectionVideo(detail.Videos); collectionItemID != "" {
-			records = append(records, feishu.TaskRecordInput{
-				App:         strings.TrimSpace(app),
-				Scene:       pool.SceneCollection,
-				Params:      strings.TrimSpace(detail.Match.Params),
-				ItemID:      collectionItemID,
-				UserID:      strings.TrimSpace(detail.Match.UserID),
-				UserName:    strings.TrimSpace(detail.Match.UserName),
-				GroupID:     groupID,
-				Datetime:    parentDatetime,
-				DatetimeRaw: inheritRaw,
-				Status:      "", // TODO: set pending status
-				Webhook:     "",
-			})
-		}
-
-		// 3. Create "视频锚点采集" tasks for each video with appLink
-		seenAppLinks := make(map[string]struct{})
-		for _, video := range detail.Videos {
-			appLink := ExtractAppLink(video.AnchorPoint)
-			if appLink == "" {
-				continue
-			}
-			// Deduplicate by appLink
-			if _, seen := seenAppLinks[appLink]; seen {
-				continue
-			}
-			seenAppLinks[appLink] = struct{}{}
-
-			records = append(records, feishu.TaskRecordInput{
-				App:         strings.TrimSpace(app),
-				Scene:       pool.SceneAnchorCapture,
-				Params:      strings.TrimSpace(detail.Match.Params),
-				UserID:      strings.TrimSpace(detail.Match.UserID),
-				UserName:    strings.TrimSpace(detail.Match.UserName),
-				Extra:       appLink,
-				GroupID:     groupID,
-				Datetime:    parentDatetime,
-				DatetimeRaw: inheritRaw,
-				Status:      "", // TODO: set pending status
-				Webhook:     "",
-			})
-		}
-	}
+	records := buildPiracyGroupTaskRecords(app, parentTaskID, parentDatetime, parentDatetimeRaw, parentBookID, details)
 
 	if len(records) == 0 {
 		log.Info().Msg("No child tasks to create")
@@ -521,6 +456,92 @@ func (pr *Reporter) CreateGroupTasksForPiracyMatches(
 		Int("group_count", len(details)).
 		Msg("Successfully wrote child task records to task table")
 	return nil
+}
+
+func buildPiracyGroupTaskRecords(
+	app string,
+	parentTaskID int64,
+	parentDatetime *time.Time,
+	parentDatetimeRaw string,
+	parentBookID string,
+	details []MatchDetail,
+) []feishu.TaskRecordInput {
+	if len(details) == 0 {
+		return nil
+	}
+	trimmedApp := strings.TrimSpace(app)
+	bookID := strings.TrimSpace(parentBookID)
+	inheritRaw := inheritDatetimeRaw(parentDatetimeRaw, parentDatetime)
+	records := make([]feishu.TaskRecordInput, 0, len(details)*3)
+
+	for idx, detail := range details {
+		groupID := fmt.Sprintf("%d_%d", parentTaskID, idx+1)
+
+		// 1. Create "个人页搜索" task
+		params := strings.TrimSpace(detail.Match.Params)
+		userID := strings.TrimSpace(detail.Match.UserID)
+		userName := strings.TrimSpace(detail.Match.UserName)
+		records = append(records, feishu.TaskRecordInput{
+			App:         trimmedApp,
+			Scene:       pool.SceneProfileSearch,
+			Params:      params,
+			UserID:      userID,
+			UserName:    userName,
+			Extra:       fmt.Sprintf("ratio=%.2f%%", detail.Match.Ratio*100),
+			GroupID:     groupID,
+			Datetime:    parentDatetime,
+			DatetimeRaw: inheritRaw,
+			Status:      feishu.StatusPending,
+			Webhook:     feishu.WebhookPending,
+			BookID:      bookID,
+		})
+
+		// 2. Create "合集视频采集" task if any video has collection tag
+		if collectionItemID := FindFirstCollectionVideo(detail.Videos); collectionItemID != "" {
+			records = append(records, feishu.TaskRecordInput{
+				App:         trimmedApp,
+				Scene:       pool.SceneCollection,
+				Params:      params,
+				ItemID:      collectionItemID,
+				UserID:      userID,
+				UserName:    userName,
+				GroupID:     groupID,
+				Datetime:    parentDatetime,
+				DatetimeRaw: inheritRaw,
+				Status:      "",
+				Webhook:     "",
+				BookID:      bookID,
+			})
+		}
+
+		// 3. Create "视频锚点采集" tasks for each video with appLink
+		seenAppLinks := make(map[string]struct{})
+		for _, video := range detail.Videos {
+			appLink := ExtractAppLink(video.AnchorPoint)
+			if appLink == "" {
+				continue
+			}
+			if _, exists := seenAppLinks[appLink]; exists {
+				continue
+			}
+			seenAppLinks[appLink] = struct{}{}
+			records = append(records, feishu.TaskRecordInput{
+				App:         trimmedApp,
+				Scene:       pool.SceneAnchorCapture,
+				Params:      params,
+				UserID:      userID,
+				UserName:    userName,
+				Extra:       appLink,
+				GroupID:     groupID,
+				Datetime:    parentDatetime,
+				DatetimeRaw: inheritRaw,
+				Status:      "",
+				Webhook:     "",
+				BookID:      bookID,
+			})
+		}
+	}
+	return records
 }
 
 func inheritDatetimeRaw(parentRaw string, parent *time.Time) string {

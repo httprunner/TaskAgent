@@ -71,7 +71,7 @@ func ReplayTask(ctx context.Context, cfg ReplayConfig) error {
 		return fmt.Errorf("task %d missing app; pass --app or ensure App column is populated", row.TaskID)
 	}
 
-	if err := reporter.CreateGroupTasksForPiracyMatches(ctx, appName, row.TaskID, row.Datetime, row.DatetimeRaw, details); err != nil {
+	if err := reporter.CreateGroupTasksForPiracyMatches(ctx, appName, row.TaskID, row.Datetime, row.DatetimeRaw, row.BookID, details); err != nil {
 		return fmt.Errorf("create child tasks failed: %w", err)
 	}
 
@@ -87,6 +87,7 @@ type replayTaskRow struct {
 	Params      string
 	App         string
 	Scene       string
+	BookID      string
 	Datetime    *time.Time
 	DatetimeRaw string
 }
@@ -101,10 +102,10 @@ func loadReplayTask(ctx context.Context, path string, taskID int64) (*replayTask
 	}
 	defer db.Close()
 
-	query := `SELECT TaskID, Params, App, Scene, Datetime FROM capture_tasks WHERE TaskID=?`
+	query := `SELECT TaskID, Params, App, Scene, BookID, Datetime FROM capture_tasks WHERE TaskID=?`
 	row := replayTaskRow{}
 	var rawDatetime sql.NullString
-	if err := db.QueryRowContext(ctx, query, taskID).Scan(&row.TaskID, &row.Params, &row.App, &row.Scene, &rawDatetime); err != nil {
+	if err := db.QueryRowContext(ctx, query, taskID).Scan(&row.TaskID, &row.Params, &row.App, &row.Scene, &row.BookID, &rawDatetime); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("task %d not found in capture_tasks", taskID)
 		}

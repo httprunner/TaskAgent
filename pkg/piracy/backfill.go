@@ -145,7 +145,7 @@ func BackfillTasks(ctx context.Context, cfg BackfillConfig) (*BackfillStats, err
 			continue
 		}
 
-		if err := reporter.CreateGroupTasksForPiracyMatches(ctx, appName, task.TaskID, task.Datetime, task.DatetimeRaw, details); err != nil {
+		if err := reporter.CreateGroupTasksForPiracyMatches(ctx, appName, task.TaskID, task.Datetime, task.DatetimeRaw, task.BookID, details); err != nil {
 			log.Error().Err(err).Int64("task_id", task.TaskID).Msg("piracy backfill: 写入子任务失败")
 			stats.Failures[task.TaskID] = err.Error()
 			errs = append(errs, fmt.Sprintf("task %d report: %v", task.TaskID, err))
@@ -181,6 +181,7 @@ type backfillTask struct {
 	TaskID      int64
 	Params      string
 	App         string
+	BookID      string
 	DatetimeRaw string
 	Datetime    *time.Time
 }
@@ -229,7 +230,7 @@ func loadBackfillTasks(ctx context.Context, cfg BackfillConfig) ([]*backfillTask
 	}
 	defer db.Close()
 
-	query := `SELECT TaskID, Params, App, Datetime FROM capture_tasks WHERE Scene = ? AND Status = ? ORDER BY TaskID`
+	query := `SELECT TaskID, Params, App, BookID, Datetime FROM capture_tasks WHERE Scene = ? AND Status = ? ORDER BY TaskID`
 	rows, err := db.QueryContext(ctx, query, cfg.Scene, cfg.Status)
 	if err != nil {
 		return nil, fmt.Errorf("查询 capture_tasks 失败: %w", err)
@@ -253,9 +254,10 @@ func loadBackfillTasks(ctx context.Context, cfg BackfillConfig) ([]*backfillTask
 			taskID   int64
 			params   sql.NullString
 			app      sql.NullString
+			bookID   sql.NullString
 			datetime sql.NullString
 		)
-		if err := rows.Scan(&taskID, &params, &app, &datetime); err != nil {
+		if err := rows.Scan(&taskID, &params, &app, &bookID, &datetime); err != nil {
 			return nil, fmt.Errorf("读取 capture_tasks 行失败: %w", err)
 		}
 		if taskID == 0 || strings.TrimSpace(params.String) == "" {
@@ -276,6 +278,7 @@ func loadBackfillTasks(ctx context.Context, cfg BackfillConfig) ([]*backfillTask
 			TaskID:      taskID,
 			Params:      strings.TrimSpace(params.String),
 			App:         strings.TrimSpace(app.String),
+			BookID:      strings.TrimSpace(bookID.String),
 			DatetimeRaw: parsedRaw,
 			Datetime:    parsedTime,
 		})

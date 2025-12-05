@@ -145,7 +145,7 @@ func (w *Workflow) handleGeneralSearch(ctx context.Context, pkg string, tasks []
 		// - 1 "个人页搜索" task per match
 		// - 1 "合集视频采集" task if any video has collection tag
 		// - N "视频锚点采集" tasks for each video with appLink
-		if err := w.reporter.CreateGroupTasksForPiracyMatches(ctx, pkg, task.TaskID, task.Datetime, task.DatetimeRaw, details); err != nil {
+		if err := w.reporter.CreateGroupTasksForPiracyMatches(ctx, pkg, task.TaskID, task.Datetime, task.DatetimeRaw, task.BookID, details); err != nil {
 			errs = append(errs, fmt.Sprintf("task %d report failed: %v", task.TaskID, err))
 			continue
 		}
