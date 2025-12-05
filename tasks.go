@@ -251,44 +251,10 @@ func (c *FeishuTaskClient) UpdateTaskWebhooks(ctx context.Context, tasks []*Feis
 	if c == nil {
 		return errors.New("feishu: task client is nil")
 	}
-	if len(tasks) == 0 {
-		return nil
+	if err := updateFeishuTaskWebhooks(ctx, tasks, webhookStatus); err != nil {
+		return err
 	}
-	trimmed := strings.TrimSpace(webhookStatus)
-	if trimmed == "" {
-		return errors.New("feishu: webhook status is empty")
-	}
-	grouped := make(map[*feishuTaskSource][]*FeishuTask, len(tasks))
-	for _, task := range tasks {
-		if task == nil || task.source == nil || task.source.client == nil || task.source.table == nil {
-			return errors.New("feishu: task missing source context for webhook update")
-		}
-		grouped[task.source] = append(grouped[task.source], task)
-	}
-	var errs []string
-	touched := make([]*FeishuTask, 0, len(tasks))
-	for source, subset := range grouped {
-		field := strings.TrimSpace(source.table.Fields.Webhook)
-		if field == "" {
-			return errors.New("feishu: webhook field is not configured in task table")
-		}
-		payload := map[string]any{field: trimmed}
-		for _, task := range subset {
-			if err := source.client.UpdateTaskFields(ctx, source.table, task.TaskID, payload); err != nil {
-				errs = append(errs, fmt.Sprintf("task %d: %v", task.TaskID, err))
-				continue
-			}
-			task.Webhook = trimmed
-			touched = append(touched, task)
-		}
-	}
-	if len(errs) > 0 {
-		return errors.New(strings.Join(errs, "; "))
-	}
-	if len(touched) == 0 {
-		return nil
-	}
-	return c.syncTaskMirror(touched)
+	return c.syncTaskMirror(tasks)
 }
 
 func (c *FeishuTaskClient) statusUpdateMeta(status string) *taskStatusMeta {
@@ -769,6 +735,42 @@ func updateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 			if err := source.client.UpdateTaskFields(ctx, source.table, task.TaskID, fields); err != nil {
 				errs = append(errs, fmt.Sprintf("task %d: %v", task.TaskID, err))
 			}
+		}
+	}
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func updateFeishuTaskWebhooks(ctx context.Context, tasks []*FeishuTask, webhookStatus string) error {
+	if len(tasks) == 0 {
+		return nil
+	}
+	trimmed := strings.TrimSpace(webhookStatus)
+	if trimmed == "" {
+		return errors.New("feishu: webhook status is empty")
+	}
+	grouped := make(map[*feishuTaskSource][]*FeishuTask, len(tasks))
+	for _, task := range tasks {
+		if task == nil || task.source == nil || task.source.client == nil || task.source.table == nil {
+			return errors.New("feishu: task missing source context for webhook update")
+		}
+		grouped[task.source] = append(grouped[task.source], task)
+	}
+	var errs []string
+	for source, subset := range grouped {
+		field := strings.TrimSpace(source.table.Fields.Webhook)
+		if field == "" {
+			return errors.New("feishu: webhook field is not configured in task table")
+		}
+		payload := map[string]any{field: trimmed}
+		for _, task := range subset {
+			if err := source.client.UpdateTaskFields(ctx, source.table, task.TaskID, payload); err != nil {
+				errs = append(errs, fmt.Sprintf("task %d: %v", task.TaskID, err))
+				continue
+			}
+			task.Webhook = trimmed
 		}
 	}
 	if len(errs) > 0 {

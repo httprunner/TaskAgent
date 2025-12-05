@@ -3,6 +3,7 @@ package pool
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -199,8 +200,131 @@ func TestSingleURLWorkerMarksCrawlerFailure(t *testing.T) {
 	}
 }
 
+func TestSingleURLWorkerSendsGroupSummaryWhenAllSuccess(t *testing.T) {
+	groupID := "B001_U001"
+	client := &singleURLTestClient{
+		rows: map[string][]feishusvc.TaskRow{
+			singleURLStatusQueued: {
+				{
+					TaskID:  20,
+					Scene:   SceneSingleURLCapture,
+					Status:  singleURLStatusQueued,
+					Params:  "capture",
+					BookID:  "B001",
+					UserID:  "U001",
+					GroupID: groupID,
+					Extra:   encodeSingleURLMetadata(singleURLMetadata{JobID: "job-sum-1"}),
+				},
+				{
+					TaskID:  21,
+					Scene:   SceneSingleURLCapture,
+					Status:  singleURLStatusQueued,
+					Params:  "capture",
+					BookID:  "B001",
+					UserID:  "U001",
+					GroupID: groupID,
+					Extra:   encodeSingleURLMetadata(singleURLMetadata{JobID: "job-sum-2"}),
+				},
+			},
+		},
+		groupRows: map[string][]feishusvc.TaskRow{
+			groupID: {
+				{TaskID: 20, Scene: SceneSingleURLCapture, Status: singleURLStatusQueued, Webhook: feishusvc.WebhookPending, BookID: "B001", UserID: "U001", GroupID: groupID, Params: "drama-A"},
+				{TaskID: 21, Scene: SceneSingleURLCapture, Status: singleURLStatusQueued, Webhook: feishusvc.WebhookPending, BookID: "B001", UserID: "U001", GroupID: groupID, Params: "drama-A"},
+			},
+		},
+	}
+	crawler := &stubCrawlerClient{
+		statuses: map[string]*crawlerTaskStatus{
+			"job-sum-1": {JobID: "job-sum-1", Status: "done", VID: "vid-1"},
+			"job-sum-2": {JobID: "job-sum-2", Status: "done", VID: "vid-2"},
+		},
+	}
+	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
+		Client:        client,
+		CrawlerClient: crawler,
+		BitableURL:    "https://bitable.example",
+		Limit:         5,
+		PollInterval:  time.Second,
+		Clock:         func() time.Time { return time.Unix(900, 0) },
+	})
+	if err != nil {
+		t.Fatalf("new worker: %v", err)
+	}
+	if err := worker.ProcessOnce(context.Background()); err != nil {
+		t.Fatalf("process once: %v", err)
+	}
+	if len(crawler.summaryPayloads) != 1 {
+		t.Fatalf("expected 1 summary payload, got %d", len(crawler.summaryPayloads))
+	}
+	payload := crawler.summaryPayloads[0]
+	if payload.TaskID != groupID {
+		t.Fatalf("unexpected task_id %s", payload.TaskID)
+	}
+	if payload.Total != 2 || payload.Done != 2 {
+		t.Fatalf("unexpected totals: %+v", payload)
+	}
+	if payload.UniqueCount != 1 {
+		t.Fatalf("expected unique count 1, got %d", payload.UniqueCount)
+	}
+	if payload.TaskName != "drama-A" {
+		t.Fatalf("unexpected task name %s", payload.TaskName)
+	}
+	if got := client.groupRows[groupID][0].Webhook; got != feishusvc.WebhookSuccess {
+		t.Fatalf("expected webhook success, got %s", got)
+	}
+}
+
+func TestSingleURLWorkerSkipsGroupSummaryWhenNotAllSuccess(t *testing.T) {
+	groupID := "B010_U010"
+	client := &singleURLTestClient{
+		rows: map[string][]feishusvc.TaskRow{
+			singleURLStatusQueued: {
+				{
+					TaskID:  30,
+					Scene:   SceneSingleURLCapture,
+					Status:  singleURLStatusQueued,
+					Params:  "capture",
+					BookID:  "B010",
+					UserID:  "U010",
+					GroupID: groupID,
+					Extra:   encodeSingleURLMetadata(singleURLMetadata{JobID: "job-mixed"}),
+				},
+			},
+		},
+		groupRows: map[string][]feishusvc.TaskRow{
+			groupID: {
+				{TaskID: 30, Scene: SceneSingleURLCapture, Status: singleURLStatusQueued, Webhook: feishusvc.WebhookPending, BookID: "B010", UserID: "U010", GroupID: groupID, Params: "drama-B"},
+				{TaskID: 31, Scene: SceneSingleURLCapture, Status: feishusvc.StatusRunning, Webhook: feishusvc.WebhookPending, BookID: "B010", UserID: "U010", GroupID: groupID, Params: "drama-B"},
+			},
+		},
+	}
+	crawler := &stubCrawlerClient{
+		statuses: map[string]*crawlerTaskStatus{
+			"job-mixed": {JobID: "job-mixed", Status: "done", VID: "vid-mixed"},
+		},
+	}
+	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
+		Client:        client,
+		CrawlerClient: crawler,
+		BitableURL:    "https://bitable.example",
+		Limit:         5,
+		PollInterval:  time.Second,
+	})
+	if err != nil {
+		t.Fatalf("new worker: %v", err)
+	}
+	if err := worker.ProcessOnce(context.Background()); err != nil {
+		t.Fatalf("process once: %v", err)
+	}
+	if len(crawler.summaryPayloads) != 0 {
+		t.Fatalf("expected no summary payload, got %d", len(crawler.summaryPayloads))
+	}
+}
+
 type singleURLTestClient struct {
 	rows        map[string][]feishusvc.TaskRow
+	groupRows   map[string][]feishusvc.TaskRow
 	updateCalls []singleURLUpdateCall
 }
 
@@ -210,6 +334,11 @@ type singleURLUpdateCall struct {
 }
 
 func (c *singleURLTestClient) FetchTaskTableWithOptions(_ context.Context, _ string, _ *feishusvc.TaskFields, opts *feishusvc.TaskQueryOptions) (*feishusvc.TaskTable, error) {
+	groupID := suExtractConditionValue(opts.Filter, feishusvc.DefaultTaskFields.GroupID)
+	if strings.TrimSpace(groupID) != "" {
+		rows := cloneTaskRows(c.groupRows[groupID])
+		return &feishusvc.TaskTable{Fields: feishusvc.DefaultTaskFields, Rows: rows}, nil
+	}
 	status := suExtractConditionValue(opts.Filter, feishusvc.DefaultTaskFields.Status)
 	scene := suExtractConditionValue(opts.Filter, feishusvc.DefaultTaskFields.Scene)
 	if scene != SceneSingleURLCapture {
@@ -236,7 +365,40 @@ func (c *singleURLTestClient) UpdateTaskFields(_ context.Context, _ *feishusvc.T
 		copyFields[k] = v
 	}
 	c.updateCalls = append(c.updateCalls, singleURLUpdateCall{taskID: taskID, fields: copyFields})
+	c.applyFieldUpdates(taskID, fields)
 	return nil
+}
+
+func (c *singleURLTestClient) applyFieldUpdates(taskID int64, fields map[string]any) {
+	if len(c.groupRows) == 0 {
+		return
+	}
+	for groupID, rows := range c.groupRows {
+		updated := false
+		for idx, row := range rows {
+			if row.TaskID != taskID {
+				continue
+			}
+			for field, value := range fields {
+				switch field {
+				case feishusvc.DefaultTaskFields.Status:
+					rows[idx].Status = fmt.Sprint(value)
+				case feishusvc.DefaultTaskFields.Webhook:
+					rows[idx].Webhook = fmt.Sprint(value)
+				case feishusvc.DefaultTaskFields.Extra:
+					if str, ok := value.(string); ok {
+						rows[idx].Extra = str
+					}
+				case feishusvc.DefaultTaskFields.GroupID:
+					rows[idx].GroupID = fmt.Sprint(value)
+				}
+			}
+			updated = true
+		}
+		if updated {
+			c.groupRows[groupID] = rows
+		}
+	}
 }
 
 func cloneTaskRows(rows []feishusvc.TaskRow) []feishusvc.TaskRow {
@@ -274,13 +436,15 @@ func suExtractConditionValue(filter *feishusvc.FilterInfo, field string) string 
 }
 
 type stubCrawlerClient struct {
-	createJobID    string
-	createErr      error
-	statuses       map[string]*crawlerTaskStatus
-	createdURLs    []string
-	createdCookies [][]string
-	createdMeta    []map[string]string
-	queriedJobID   []string
+	createJobID     string
+	createErr       error
+	statuses        map[string]*crawlerTaskStatus
+	createdURLs     []string
+	createdCookies  [][]string
+	createdMeta     []map[string]string
+	summaryPayloads []TaskSummaryPayload
+	summaryErr      error
+	queriedJobID    []string
 }
 
 func (c *stubCrawlerClient) CreateTask(_ context.Context, url string, cookies []string, meta map[string]string) (string, error) {
@@ -307,6 +471,11 @@ func (c *stubCrawlerClient) GetTask(_ context.Context, jobID string) (*crawlerTa
 		return status, nil
 	}
 	return nil, errCrawlerJobNotFound
+}
+
+func (c *stubCrawlerClient) SendTaskSummary(_ context.Context, payload TaskSummaryPayload) error {
+	c.summaryPayloads = append(c.summaryPayloads, payload)
+	return c.summaryErr
 }
 
 type stubCookieProvider struct {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ const (
 	crawlerServiceBaseURLEnv     = "CRAWLER_SERVICE_BASE_URL"
 	defaultCrawlerServiceBaseURL = "http://localhost:8000"
 	singleURLStatusQueued        = "queued"
+	singleURLGroupFetchLimit     = 200
 )
 
 type singleURLMetadata struct {
@@ -319,7 +321,18 @@ func (w *SingleURLWorker) reconcileSingleURLTask(ctx context.Context, task *Feis
 			return err
 		}
 		completed := w.clock()
-		return updateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishu.StatusSuccess, "", &taskStatusMeta{completedAt: &completed})
+		if err := updateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishu.StatusSuccess, "", &taskStatusMeta{completedAt: &completed}); err != nil {
+			return err
+		}
+		task.Status = feishu.StatusSuccess
+		if err := w.maybeSendGroupSummary(ctx, task); err != nil {
+			log.Error().
+				Err(err).
+				Str("group_id", strings.TrimSpace(task.GroupID)).
+				Int64("task_id", task.TaskID).
+				Msg("single url worker: send group summary failed")
+		}
+		return nil
 	case "failed":
 		reason := strings.TrimSpace(status.Error)
 		if reason == "" {
@@ -459,4 +472,131 @@ func updateTimestampFields(task *FeishuTask, ts time.Time, millis int64) {
 		task.DispatchedAt = &copy
 		task.StartAt = &copy
 	}
+}
+
+func (w *SingleURLWorker) maybeSendGroupSummary(ctx context.Context, task *FeishuTask) error {
+	if w == nil || task == nil || w.crawler == nil {
+		return nil
+	}
+	groupID := strings.TrimSpace(task.GroupID)
+	if groupID == "" {
+		return nil
+	}
+	tasks, err := w.fetchSingleURLGroupTasks(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	if len(tasks) == 0 {
+		return nil
+	}
+	total := len(tasks)
+	allSuccess := true
+	allWebhookSuccess := true
+	fallbackName := firstNonEmpty(strings.TrimSpace(task.Params), strings.TrimSpace(task.BookID))
+	var nameCandidate string
+	for _, candidate := range tasks {
+		if candidate == nil {
+			continue
+		}
+		if strings.TrimSpace(candidate.Status) != feishu.StatusSuccess {
+			allSuccess = false
+			break
+		}
+		if strings.TrimSpace(candidate.Webhook) != feishu.WebhookSuccess {
+			allWebhookSuccess = false
+		}
+		if nameCandidate == "" {
+			nameCandidate = firstNonEmpty(strings.TrimSpace(candidate.Params), strings.TrimSpace(candidate.BookID))
+		}
+	}
+	if !allSuccess || total == 0 || allWebhookSuccess {
+		return nil
+	}
+	combos := collectSummaryCombinations(tasks)
+	clock := w.clock()
+	payload := TaskSummaryPayload{
+		TaskID:             groupID,
+		Total:              total,
+		Done:               total,
+		UniqueCombinations: combos,
+		UniqueCount:        len(combos),
+		CreatedAt:          clock.UTC().Unix(),
+		TaskName:           firstNonEmpty(nameCandidate, fallbackName, groupID),
+	}
+	if err := w.crawler.SendTaskSummary(ctx, payload); err != nil {
+		return err
+	}
+	if err := updateFeishuTaskWebhooks(ctx, tasks, feishu.WebhookSuccess); err != nil {
+		return err
+	}
+	log.Info().
+		Str("group_id", groupID).
+		Int("task_count", total).
+		Msg("single url worker: sent task summary for group")
+	return nil
+}
+
+func (w *SingleURLWorker) fetchSingleURLGroupTasks(ctx context.Context, groupID string) ([]*FeishuTask, error) {
+	if w == nil {
+		return nil, errors.New("single url worker: nil instance")
+	}
+	groupField := strings.TrimSpace(feishu.DefaultTaskFields.GroupID)
+	if groupField == "" {
+		return nil, errors.New("single url worker: group id field is not configured")
+	}
+	filter := feishu.NewFilterInfo("and")
+	if sceneField := strings.TrimSpace(feishu.DefaultTaskFields.Scene); sceneField != "" {
+		if cond := feishu.NewCondition(sceneField, "is", SceneSingleURLCapture); cond != nil {
+			filter.Conditions = append(filter.Conditions, cond)
+		}
+	}
+	if cond := feishu.NewCondition(groupField, "is", strings.TrimSpace(groupID)); cond != nil {
+		filter.Conditions = append(filter.Conditions, cond)
+	}
+	if len(filter.Conditions) == 0 {
+		return nil, nil
+	}
+	return fetchFeishuTasksWithFilter(ctx, w.client, w.bitableURL, filter, singleURLGroupFetchLimit)
+}
+
+func collectSummaryCombinations(tasks []*FeishuTask) []TaskSummaryCombination {
+	if len(tasks) == 0 {
+		return nil
+	}
+	combos := make(map[string]TaskSummaryCombination, len(tasks))
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		bid := strings.TrimSpace(task.BookID)
+		uid := strings.TrimSpace(task.UserID)
+		if bid == "" || uid == "" {
+			continue
+		}
+		key := bid + "|" + uid
+		combos[key] = TaskSummaryCombination{Bid: bid, AccountID: uid}
+	}
+	if len(combos) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(combos))
+	for key := range combos {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	result := make([]TaskSummaryCombination, 0, len(keys))
+	for _, key := range keys {
+		result = append(result, combos[key])
+	}
+	return result
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
