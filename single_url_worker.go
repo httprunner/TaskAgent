@@ -24,10 +24,17 @@ const (
 	DefaultSingleURLWorkerLimit = 20
 )
 
+type singleURLAttempt struct {
+	JobID       string `json:"job_id,omitempty"`
+	VID         string `json:"vid,omitempty"`
+	Error       string `json:"error,omitempty"`
+	Status      string `json:"status,omitempty"`
+	CreatedAt   int64  `json:"created_at,omitempty"`
+	CompletedAt int64  `json:"completed_at,omitempty"`
+}
+
 type singleURLMetadata struct {
-	JobID string `json:"job_id,omitempty"`
-	VID   string `json:"vid,omitempty"`
-	Error string `json:"error,omitempty"`
+	Attempts []singleURLAttempt `json:"attempts,omitempty"`
 }
 
 func decodeSingleURLMetadata(raw string) singleURLMetadata {
@@ -35,19 +42,98 @@ func decodeSingleURLMetadata(raw string) singleURLMetadata {
 	if trimmed == "" {
 		return singleURLMetadata{}
 	}
-	var meta singleURLMetadata
-	if err := json.Unmarshal([]byte(trimmed), &meta); err != nil {
+	if strings.HasPrefix(trimmed, "[") {
+		var attempts []singleURLAttempt
+		if err := json.Unmarshal([]byte(trimmed), &attempts); err == nil {
+			return singleURLMetadata{Attempts: attempts}
+		}
 		return singleURLMetadata{}
 	}
-	return meta
+	var legacy singleURLAttempt
+	if err := json.Unmarshal([]byte(trimmed), &legacy); err != nil {
+		return singleURLMetadata{}
+	}
+	if strings.TrimSpace(legacy.JobID) == "" && strings.TrimSpace(legacy.VID) == "" && strings.TrimSpace(legacy.Error) == "" {
+		return singleURLMetadata{}
+	}
+	return singleURLMetadata{Attempts: []singleURLAttempt{legacy}}
 }
 
 func encodeSingleURLMetadata(meta singleURLMetadata) string {
-	buf, err := json.Marshal(meta)
+	if len(meta.Attempts) == 0 {
+		return "[]"
+	}
+	buf, err := json.Marshal(meta.Attempts)
 	if err != nil {
 		return ""
 	}
 	return string(buf)
+}
+
+func (m *singleURLMetadata) latestAttempt() *singleURLAttempt {
+	if m == nil || len(m.Attempts) == 0 {
+		return nil
+	}
+	return &m.Attempts[len(m.Attempts)-1]
+}
+
+func (m *singleURLMetadata) appendAttempt(jobID string, status string, ts time.Time) *singleURLAttempt {
+	if m == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(jobID)
+	if trimmed == "" {
+		return nil
+	}
+	attempt := singleURLAttempt{JobID: trimmed, Status: strings.TrimSpace(status)}
+	if !ts.IsZero() {
+		attempt.CreatedAt = ts.UTC().Unix()
+	}
+	m.Attempts = append(m.Attempts, attempt)
+	return m.latestAttempt()
+}
+
+func (m *singleURLMetadata) latestJobID() string {
+	if latest := m.latestAttempt(); latest != nil {
+		return strings.TrimSpace(latest.JobID)
+	}
+	return ""
+}
+
+func (m *singleURLMetadata) markQueued(ts time.Time) {
+	if latest := m.latestAttempt(); latest != nil {
+		latest.Status = singleURLStatusQueued
+		if latest.CreatedAt == 0 && !ts.IsZero() {
+			latest.CreatedAt = ts.UTC().Unix()
+		}
+	}
+}
+
+func (m *singleURLMetadata) markRunning() {
+	if latest := m.latestAttempt(); latest != nil {
+		latest.Status = feishu.StatusRunning
+	}
+}
+
+func (m *singleURLMetadata) markSuccess(vid string, ts time.Time) {
+	if latest := m.latestAttempt(); latest != nil {
+		latest.Status = feishu.StatusSuccess
+		latest.VID = strings.TrimSpace(vid)
+		latest.Error = ""
+		if !ts.IsZero() {
+			latest.CompletedAt = ts.UTC().Unix()
+		}
+	}
+}
+
+func (m *singleURLMetadata) markFailure(reason string, ts time.Time) {
+	if latest := m.latestAttempt(); latest != nil {
+		latest.Status = feishu.StatusFailed
+		latest.Error = strings.TrimSpace(reason)
+		if !ts.IsZero() {
+			latest.CompletedAt = ts.UTC().Unix()
+		}
+	}
 }
 
 // SingleURLWorkerConfig captures the dependencies required to process
@@ -254,12 +340,15 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 		return w.failSingleURLTask(ctx, task, reason, nil)
 	}
 	meta := decodeSingleURLMetadata(task.Extra)
-	if meta.JobID != "" {
-		log.Info().
-			Int64("task_id", task.TaskID).
-			Str("job_id", meta.JobID).
-			Msg("single url task already has job id; skip creation")
-		return nil
+	retryRequired := strings.TrimSpace(task.Status) == feishu.StatusFailed
+	if !retryRequired {
+		if jobID := meta.latestJobID(); jobID != "" {
+			log.Info().
+				Int64("task_id", task.TaskID).
+				Str("job_id", jobID).
+				Msg("single url task already has job id; skip creation")
+			return nil
+		}
 	}
 	cookies := w.collectCookies(ctx)
 	metaPayload := make(map[string]string, 3)
@@ -276,9 +365,11 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 	if err != nil {
 		return w.failSingleURLTask(ctx, task, fmt.Sprintf("create job failed: %v", err), nil)
 	}
-	meta.JobID = jobID
-	meta.VID = ""
-	meta.Error = ""
+	createdAt := w.clock()
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
+	meta.appendAttempt(jobID, singleURLStatusQueued, createdAt)
 	groupID := fmt.Sprintf("%s_%s", bookID, userID)
 	if err := w.markSingleURLTaskQueued(ctx, task, groupID, meta); err != nil {
 		return err
@@ -298,12 +389,14 @@ func (w *SingleURLWorker) reconcileSingleURLTask(ctx context.Context, task *Feis
 		return errors.New("single url worker: nil task")
 	}
 	meta := decodeSingleURLMetadata(task.Extra)
-	if meta.JobID == "" {
+	jobID := meta.latestJobID()
+	if jobID == "" {
 		return w.failSingleURLTask(ctx, task, "missing job_id for queued task", nil)
 	}
-	status, err := w.crawler.GetTask(ctx, meta.JobID)
+	status, err := w.crawler.GetTask(ctx, jobID)
 	if err != nil {
 		if errors.Is(err, errCrawlerJobNotFound) {
+			meta.markFailure("crawler job not found", w.clock())
 			return w.failSingleURLTask(ctx, task, "crawler job not found", &meta)
 		}
 		return err
@@ -315,14 +408,17 @@ func (w *SingleURLWorker) reconcileSingleURLTask(ctx context.Context, task *Feis
 		}
 		return nil
 	case "running":
-		return updateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishu.StatusRunning, "", nil)
-	case "done":
-		meta.VID = status.VID
-		meta.Error = ""
+		meta.markRunning()
 		if err := w.updateTaskExtra(ctx, task, meta); err != nil {
 			return err
 		}
+		return updateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishu.StatusRunning, "", nil)
+	case "done":
 		completed := w.clock()
+		meta.markSuccess(status.VID, completed)
+		if err := w.updateTaskExtra(ctx, task, meta); err != nil {
+			return err
+		}
 		if err := updateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishu.StatusSuccess, "", &taskStatusMeta{completedAt: &completed}); err != nil {
 			return err
 		}
@@ -340,12 +436,12 @@ func (w *SingleURLWorker) reconcileSingleURLTask(ctx context.Context, task *Feis
 		if reason == "" {
 			reason = "crawler job failed"
 		}
-		meta.Error = reason
+		meta.markFailure(reason, w.clock())
 		return w.failSingleURLTask(ctx, task, reason, &meta)
 	default:
 		log.Warn().
 			Int64("task_id", task.TaskID).
-			Str("job_id", meta.JobID).
+			Str("job_id", jobID).
 			Str("status", status.Status).
 			Msg("single url worker: unknown crawler status")
 		return nil
@@ -382,9 +478,6 @@ func (w *SingleURLWorker) failSingleURLTask(ctx context.Context, task *FeishuTas
 	}
 	if extraField := strings.TrimSpace(src.table.Fields.Extra); extraField != "" {
 		if meta != nil {
-			if strings.TrimSpace(reason) != "" {
-				meta.Error = reason
-			}
 			fields[extraField] = encodeSingleURLMetadata(*meta)
 		} else {
 			fields[extraField] = reason
@@ -411,7 +504,11 @@ func (w *SingleURLWorker) markSingleURLTaskQueued(ctx context.Context, task *Fei
 		return errors.New("single url worker: task missing source")
 	}
 	now := w.clock()
+	if now.IsZero() {
+		now = time.Now()
+	}
 	nowMillis := now.UTC().UnixMilli()
+	meta.markQueued(now)
 	fields := map[string]any{}
 	if statusField := strings.TrimSpace(src.table.Fields.Status); statusField != "" {
 		fields[statusField] = singleURLStatusQueued

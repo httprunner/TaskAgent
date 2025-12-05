@@ -132,7 +132,7 @@ func TestSingleURLWorkerUsesCookiesWhenAvailable(t *testing.T) {
 }
 
 func TestSingleURLWorkerPollsSuccessAndWritesVid(t *testing.T) {
-	meta := singleURLMetadata{JobID: "job-success"}
+	meta := singleURLMetadata{Attempts: []singleURLAttempt{{JobID: "job-success"}}}
 	client := &singleURLTestClient{
 		rows: map[string][]feishusvc.TaskRow{
 			singleURLStatusQueued: {
@@ -228,7 +228,7 @@ func TestSingleURLWorkerSendsGroupSummaryWhenAllSuccess(t *testing.T) {
 					BookID:  "B001",
 					UserID:  "U001",
 					GroupID: groupID,
-					Extra:   encodeSingleURLMetadata(singleURLMetadata{JobID: "job-sum-1"}),
+					Extra:   encodeSingleURLMetadata(singleURLMetadata{Attempts: []singleURLAttempt{{JobID: "job-sum-1"}}}),
 				},
 				{
 					TaskID:  21,
@@ -238,7 +238,7 @@ func TestSingleURLWorkerSendsGroupSummaryWhenAllSuccess(t *testing.T) {
 					BookID:  "B001",
 					UserID:  "U001",
 					GroupID: groupID,
-					Extra:   encodeSingleURLMetadata(singleURLMetadata{JobID: "job-sum-2"}),
+					Extra:   encodeSingleURLMetadata(singleURLMetadata{Attempts: []singleURLAttempt{{JobID: "job-sum-2"}}}),
 				},
 			},
 		},
@@ -303,7 +303,7 @@ func TestSingleURLWorkerSkipsGroupSummaryWhenNotAllSuccess(t *testing.T) {
 					BookID:  "B010",
 					UserID:  "U010",
 					GroupID: groupID,
-					Extra:   encodeSingleURLMetadata(singleURLMetadata{JobID: "job-mixed"}),
+					Extra:   encodeSingleURLMetadata(singleURLMetadata{Attempts: []singleURLAttempt{{JobID: "job-mixed"}}}),
 				},
 			},
 		},
@@ -334,6 +334,62 @@ func TestSingleURLWorkerSkipsGroupSummaryWhenNotAllSuccess(t *testing.T) {
 	}
 	if len(crawler.summaryPayloads) != 0 {
 		t.Fatalf("expected no summary payload, got %d", len(crawler.summaryPayloads))
+	}
+}
+
+func TestSingleURLWorkerRetriesFailedTaskWithExistingJobID(t *testing.T) {
+	legacyExtra := `{"job_id":"job-old","error":"boom"}`
+	client := &singleURLTestClient{
+		rows: map[string][]feishusvc.TaskRow{
+			feishusvc.StatusFailed: {
+				{
+					TaskID: 40,
+					Scene:  SceneSingleURLCapture,
+					Status: feishusvc.StatusFailed,
+					Params: "capture",
+					BookID: "B040",
+					UserID: "U040",
+					URL:    "https://example.com/retry",
+					Extra:  legacyExtra,
+				},
+			},
+		},
+	}
+	crawler := &stubCrawlerClient{createJobID: "job-new"}
+	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
+		Client:        client,
+		CrawlerClient: crawler,
+		BitableURL:    "https://bitable.example",
+		Limit:         5,
+		PollInterval:  time.Second,
+		Clock:         func() time.Time { return time.Unix(500, 0) },
+	})
+	if err != nil {
+		t.Fatalf("new worker: %v", err)
+	}
+	if err := worker.ProcessOnce(context.Background()); err != nil {
+		t.Fatalf("process once: %v", err)
+	}
+	if len(crawler.createdURLs) != 1 {
+		t.Fatalf("expected retry to create crawler job, got %d", len(crawler.createdURLs))
+	}
+	var encoded string
+	for _, call := range client.updateCalls {
+		if val, ok := call.fields[feishusvc.DefaultTaskFields.Extra]; ok {
+			if s, ok := val.(string); ok {
+				encoded = s
+			}
+		}
+	}
+	if encoded == "" {
+		t.Fatalf("expected extra to be updated")
+	}
+	meta := decodeSingleURLMetadata(encoded)
+	if len(meta.Attempts) != 2 {
+		t.Fatalf("expected 2 attempts recorded, got %d", len(meta.Attempts))
+	}
+	if meta.Attempts[0].JobID != "job-old" || meta.Attempts[1].JobID != "job-new" {
+		t.Fatalf("unexpected job history: %#v", meta.Attempts)
 	}
 }
 
