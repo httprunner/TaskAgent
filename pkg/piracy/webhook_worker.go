@@ -21,23 +21,60 @@ type WebhookWorkerConfig struct {
 	App               string
 	PollInterval      time.Duration
 	BatchLimit        int
+	GroupCooldown     time.Duration
 }
 
 // WebhookWorker periodically scans Feishu tasks for pending/failed webhook rows
 // and retries the synchronization independently from the search workflow.
 type WebhookWorker struct {
-	client       *feishu.Client
-	bitableURL   string
-	webhookURL   string
-	app          string
-	pollInterval time.Duration
-	batchLimit   int
+	client        *feishu.Client
+	bitableURL    string
+	webhookURL    string
+	app           string
+	pollInterval  time.Duration
+	batchLimit    int
+	groupCooldown map[string]time.Time
+	cooldownDur   time.Duration
 }
 
 type webhookOutcome struct {
 	successIDs []int64
 	failedIDs  []int64
 	errorIDs   []int64
+}
+
+func (w *WebhookWorker) shouldSkipGroup(groupID string) bool {
+	if strings.TrimSpace(groupID) == "" || w == nil {
+		return false
+	}
+	expiry, ok := w.groupCooldown[groupID]
+	if !ok {
+		return false
+	}
+	if time.Now().After(expiry) {
+		delete(w.groupCooldown, groupID)
+		return false
+	}
+	return true
+}
+
+func (w *WebhookWorker) markGroupCooldown(groupID, reason string) {
+	if strings.TrimSpace(groupID) == "" || w == nil || w.cooldownDur <= 0 {
+		return
+	}
+	w.groupCooldown[groupID] = time.Now().Add(w.cooldownDur)
+	log.Debug().
+		Str("group_id", groupID).
+		Dur("cooldown", w.cooldownDur).
+		Str("reason", reason).
+		Msg("group added to webhook cooldown queue")
+}
+
+func (w *WebhookWorker) clearGroupCooldown(groupID string) {
+	if strings.TrimSpace(groupID) == "" || w == nil {
+		return
+	}
+	delete(w.groupCooldown, groupID)
 }
 
 var webhookCandidatePriority = []struct {
@@ -72,13 +109,19 @@ func NewWebhookWorker(cfg WebhookWorkerConfig) (*WebhookWorker, error) {
 	if batch <= 0 {
 		batch = 20
 	}
+	cooldown := cfg.GroupCooldown
+	if cooldown <= 0 {
+		cooldown = 2 * time.Minute
+	}
 	return &WebhookWorker{
-		client:       client,
-		bitableURL:   trimmedURL,
-		webhookURL:   webhookURL,
-		app:          strings.TrimSpace(cfg.App),
-		pollInterval: interval,
-		batchLimit:   batch,
+		client:        client,
+		bitableURL:    trimmedURL,
+		webhookURL:    webhookURL,
+		app:           strings.TrimSpace(cfg.App),
+		pollInterval:  interval,
+		batchLimit:    batch,
+		groupCooldown: make(map[string]time.Time),
+		cooldownDur:   cooldown,
 	}, nil
 }
 
@@ -228,6 +271,7 @@ func (w *WebhookWorker) handleGroupRow(ctx context.Context, table *feishu.TaskTa
 			Str("group_id", groupID).
 			Int("total", len(groupTasks)).
 			Msg("group not ready: no tasks with status")
+		w.markGroupCooldown(groupID, "missing_status")
 		return outcome, nil
 	}
 
@@ -238,6 +282,7 @@ func (w *WebhookWorker) handleGroupRow(ctx context.Context, table *feishu.TaskTa
 			Str("group_id", groupID).
 			Int64("task_id", row.TaskID).
 			Msg("group task missing datetime, skip webhook readiness")
+		w.markGroupCooldown(groupID, "missing_datetime")
 		return outcome, nil
 	}
 	dayTasks := filterTasksByDate(readyTasks, referenceDay)
@@ -249,6 +294,7 @@ func (w *WebhookWorker) handleGroupRow(ctx context.Context, table *feishu.TaskTa
 			Int("total", len(groupTasks)).
 			Int("with_status", len(readyTasks)).
 			Msg("group not ready: no tasks match reference day")
+		w.markGroupCooldown(groupID, "date_mismatch")
 		return outcome, nil
 	}
 	if !allGroupTasksSuccess(dayTasks) {
@@ -261,6 +307,7 @@ func (w *WebhookWorker) handleGroupRow(ctx context.Context, table *feishu.TaskTa
 			Int("evaluated", len(dayTasks)).
 			Int("success", countSuccessTasks(dayTasks)).
 			Msg("group day not ready, waiting for success statuses")
+		w.markGroupCooldown(groupID, "waiting_success")
 		return outcome, nil
 	}
 
@@ -287,6 +334,7 @@ func (w *WebhookWorker) handleGroupRow(ctx context.Context, table *feishu.TaskTa
 		Int("task_count", len(dayTasks)).
 		Msg("group webhook delivered")
 	outcome.successIDs = append(outcome.successIDs, taskIDs...)
+	w.clearGroupCooldown(groupID)
 	return outcome, w.updateWebhookState(ctx, table, taskIDs, feishu.WebhookSuccess)
 }
 
@@ -678,7 +726,21 @@ func (w *WebhookWorker) fetchWebhookBatch(ctx context.Context, scene, webhookSta
 	if table == nil {
 		return nil, 0, nil
 	}
-	eligible, skipped := limitEligibleRows(table.Rows, need)
+	skipped := 0
+	if scene == pool.SceneProfileSearch {
+		filtered := make([]feishu.TaskRow, 0, len(table.Rows))
+		for _, row := range table.Rows {
+			grp := strings.TrimSpace(row.GroupID)
+			if grp != "" && w.shouldSkipGroup(grp) {
+				skipped++
+				continue
+			}
+			filtered = append(filtered, row)
+		}
+		table.Rows = filtered
+	}
+	eligible, dropped := limitEligibleRows(table.Rows, need)
+	skipped += dropped
 	table.Rows = eligible
 	return table, skipped, nil
 }

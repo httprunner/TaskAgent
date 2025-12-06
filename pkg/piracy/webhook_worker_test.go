@@ -147,3 +147,27 @@ func TestNormalizeTaskDay(t *testing.T) {
 		t.Fatalf("expected normalized day to be midnight, got %v", norm)
 	}
 }
+
+func TestGroupCooldownLifecycle(t *testing.T) {
+	worker := &WebhookWorker{
+		groupCooldown: make(map[string]time.Time),
+		cooldownDur:   5 * time.Millisecond,
+	}
+	groupID := "kwai_book_user"
+	if worker.shouldSkipGroup(groupID) {
+		t.Fatalf("group should not be skipped prior to marking")
+	}
+	worker.markGroupCooldown(groupID, "test")
+	if !worker.shouldSkipGroup(groupID) {
+		t.Fatalf("group should be skipped immediately after marking")
+	}
+	worker.clearGroupCooldown(groupID)
+	if worker.shouldSkipGroup(groupID) {
+		t.Fatalf("group should not be skipped after clearing")
+	}
+	worker.markGroupCooldown(groupID, "test2")
+	time.Sleep(10 * time.Millisecond)
+	if worker.shouldSkipGroup(groupID) {
+		t.Fatalf("group cooldown should expire automatically")
+	}
+}

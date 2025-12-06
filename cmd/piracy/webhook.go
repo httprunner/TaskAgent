@@ -20,6 +20,7 @@ func newWebhookCmd() *cobra.Command {
 		flagApp        string
 		flagPoll       time.Duration
 		flagBatchLimit int
+		flagGroupCool  time.Duration
 	)
 
 	cmd := &cobra.Command{
@@ -51,6 +52,7 @@ func newWebhookCmd() *cobra.Command {
 				App:               strings.TrimSpace(app),
 				PollInterval:      flagPoll,
 				BatchLimit:        flagBatchLimit,
+				GroupCooldown:     flagGroupCool,
 			}
 			worker, err := piracy.NewWebhookWorker(cfg)
 			if err != nil {
@@ -72,6 +74,7 @@ func newWebhookCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flagApp, "app", "", "Optional App filter (defaults to BUNDLE_ID env)")
 	cmd.Flags().DurationVar(&flagPoll, "poll-interval", 30*time.Second, "Interval between webhook scans")
 	cmd.Flags().IntVar(&flagBatchLimit, "batch-limit", 50, "Maximum number of webhook tasks processed per scan")
+	cmd.Flags().DurationVar(&flagGroupCool, "group-cooldown", 2*time.Minute, "Cool-down duration before rechecking an incomplete group")
 
 	return cmd
 }
