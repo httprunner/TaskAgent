@@ -198,6 +198,30 @@ func TestFetchTodayPendingFeishuTasksAllowedScenesOrderPreserved(t *testing.T) {
 	}
 }
 
+func TestNormalizeAllowedScenesDefaultsExcludeSingleURL(t *testing.T) {
+	set := normalizeAllowedScenes(nil)
+	if set == nil {
+		t.Fatalf("expected default scene set")
+	}
+	if _, ok := set[SceneSingleURLCapture]; ok {
+		t.Fatalf("default scenes should not include single url capture")
+	}
+	if len(set) != len(defaultDeviceScenes) {
+		t.Fatalf("expected %d default scenes, got %d", len(defaultDeviceScenes), len(set))
+	}
+}
+
+func TestNormalizeAllowedScenesRespectsExplicitList(t *testing.T) {
+	custom := []string{SceneSingleURLCapture}
+	set := normalizeAllowedScenes(custom)
+	if len(set) != len(custom) {
+		t.Fatalf("expected len %d got %d", len(custom), len(set))
+	}
+	if _, ok := set[SceneSingleURLCapture]; !ok {
+		t.Fatalf("expected single url scene to be allowed when explicitly provided")
+	}
+}
+
 type sceneStatusTargetClient struct {
 	rows map[string][]feishusvc.TaskRow
 }
