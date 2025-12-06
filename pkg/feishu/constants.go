@@ -16,6 +16,8 @@ const (
 	// EnvResultBitableURL indicates where to push Feishu result rows.
 	EnvResultBitableURL = "RESULT_BITABLE_URL"
 	// EnvDeviceBitableURL indicates where to pull/push Feishu device status rows.
+	// StatusError marks a task row as permanently errored and skipped.
+	StatusError         = "error"
 	EnvDeviceBitableURL = "DEVICE_BITABLE_URL"
 	// EnvCookieBitableURL points to the dedicated cookies table for SingleURLWorker.
 	EnvCookieBitableURL = "COOKIE_BITABLE_URL"

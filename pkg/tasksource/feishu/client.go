@@ -43,7 +43,7 @@ func NewFeishuTaskClientWithOptions(bitableURL string, opts FeishuTaskClientOpti
 		client:        client,
 		bitableURL:    bitableURL,
 		mirror:        mirror,
-		allowedScenes: buildSceneSet(opts.AllowedScenes),
+		allowedScenes: normalizeAllowedScenes(opts.AllowedScenes),
 	}, nil
 }
 
@@ -71,6 +71,13 @@ func buildSceneSet(scenes []string) map[string]struct{} {
 		return nil
 	}
 	return set
+}
+
+func normalizeAllowedScenes(scenes []string) map[string]struct{} {
+	if len(scenes) == 0 {
+		return buildSceneSet(defaultDeviceScenes)
+	}
+	return buildSceneSet(scenes)
 }
 
 func (c *FeishuTaskClient) FetchAvailableTasks(ctx context.Context, app string, limit int) ([]*agenttasks.Task, error) {
@@ -403,6 +410,14 @@ const (
 	SceneVideoScreenCapture = "视频录屏采集"
 	SceneSingleURLCapture   = "单个链接采集"
 )
+
+var defaultDeviceScenes = []string{
+	SceneVideoScreenCapture,
+	SceneGeneralSearch,
+	SceneProfileSearch,
+	SceneCollection,
+	SceneAnchorCapture,
+}
 
 func fetchTodayPendingFeishuTasks(ctx context.Context, client TargetTableClient, bitableURL, app string, limit int, allowedScenes map[string]struct{}) ([]*FeishuTask, error) {
 	if client == nil {
