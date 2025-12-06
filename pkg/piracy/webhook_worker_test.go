@@ -60,6 +60,7 @@ func TestFilterTasksWithStatus(t *testing.T) {
 		{TaskID: 1, Status: ""},
 		{TaskID: 2, Status: feishu.StatusSuccess},
 		{TaskID: 3, Status: " success "},
+		{TaskID: 4, Status: " error "},
 	}
 	filtered := filterTasksWithStatus(rows)
 	if len(filtered) != 2 {
@@ -67,6 +68,17 @@ func TestFilterTasksWithStatus(t *testing.T) {
 	}
 	if filtered[0].TaskID != 2 || filtered[1].TaskID != 3 {
 		t.Fatalf("unexpected filtered task ids: %+v", filtered)
+	}
+}
+
+func TestFilterTasksWithStatusSkipsError(t *testing.T) {
+	rows := []feishu.TaskRow{
+		{TaskID: 10, Status: feishu.StatusError},
+		{TaskID: 11, Status: feishu.StatusSuccess},
+	}
+	filtered := filterTasksWithStatus(rows)
+	if len(filtered) != 1 || filtered[0].TaskID != 11 {
+		t.Fatalf("expected only success task to remain, got %+v", filtered)
 	}
 }
 

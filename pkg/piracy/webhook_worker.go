@@ -463,7 +463,8 @@ func filterTasksWithStatus(tasks []feishu.TaskRow) []feishu.TaskRow {
 	}
 	filtered := make([]feishu.TaskRow, 0, len(tasks))
 	for _, t := range tasks {
-		if strings.TrimSpace(t.Status) == "" {
+		status := strings.ToLower(strings.TrimSpace(t.Status))
+		if status == "" || status == feishu.StatusError {
 			continue
 		}
 		filtered = append(filtered, t)
