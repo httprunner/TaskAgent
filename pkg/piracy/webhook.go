@@ -11,11 +11,11 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"reflect"
 	"strings"
 	"time"
 
 	"github.com/httprunner/TaskAgent/pkg/feishu"
+	feishufields "github.com/httprunner/TaskAgent/pkg/feishu/fields"
 	"github.com/rs/zerolog/log"
 )
 
@@ -246,7 +246,7 @@ func buildWebhookPayload(drama *dramaInfo, records []map[string]any, fields summ
 }
 
 func flattenDramaFields(raw map[string]any, schema feishu.DramaFields) map[string]any {
-	fieldMap := structFieldMap(schema)
+	fieldMap := feishufields.StructFieldMap(schema)
 	payload := make(map[string]any, len(fieldMap))
 	for engName, rawKey := range fieldMap {
 		// Feishu bitable fields often arrive as rich-text arrays or numeric
@@ -261,22 +261,8 @@ func flattenDramaFields(raw map[string]any, schema feishu.DramaFields) map[strin
 	return payload
 }
 
-// mapAppFieldValue maps package names to human-readable app names
-func mapAppFieldValue(app string) string {
-	appMapping := map[string]string{
-		"com.smile.gifmaker": "快手",
-		"com.jiangjia.gif":   "快手",
-		"com.tencent.mm":     "微信",
-		"com.tencent.xin":    "微信",
-	}
-	if mapped, ok := appMapping[app]; ok {
-		return mapped
-	}
-	return app
-}
-
 func flattenRecordsAndCollectItemIDs(records []CaptureRecordPayload, schema feishu.ResultFields) ([]map[string]any, []string) {
-	fieldMap := structFieldMap(schema)
+	fieldMap := feishufields.StructFieldMap(schema)
 	result := make([]map[string]any, 0, len(records))
 	rawItemKey := fieldMap["ItemID"]
 	rawAppKey := fieldMap["App"]
@@ -305,7 +291,7 @@ func flattenRecordsAndCollectItemIDs(records []CaptureRecordPayload, schema feis
 
 			// Apply App field mapping if this is the App field
 			if rawKey == rawAppKey && engName == "App" {
-				fieldValue = mapAppFieldValue(fieldValue)
+				fieldValue = feishufields.MapAppValue(fieldValue)
 			}
 
 			entry[engName] = fieldValue
@@ -354,32 +340,6 @@ func sha256HMAC(key []byte, data []byte) []byte {
 	mac := hmac.New(sha256.New, key)
 	mac.Write(data)
 	return []byte(fmt.Sprintf("%x", mac.Sum(nil)))
-}
-
-// structFieldMap returns a mapping of struct field names (English keys) to their raw column names.
-func structFieldMap(schema any) map[string]string {
-	val := reflect.ValueOf(schema)
-	if val.Kind() == reflect.Pointer {
-		val = val.Elem()
-	}
-	if val.Kind() != reflect.Struct {
-		return nil
-	}
-	typ := val.Type()
-	names := make(map[string]string, val.NumField())
-	for i := 0; i < val.NumField(); i++ {
-		fieldVal := val.Field(i)
-		if fieldVal.Kind() != reflect.String {
-			continue
-		}
-		rawName := strings.TrimSpace(fieldVal.String())
-		if rawName == "" {
-			continue
-		}
-		engName := typ.Field(i).Name
-		names[engName] = rawName
-	}
-	return names
 }
 
 func loadSummaryFieldConfig() summaryFieldConfig {

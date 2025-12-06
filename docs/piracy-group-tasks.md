@@ -50,10 +50,10 @@ Webhook worker (见 `docs/webhook-worker.md`) 监控 GroupID，全部任务
 ## 4. GroupID 格式
 
 ```
-{mapAppFieldValue(App)}_{BookID}_{UserID}
+{MapAppValue(App)}_{BookID}_{UserID}
 ```
 
-- `mapAppFieldValue(App)`: 将包名映射成可读平台名，例如 `com.smile.gifmaker → 快手`
+- `MapAppValue(App)`: 将包名映射成可读平台名（实现见 `pkg/feishu/fields`），例如 `com.smile.gifmaker → 快手`
 - `BookID`: 短剧 ID
 - `UserID`: 盗版账号 ID
 
@@ -92,7 +92,7 @@ type VideoDetail struct {
 
 ```go
 for _, detail := range matchDetails {
-    groupID := fmt.Sprintf("%s_%s_%s", mapAppFieldValue(detail.Match.App), bookID, detail.Match.UserID)
+    groupID := fmt.Sprintf("%s_%s_%s", MapAppValue(detail.Match.App), bookID, detail.Match.UserID)
     params := detail.Match.DramaName
     userID := detail.Match.UserID
     userName := detail.Match.UserName
@@ -153,7 +153,7 @@ for _, detail := range matchDetails {
 | Params | 始终沿用父任务短剧名称 |
 | UserID | 继承盗版线索的用户 ID |
 | UserName | 继承盗版线索的用户名 |
-| GroupID | `{mapAppFieldValue(App)}_{BookID}_{UserID}` |
+| GroupID | `{MapAppValue(App)}_{BookID}_{UserID}` |
 | Datetime | 继承父任务 |
 | Status | 个人页搜索=`pending`；其他场景留空等待调度后更新 |
 | Webhook | 个人页搜索=`pending`；其他场景留空 |

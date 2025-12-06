@@ -3,9 +3,7 @@ package piracy
 import (
 	"context"
 	"fmt"
-	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -44,61 +42,6 @@ type paramTaskInfo struct {
 	BookID string
 	App    string
 	Param  string
-}
-
-// ApplyDefaults populates missing config fields from environment variables or sensible defaults.
-
-func (c *Config) ApplyDefaults() {
-	if strings.TrimSpace(c.ParamsField) == "" {
-		c.ParamsField = feishu.DefaultResultFields.Params
-	}
-	if strings.TrimSpace(c.UserIDField) == "" {
-		c.UserIDField = feishu.DefaultResultFields.UserID
-	}
-	if strings.TrimSpace(c.DurationField) == "" {
-		c.DurationField = feishu.DefaultResultFields.ItemDuration
-	}
-	if strings.TrimSpace(c.ItemIDField) == "" {
-		c.ItemIDField = feishu.DefaultResultFields.ItemID
-	}
-	if strings.TrimSpace(c.ResultAppField) == "" {
-		c.ResultAppField = feishu.DefaultResultFields.App
-	}
-	if strings.TrimSpace(c.TaskParamsField) == "" {
-		c.TaskParamsField = feishu.DefaultTaskFields.Params
-	}
-	if strings.TrimSpace(c.TaskBookIDField) == "" {
-		c.TaskBookIDField = feishu.DefaultTaskFields.BookID
-	}
-	if strings.TrimSpace(c.TaskStatusField) == "" {
-		c.TaskStatusField = feishu.DefaultTaskFields.Status
-	}
-	if strings.TrimSpace(c.TaskSceneField) == "" {
-		c.TaskSceneField = feishu.DefaultTaskFields.Scene
-	}
-	if strings.TrimSpace(c.TaskAppField) == "" {
-		c.TaskAppField = feishu.DefaultTaskFields.App
-	}
-	if strings.TrimSpace(c.DramaIDField) == "" {
-		c.DramaIDField = feishu.DefaultDramaFields.DramaID
-	}
-	if strings.TrimSpace(c.DramaNameField) == "" {
-		c.DramaNameField = feishu.DefaultDramaFields.DramaName
-	}
-	if strings.TrimSpace(c.DramaDurationField) == "" {
-		c.DramaDurationField = feishu.DefaultDramaFields.TotalDuration
-	}
-	if c.Threshold <= 0 {
-		if threshold := os.Getenv("THRESHOLD"); threshold != "" {
-			if thresholdFloat, err := strconv.ParseFloat(threshold, 64); err == nil && thresholdFloat > 0 {
-				c.Threshold = thresholdFloat
-			} else {
-				c.Threshold = 0.5
-			}
-		} else {
-			c.Threshold = 0.5
-		}
-	}
 }
 
 // Detect performs piracy detection and returns a report.

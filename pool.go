@@ -8,6 +8,9 @@ import (
 	"time"
 
 	envload "github.com/httprunner/TaskAgent/internal"
+	agentdevice "github.com/httprunner/TaskAgent/internal/agent/device"
+	agentlifecycle "github.com/httprunner/TaskAgent/internal/agent/lifecycle"
+	agenttasks "github.com/httprunner/TaskAgent/internal/agent/tasks"
 	"github.com/httprunner/TaskAgent/pkg/feishu"
 	adbprovider "github.com/httprunner/TaskAgent/providers/adb"
 	gadb "github.com/httprunner/httprunner/v5/pkg/gadb"
@@ -19,41 +22,15 @@ func init() {
 	envload.Ensure()
 }
 
-// Task represents a single unit of work to be executed on a device.
-type Task struct {
-	ID           string
-	Payload      any
-	DeviceSerial string
-	ResultStatus string
-}
-
-// TaskLifecycle defines callbacks for task execution progress.
-type TaskLifecycle struct {
-	OnTaskStarted func(task *Task)
-	OnTaskResult  func(task *Task, err error)
-}
-
-// DeviceProvider returns the set of currently connected device serials.
-type DeviceProvider interface {
-	ListDevices(ctx context.Context) ([]string, error)
-}
-
-// TaskManager owns task lifecycle hooks (fetch/dispatch/complete).
-type TaskManager interface {
-	FetchAvailableTasks(ctx context.Context, app string, limit int) ([]*Task, error)
-	OnTasksDispatched(ctx context.Context, deviceSerial string, tasks []*Task) error
-	OnTasksCompleted(ctx context.Context, deviceSerial string, tasks []*Task, jobErr error) error
-}
-
-// TaskStartNotifier can be implemented by TaskManagers that need per-task start events.
-type TaskStartNotifier interface {
-	OnTaskStarted(ctx context.Context, deviceSerial string, task *Task) error
-}
-
-// TaskResultNotifier receives per-task completion events right after a task finishes.
-type TaskResultNotifier interface {
-	OnTaskResult(ctx context.Context, deviceSerial string, task *Task, runErr error) error
-}
+// Re-export核心类型，保持向后兼容。
+type Task = agenttasks.Task
+type TaskLifecycle = agentlifecycle.Callbacks
+type DeviceProvider = agentdevice.Provider
+type DeviceRecorder = agentdevice.Recorder
+type DeviceInfoUpdate = agentdevice.InfoUpdate
+type TaskManager = agenttasks.Source
+type TaskStartNotifier = agenttasks.StartNotifier
+type TaskResultNotifier = agenttasks.ResultNotifier
 
 // JobRequest bundles the execution details for a device.
 type JobRequest struct {
@@ -80,6 +57,7 @@ type Config struct {
 	BitableURL      string
 	AgentVersion    string
 	DeviceRecorder  DeviceRecorder
+	AllowedScenes   []string
 }
 
 // DevicePoolAgent coordinates plug-and-play devices with a task source.
@@ -89,40 +67,19 @@ type DevicePoolAgent struct {
 	taskManager     TaskManager
 	recorder        DeviceRecorder
 	jobRunner       JobRunner
-	deviceMu        sync.Mutex
-	devices         map[string]*deviceState
+	deviceManager   *agentdevice.Manager
+	jobsMu          sync.RWMutex
+	jobs            map[string]*deviceJob
 	backgroundGroup sync.WaitGroup
 	adbClient       gadb.Client
 	adbReady        bool
 	hostUUID        string
 }
 
-type deviceStatus string
-
 const (
-	statusIdle    deviceStatus = "idle"
-	statusRunning deviceStatus = "running"
+	statusIdle    = agentdevice.StatusIdle
+	statusRunning = agentdevice.StatusRunning
 )
-
-const offlineThreshold = 5 * time.Minute
-
-type deviceState struct {
-	serial         string
-	status         deviceStatus
-	lastSeen       time.Time
-	removeAfterJob bool
-	currentJob     *deviceJob
-	// meta contains immutable device info (os version/root). Fetch once to avoid repeated adb calls.
-	meta      deviceMeta
-	metaReady bool
-}
-
-type deviceMeta struct {
-	osType       string
-	osVersion    string
-	isRoot       string
-	providerUUID string
-}
 
 type deviceJob struct {
 	deviceSerial string
@@ -137,9 +94,20 @@ type noopRecorder struct{}
 func (noopRecorder) UpsertDevices(ctx context.Context, devices []DeviceInfoUpdate) error { return nil }
 
 type deviceAssignment struct {
-	device   *deviceState
+	serial   string
+	meta     agentdevice.Meta
 	tasks    []*Task
 	capacity int
+}
+
+func defaultDeviceAllowedScenes() []string {
+	return []string{
+		SceneVideoScreenCapture,
+		SceneGeneralSearch,
+		SceneProfileSearch,
+		SceneCollection,
+		SceneAnchorCapture,
+	}
 }
 
 // NewDevicePoolAgent builds an agent with the provided configuration and job runner.
@@ -171,8 +139,12 @@ func NewDevicePoolAgent(cfg Config, runner JobRunner) (*DevicePoolAgent, error) 
 
 	manager := cfg.TaskManager
 	if manager == nil {
+		allowed := cfg.AllowedScenes
+		if len(allowed) == 0 {
+			allowed = defaultDeviceAllowedScenes()
+		}
 		var err error
-		manager, err = NewFeishuTaskClient(cfg.BitableURL)
+		manager, err = NewFeishuTaskClientWithOptions(cfg.BitableURL, FeishuTaskClientOptions{AllowedScenes: allowed})
 		if err != nil {
 			return nil, err
 		}
@@ -181,21 +153,24 @@ func NewDevicePoolAgent(cfg Config, runner JobRunner) (*DevicePoolAgent, error) 
 		return nil, errors.New("task manager cannot be nil")
 	}
 
+	hostUUID := ""
+	if uuid, err := getHostUUID(); err == nil {
+		hostUUID = uuid
+	}
+
 	agent := &DevicePoolAgent{
 		cfg:            cfg,
 		deviceProvider: provider,
 		taskManager:    manager,
 		recorder:       cfg.DeviceRecorder,
 		jobRunner:      runner,
-		devices:        make(map[string]*deviceState),
+		jobs:           make(map[string]*deviceJob),
+		hostUUID:       hostUUID,
 	}
 	if agent.recorder == nil {
 		agent.recorder = noopRecorder{}
 	}
-	// cache host UUID for ProviderUUID field; ignore error silently
-	if uuid, err := getHostUUID(); err == nil {
-		agent.hostUUID = uuid
-	}
+	agent.deviceManager = agentdevice.NewManager(agent.deviceProvider, agent.recorder, agent.cfg.AgentVersion, agent.hostUUID)
 	return agent, nil
 }
 
@@ -260,107 +235,10 @@ func (a *DevicePoolAgent) runCycle(ctx context.Context, app string) error {
 
 func (a *DevicePoolAgent) refreshDevices(ctx context.Context) error {
 	log.Info().Msg("refresh devices for device pool agent")
-	serials, err := a.deviceProvider.ListDevices(ctx)
-	if err != nil {
-		return errors.Wrap(err, "list devices failed")
+	if a.deviceManager == nil {
+		return errors.New("device manager is not initialized")
 	}
-	now := time.Now()
-	seen := make(map[string]struct{}, len(serials))
-	updates := make([]DeviceInfoUpdate, 0, len(serials))
-
-	a.deviceMu.Lock()
-	defer a.deviceMu.Unlock()
-
-	for _, serial := range serials {
-		serial = strings.TrimSpace(serial)
-		if serial == "" {
-			continue
-		}
-		seen[serial] = struct{}{}
-		if dev, ok := a.devices[serial]; ok {
-			dev.lastSeen = now
-			if !dev.metaReady {
-				dev.meta = a.fetchDeviceMeta(serial)
-				dev.metaReady = true
-			}
-			runningTask := ""
-			pendingTasks := []string(nil)
-			if dev.currentJob != nil {
-				runningTask = firstTaskID(dev.currentJob.tasks)
-				pendingTasks = remainingTaskIDs(dev.currentJob.tasks)
-			}
-			updates = append(updates,
-				DeviceInfoUpdate{
-					DeviceSerial: serial,
-					Status:       string(dev.status),
-					OSType:       dev.meta.osType,
-					OSVersion:    dev.meta.osVersion,
-					IsRoot:       dev.meta.isRoot,
-					ProviderUUID: dev.meta.providerUUID,
-					AgentVersion: a.cfg.AgentVersion,
-					LastSeenAt:   now,
-					RunningTask:  runningTask,
-					PendingTasks: pendingTasks,
-				})
-			continue
-		}
-		meta := a.fetchDeviceMeta(serial)
-		a.devices[serial] = &deviceState{
-			serial:    serial,
-			status:    statusIdle,
-			lastSeen:  now,
-			meta:      meta,
-			metaReady: true,
-		}
-		updates = append(updates, DeviceInfoUpdate{
-			DeviceSerial: serial,
-			Status:       string(statusIdle),
-			OSType:       meta.osType,
-			OSVersion:    meta.osVersion,
-			IsRoot:       meta.isRoot,
-			ProviderUUID: meta.providerUUID,
-			AgentVersion: a.cfg.AgentVersion,
-			LastSeenAt:   now,
-		})
-		log.Info().Str("serial", serial).Msg("device connected")
-	}
-
-	for serial, dev := range a.devices {
-		if _, ok := seen[serial]; ok {
-			continue
-		}
-		if dev.status == statusRunning {
-			dev.removeAfterJob = true
-			log.Warn().Str("serial", serial).Msg("device disconnected during job, will remove after completion")
-			continue
-		}
-		if now.Sub(dev.lastSeen) < offlineThreshold {
-			// wait until threshold before marking offline
-			continue
-		}
-		if !dev.metaReady {
-			dev.meta = a.fetchDeviceMeta(serial)
-			dev.metaReady = true
-		}
-		delete(a.devices, serial)
-		updates = append(updates,
-			DeviceInfoUpdate{
-				DeviceSerial: serial,
-				Status:       "offline",
-				OSType:       dev.meta.osType,
-				OSVersion:    dev.meta.osVersion,
-				IsRoot:       dev.meta.isRoot,
-				ProviderUUID: dev.meta.providerUUID,
-				AgentVersion: a.cfg.AgentVersion,
-				LastSeenAt:   dev.lastSeen,
-			})
-		log.Info().Str("serial", serial).Msg("device disconnected")
-	}
-
-	if err := a.recorder.UpsertDevices(ctx, updates); err != nil {
-		log.Error().Err(err).Msg("device recorder upsert failed")
-	}
-	return nil
+	return a.deviceManager.Refresh(ctx, a.fetchDeviceMeta, a.snapshotJobTasks)
 }
 
 func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
@@ -406,17 +284,22 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 		targeted[target] = append(targeted[target], task)
 	}
 	assignments := make([]*deviceAssignment, 0, len(idle))
-	for _, dev := range idle {
+	for _, serial := range idle {
 		capacity := a.cfg.MaxTasksPerJob
 		if capacity <= 0 {
 			capacity = 1
 		}
+		meta := agentdevice.Meta{}
+		if a.deviceManager != nil {
+			meta = a.deviceManager.Meta(serial)
+		}
 		assignment := &deviceAssignment{
-			device:   dev,
+			serial:   serial,
+			meta:     meta,
 			tasks:    make([]*Task, 0, capacity),
 			capacity: capacity,
 		}
-		if list := targeted[dev.serial]; len(list) > 0 {
+		if list := targeted[serial]; len(list) > 0 {
 			take := assignment.capacity
 			if take > len(list) {
 				take = len(list)
@@ -446,77 +329,87 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 		}
 	}
 	for _, assignment := range assignments {
-		if len(assignment.tasks) == 0 || assignment.device == nil {
+		if len(assignment.tasks) == 0 || strings.TrimSpace(assignment.serial) == "" {
 			continue
 		}
-		dev := assignment.device
-		if err := a.taskManager.OnTasksDispatched(ctx, dev.serial, assignment.tasks); err != nil {
-			log.Error().Err(err).Str("serial", dev.serial).Msg("task dispatch hook failed")
+		serial := assignment.serial
+		if err := a.taskManager.OnTasksDispatched(ctx, serial, assignment.tasks); err != nil {
+			log.Error().Err(err).Str("serial", serial).Msg("task dispatch hook failed")
 			continue
 		}
 		now := time.Now()
 		pending := extractTaskIDs(assignment.tasks)
 		if err := a.recorder.UpsertDevices(ctx, []DeviceInfoUpdate{{
-			DeviceSerial: dev.serial,
+			DeviceSerial: serial,
 			Status:       string(statusRunning),
-			OSType:       dev.meta.osType,
-			OSVersion:    dev.meta.osVersion,
-			IsRoot:       dev.meta.isRoot,
-			ProviderUUID: dev.meta.providerUUID,
+			OSType:       assignment.meta.OSType,
+			OSVersion:    assignment.meta.OSVersion,
+			IsRoot:       assignment.meta.IsRoot,
+			ProviderUUID: assignment.meta.ProviderUUID,
 			AgentVersion: a.cfg.AgentVersion,
 			LastSeenAt:   now,
 			RunningTask:  "",
 			PendingTasks: pending,
 		}}); err != nil {
-			log.Error().Err(err).Str("serial", dev.serial).Msg("device recorder update running state failed")
+			log.Error().Err(err).Str("serial", serial).Msg("device recorder update running state failed")
 		}
 		log.Info().
-			Str("serial", dev.serial).
+			Str("serial", serial).
 			Int("assigned_tasks", len(assignment.tasks)).
 			Msg("device pool dispatched tasks to device")
-		a.startDeviceJob(ctx, dev, assignment.tasks)
+		a.startDeviceJob(ctx, serial, assignment.tasks)
 	}
 	return nil
 }
 
-func (a *DevicePoolAgent) idleDevices() []*deviceState {
-	a.deviceMu.Lock()
-	defer a.deviceMu.Unlock()
-	result := make([]*deviceState, 0, len(a.devices))
-	for _, dev := range a.devices {
-		if dev.status == statusIdle && !dev.removeAfterJob {
-			result = append(result, dev)
-		}
+func (a *DevicePoolAgent) idleDevices() []string {
+	if a.deviceManager == nil {
+		return nil
 	}
-	return result
+	return a.deviceManager.IdleDevices()
 }
 
-func (a *DevicePoolAgent) startDeviceJob(ctx context.Context, dev *deviceState, tasks []*Task) {
+func (a *DevicePoolAgent) snapshotJobTasks(serial string) (string, []string) {
+	a.jobsMu.RLock()
+	job := a.jobs[serial]
+	a.jobsMu.RUnlock()
+	if job == nil {
+		return "", nil
+	}
+	running := firstTaskID(job.tasks)
+	pending := remainingTaskIDs(job.tasks)
+	return running, pending
+}
+
+func (a *DevicePoolAgent) startDeviceJob(ctx context.Context, serial string, tasks []*Task) {
 	jobCtx, cancel := context.WithCancel(ctx)
 	job := &deviceJob{
-		deviceSerial: dev.serial,
+		deviceSerial: serial,
 		tasks:        tasks,
 		cancel:       cancel,
 		startAt:      time.Now(),
 	}
-	job.lifecycle = a.buildTaskLifecycle(jobCtx, dev, job)
+	job.lifecycle = a.buildTaskLifecycle(jobCtx, serial, job)
 
-	a.deviceMu.Lock()
-	dev.status = statusRunning
-	dev.currentJob = job
-	a.deviceMu.Unlock()
+	a.jobsMu.Lock()
+	a.jobs[serial] = job
+	a.jobsMu.Unlock()
+
+	if a.deviceManager != nil {
+		a.deviceManager.MarkRunning(serial)
+	}
 
 	a.backgroundGroup.Add(1)
-	go a.runDeviceJob(jobCtx, dev, job)
+	go a.runDeviceJob(jobCtx, serial, job)
 }
 
-func (a *DevicePoolAgent) buildTaskLifecycle(ctx context.Context, dev *deviceState, job *deviceJob) *TaskLifecycle {
+func (a *DevicePoolAgent) buildTaskLifecycle(ctx context.Context, serial string, job *deviceJob) *TaskLifecycle {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	return &TaskLifecycle{
 		OnTaskStarted: func(task *Task) {
-			a.handleTaskStarted(ctx, dev, job, task)
+			a.handleTaskStarted(ctx, serial, job, task)
 		},
 		OnTaskResult: func(task *Task, err error) {
 			if task == nil {
@@ -532,7 +425,7 @@ func (a *DevicePoolAgent) buildTaskLifecycle(ctx context.Context, dev *deviceSta
 	}
 }
 
-func (a *DevicePoolAgent) runDeviceJob(ctx context.Context, dev *deviceState, job *deviceJob) {
+func (a *DevicePoolAgent) runDeviceJob(ctx context.Context, serial string, job *deviceJob) {
 	defer a.backgroundGroup.Done()
 	defer job.cancel()
 
@@ -545,6 +438,7 @@ func (a *DevicePoolAgent) runDeviceJob(ctx context.Context, dev *deviceState, jo
 	if maxAttempts <= 0 {
 		maxAttempts = 1
 	}
+
 	backoff := a.cfg.JobRetryBackoff
 	if backoff <= 0 {
 		backoff = 5 * time.Second
@@ -589,11 +483,13 @@ func (a *DevicePoolAgent) runDeviceJob(ctx context.Context, dev *deviceState, jo
 
 	a.handleTaskResults(job, err)
 
-	a.deviceMu.Lock()
-	dev.status = statusIdle
-	dev.currentJob = nil
-	remove := dev.removeAfterJob
-	a.deviceMu.Unlock()
+	remove := false
+	if a.deviceManager != nil {
+		remove = a.deviceManager.MarkIdle(serial)
+	}
+	a.jobsMu.Lock()
+	delete(a.jobs, serial)
+	a.jobsMu.Unlock()
 
 	if err != nil {
 		log.Error().Err(err).Str("serial", job.deviceSerial).Msg("device job failed")
@@ -605,13 +501,17 @@ func (a *DevicePoolAgent) runDeviceJob(ctx context.Context, dev *deviceState, jo
 	if remove {
 		finalStatus = "offline"
 	}
+	meta := agentdevice.Meta{}
+	if a.deviceManager != nil {
+		meta = a.deviceManager.Meta(serial)
+	}
 	if recErr := a.recorder.UpsertDevices(context.Background(), []DeviceInfoUpdate{{
 		DeviceSerial: job.deviceSerial,
 		Status:       finalStatus,
-		OSType:       dev.meta.osType,
-		OSVersion:    dev.meta.osVersion,
-		IsRoot:       dev.meta.isRoot,
-		ProviderUUID: dev.meta.providerUUID,
+		OSType:       meta.OSType,
+		OSVersion:    meta.OSVersion,
+		IsRoot:       meta.IsRoot,
+		ProviderUUID: meta.ProviderUUID,
 		AgentVersion: a.cfg.AgentVersion,
 		LastSeenAt:   time.Now(),
 		LastError:    errString(err),
@@ -626,32 +526,33 @@ func (a *DevicePoolAgent) runDeviceJob(ctx context.Context, dev *deviceState, jo
 	}
 }
 
-func (a *DevicePoolAgent) handleTaskStarted(ctx context.Context, dev *deviceState, job *deviceJob, task *Task) {
+func (a *DevicePoolAgent) handleTaskStarted(ctx context.Context, serial string, job *deviceJob, task *Task) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if dev == nil || job == nil || task == nil {
+	if job == nil || task == nil {
 		return
 	}
 	now := time.Now()
 
-	a.deviceMu.Lock()
-	meta := dev.meta
+	meta := agentdevice.Meta{}
+	if a.deviceManager != nil {
+		meta = a.deviceManager.Meta(serial)
+	}
 	running := firstTaskID(job.tasks)
 	if running == "" && strings.TrimSpace(task.ID) != "" {
 		running = strings.TrimSpace(task.ID)
 	}
 	pending := remainingTaskIDs(job.tasks)
-	a.deviceMu.Unlock()
 
 	if a.recorder != nil {
 		if err := a.recorder.UpsertDevices(ctx, []DeviceInfoUpdate{{
-			DeviceSerial: job.deviceSerial,
+			DeviceSerial: serial,
 			Status:       string(statusRunning),
-			OSType:       meta.osType,
-			OSVersion:    meta.osVersion,
-			IsRoot:       meta.isRoot,
-			ProviderUUID: meta.providerUUID,
+			OSType:       meta.OSType,
+			OSVersion:    meta.OSVersion,
+			IsRoot:       meta.IsRoot,
+			ProviderUUID: meta.ProviderUUID,
 			AgentVersion: a.cfg.AgentVersion,
 			LastSeenAt:   now,
 			RunningTask:  running,
@@ -659,17 +560,17 @@ func (a *DevicePoolAgent) handleTaskStarted(ctx context.Context, dev *deviceStat
 		}}); err != nil {
 			log.Error().
 				Err(err).
-				Str("serial", job.deviceSerial).
+				Str("serial", serial).
 				Str("running_task", running).
 				Strs("pending_tasks", pending).
 				Msg("device recorder update running task failed")
 		}
 	}
 	if notifier, ok := a.taskManager.(TaskStartNotifier); ok && notifier != nil {
-		if err := notifier.OnTaskStarted(ctx, job.deviceSerial, task); err != nil {
+		if err := notifier.OnTaskStarted(ctx, serial, task); err != nil {
 			log.Warn().
 				Err(err).
-				Str("serial", job.deviceSerial).
+				Str("serial", serial).
 				Str("task_id", task.ID).
 				Msg("task manager handle task started failed")
 		}
@@ -800,8 +701,10 @@ func errString(err error) string {
 }
 
 func (a *DevicePoolAgent) removeDevice(serial string) {
-	a.deviceMu.Lock()
-	defer a.deviceMu.Unlock()
-	delete(a.devices, serial)
-	log.Info().Str("serial", serial).Msg("device removed from pool")
+	if a.deviceManager != nil {
+		a.deviceManager.Remove(serial)
+	}
+	a.jobsMu.Lock()
+	delete(a.jobs, serial)
+	a.jobsMu.Unlock()
 }

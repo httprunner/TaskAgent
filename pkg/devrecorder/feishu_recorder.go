@@ -100,15 +100,6 @@ func (r *FeishuRecorder) now() time.Time {
 	return time.Now()
 }
 
-// toSlice converts a single string to a slice, trimming blanks.
-func toSlice(value string) []string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil
-	}
-	return []string{value}
-}
-
 // sanitizeSlice removes blanks from the provided string slice.
 func sanitizeSlice(values []string) []string {
 	result := make([]string, 0, len(values))

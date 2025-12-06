@@ -1,8 +1,8 @@
 # Repository Guidelines
 
 ## 1. Project orientation
-- **Core packages**: `pool.go`/`tasks.go` drive scheduling + lifecycle hooks, `pkg/feishu` wraps every Bitable call, `pkg/storage` handles SQLite + Feishu reporting, `pkg/piracy` implements detection/webhook workflows, and `providers/adb` is the default device provider. Read [`README.md`](README.md) for the architecture diagram and [`docs/`](docs) for deep dives.
-- **Configuration**: keep Feishu credentials plus table URLs in `.env` (`FEISHU_APP_ID`, `FEISHU_APP_SECRET`, `TASK_BITABLE_URL`, etc.). `internal/envload.Ensure` loads the first `.env` it finds upward from the repo root.
+- **Core packages**: `internal/agent/{device,scheduler,lifecycle,tasks}` host the scheduling core (re-exported via `pool.DevicePoolAgent`), `pkg/tasksource/feishu` provides the default Feishu-backed task source, `pkg/feishu` wraps every Bitable call, `pkg/storage` handles SQLite + Feishu reporting, `pkg/piracy` + its subpackages (`types`, `webhook`, `reporter`) implement detection workflows, and `providers/adb` is the default device provider. Read [`README.md`](README.md) for the architecture diagram and [`docs/`](docs) for deep dives.
+- **Configuration**: keep Feishu credentials plus table URLs in `.env` (`FEISHU_APP_ID`, `FEISHU_APP_SECRET`, `TASK_BITABLE_URL`, etc.). `internal/config` wraps env lookups on top of `internal/envload.Ensure`, so prefer it over raw `os.Getenv` in new code.
 
 ## 2. Daily development workflow
 1. Install deps via `go mod download` and keep Go at 1.24+.
@@ -17,7 +17,7 @@
 
 ## 3. Coding conventions
 - Gofmt everything, keep packages short + lowercase, and colocate mocks in `*_test.go` files.
-- Use interfaces (`pool.DeviceProvider`, `pool.TaskManager`, `pool.JobRunner`) instead of wiring business logic directly into the pool.
+- Use interfaces (`pool.DeviceProvider`, `tasks.Source`, `pool.JobRunner`) instead of wiring business logic directly into the pool.
 - Honor `TaskLifecycle`: invoke `OnTaskStarted` before the device work begins and call `OnTaskResult` exactly once per task so Feishu status + recorder state stay consistent.
 - Prefer structured logging via `zerolog` and propagate `context.Context` through every exported API so callers can cancel long-running Feishu calls.
 

@@ -3,13 +3,14 @@ package piracy
 import (
 	"context"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	pool "github.com/httprunner/TaskAgent"
+	"github.com/httprunner/TaskAgent/internal/config"
 	"github.com/httprunner/TaskAgent/pkg/feishu"
+	feishufields "github.com/httprunner/TaskAgent/pkg/feishu/fields"
 	"github.com/rs/zerolog/log"
 )
 
@@ -26,9 +27,9 @@ type Reporter struct {
 // NewReporter creates a new piracy reporter
 func NewReporter() *Reporter {
 	// Get table URLs from environment variables
-	resultTableURL := os.Getenv("RESULT_BITABLE_URL") // Video data
-	dramaTableURL := os.Getenv("DRAMA_BITABLE_URL")   // Drama durations
-	taskTableURL := os.Getenv("TASK_BITABLE_URL")     // Where to write reports
+	resultTableURL := config.String("RESULT_BITABLE_URL", "")
+	dramaTableURL := config.String("DRAMA_BITABLE_URL", "")
+	taskTableURL := config.String("TASK_BITABLE_URL", "")
 
 	cfg := Config{}
 	cfg.ApplyDefaults()
@@ -493,7 +494,7 @@ func buildPiracyGroupTaskRecords(
 	inheritRaw := inheritDatetimeRaw(parentDatetimeRaw, parentDatetime)
 	records := make([]feishu.TaskRecordInput, 0, len(details)*3)
 	usedGroups := make(map[string]struct{})
-	mappedApp := mapAppFieldValue(trimmedApp)
+	mappedApp := feishufields.MapAppValue(trimmedApp)
 	if mappedApp == "" {
 		mappedApp = strings.TrimSpace(trimmedApp)
 	}
@@ -592,7 +593,7 @@ func inheritDatetimeRaw(parentRaw string, parent *time.Time) string {
 }
 
 func buildGroupID(appName, bookID, userID string) string {
-	mappedApp := mapAppFieldValue(strings.TrimSpace(appName))
+	mappedApp := feishufields.MapAppValue(strings.TrimSpace(appName))
 	if mappedApp == "" {
 		mappedApp = strings.TrimSpace(appName)
 	}

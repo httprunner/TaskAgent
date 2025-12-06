@@ -27,7 +27,7 @@
 
 ## 调度与状态流转
 
-1. `TASK_FIELD_SCENE = 单个链接采集` 且 `Datetime=Today` 的任务会插队在 `视频录屏采集` 之后、搜索类任务之前（参见 `fetchTodayPendingFeishuTasks`）。
+1. 设备池（`DevicePoolAgent`）默认通过 `pool.Config.AllowedScenes` 仅消费需要物理设备的场景（比如综合页/个人页/录屏/合集/锚点），`Scene=单个链接采集` 不在列表中，因此完全交给 `SingleURLWorker`（内部仍使用 `pkg/tasksource/feishu` 的相同查询逻辑），不会再占用设备拉取额度。
 2. `SingleURLWorker`（`pool/single_url_worker.go`）按照 `pending → failed` 顺序批量拉取任务，每轮最多 `fetch-tasks-limit` 条，可通过 `--single-url-poll-interval` 改写扫描频率。
 3. 对于所有字段完整的任务：
    - Worker 会调用下载服务 `POST /download/tasks`，请求体为 `{url, cookies: [], sync_to_hive: true}`；
@@ -38,7 +38,7 @@
 | 下载服务状态 | Task 表 Status | 行为 |
 | --- | --- | --- |
 | `queued` | `queued` | 维持排队状态，如缺失 job_id 会自动补齐/报错。 |
-| `running` | `running` | 通过 `updateFeishuTaskStatuses` 更新状态，保持原始时间戳。 |
+| `running` | `running` | 通过 `UpdateFeishuTaskStatuses` 更新状态，保持原始时间戳。 |
 | `done` | `success` | 写入 `vid` 到 `Extra`（`{"job_id":"...","vid":"..."}`），并把 `EndAt`/`ElapsedSeconds` 补齐。 |
 | `failed` / 404 | `failed` | 将失败原因附加到 `Extra`，同时保留 `job_id` 方便排查。 |
 
@@ -61,6 +61,6 @@
 
 ## 关联文件
 
-- 代码：`pool/single_url_worker.go`（核心逻辑）、`pool/single_url_client.go`（HTTP 客户端）、`pool/tasks.go`（Scene 优先级）、`biz/fox/cli/run_search.go`（CLI 入口）。
+- 代码：`pool/single_url_worker.go`（核心逻辑）、`pool/single_url_client.go`（HTTP 客户端）、`pkg/tasksource/feishu/client.go`（Scene 优先级）、`biz/fox/cli/run_search.go`（CLI 入口）。
 - 配置：`docs/ENVIRONMENT.md` 中的 `CRAWLER_SERVICE_BASE_URL`、`COOKIE_BITABLE_URL`、`TASK_FIELD_BOOKID`、`TASK_FIELD_URL` 等说明。
 - 下载服务：`/Users/debugtalk/MyProjects/ByteDance/content_web_crawler`（`routes/download_routes.py` + `services/download_service.py`），`JobStatusManager` 会把 job 状态持久化在 Redis。

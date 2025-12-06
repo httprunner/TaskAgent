@@ -1,4 +1,4 @@
-package pool
+package feishusource
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	agenttasks "github.com/httprunner/TaskAgent/internal/agent/tasks"
 	feishusvc "github.com/httprunner/TaskAgent/pkg/feishu"
 )
 
@@ -30,7 +31,7 @@ func TestFetchFeishuTasksWithStrategyFiltersInvalidTasks(t *testing.T) {
 		},
 	}
 
-	tasks, err := fetchFeishuTasksWithStrategy(ctx, client, "https://example.com/bitable/abc", feishusvc.DefaultTaskFields, "com.app", []string{""}, 5, "")
+	tasks, err := FetchFeishuTasksWithStrategy(ctx, client, "https://example.com/bitable/abc", feishusvc.DefaultTaskFields, "com.app", []string{""}, 5, "")
 	if err != nil {
 		t.Fatalf("fetchFeishuTasksWithStrategy returned error: %v", err)
 	}
@@ -60,7 +61,7 @@ func TestFetchFeishuTasksWithFilterAllowsBookOrURLOnlyRows(t *testing.T) {
 			},
 		},
 	}
-	tasks, err := fetchFeishuTasksWithFilter(ctx, client, "https://example.com/bitable/rows", nil, 10)
+	tasks, err := FetchFeishuTasksWithFilter(ctx, client, "https://example.com/bitable/rows", nil, 10)
 	if err != nil {
 		t.Fatalf("fetchFeishuTasksWithFilter returned error: %v", err)
 	}
@@ -117,7 +118,7 @@ func TestFetchTodayPendingFeishuTasksSceneStatusPriorityStopsAfterLimit(t *testi
 		},
 	}
 
-	tasks, err := fetchTodayPendingFeishuTasks(ctx, client, "https://example.com/bitable/foo", "com.app", 3)
+	tasks, err := fetchTodayPendingFeishuTasks(ctx, client, "https://example.com/bitable/foo", "com.app", 3, nil)
 	if err != nil {
 		t.Fatalf("fetchTodayPendingFeishuTasks returned error: %v", err)
 	}
@@ -125,6 +126,75 @@ func TestFetchTodayPendingFeishuTasksSceneStatusPriorityStopsAfterLimit(t *testi
 	want := []int64{1, 11, 12}
 	if !equalIDs(got, want) {
 		t.Fatalf("unexpected ids: got %v, want %v", got, want)
+	}
+}
+
+func TestFetchTodayPendingFeishuTasksRespectsAllowedScenes(t *testing.T) {
+	ctx := context.Background()
+	client := &sceneStatusTargetClient{
+		rows: map[string][]feishusvc.TaskRow{
+			"单个链接采集|pending|with": {
+				{TaskID: 50, Params: "S1", App: "com.app", Scene: SceneSingleURLCapture},
+				{TaskID: 51, Params: "S2", App: "com.app", Scene: SceneSingleURLCapture},
+			},
+			"综合页搜索|pending|with": {
+				{TaskID: 60, Params: "E1", App: "com.app", Scene: SceneGeneralSearch},
+			},
+		},
+	}
+	allowed := map[string]struct{}{SceneGeneralSearch: {}}
+	tasks, err := fetchTodayPendingFeishuTasks(ctx, client, "https://example.com/bitable/foo", "com.app", 2, allowed)
+	if err != nil {
+		t.Fatalf("fetchTodayPendingFeishuTasks returned error: %v", err)
+	}
+	got := collectTaskIDs(tasks)
+	want := []int64{60}
+	if !equalIDs(got, want) {
+		t.Fatalf("unexpected ids: got %v want %v", got, want)
+	}
+}
+
+func TestFetchTodayPendingFeishuTasksReturnsEmptyWhenSceneNotAllowed(t *testing.T) {
+	ctx := context.Background()
+	client := &sceneStatusTargetClient{
+		rows: map[string][]feishusvc.TaskRow{
+			"单个链接采集|pending|with": {
+				{TaskID: 70, Params: "S1", App: "com.app", Scene: SceneSingleURLCapture},
+			},
+		},
+	}
+	allowed := map[string]struct{}{SceneGeneralSearch: {}}
+	tasks, err := fetchTodayPendingFeishuTasks(ctx, client, "https://example.com/bitable/foo", "com.app", 5, allowed)
+	if err != nil {
+		t.Fatalf("fetchTodayPendingFeishuTasks returned error: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("expected no tasks when scene not allowed, got %v", collectTaskIDs(tasks))
+	}
+}
+
+func TestFetchTodayPendingFeishuTasksAllowedScenesOrderPreserved(t *testing.T) {
+	ctx := context.Background()
+	client := &sceneStatusTargetClient{
+		rows: map[string][]feishusvc.TaskRow{
+			"综合页搜索|pending|with": {
+				{TaskID: 201, Params: "G1", App: "com.app", Scene: SceneGeneralSearch},
+			},
+			"个人页搜索|pending|with": {
+				{TaskID: 301, Params: "P1", App: "com.app", Scene: SceneProfileSearch},
+				{TaskID: 302, Params: "P2", App: "com.app", Scene: SceneProfileSearch},
+			},
+		},
+	}
+	allowed := map[string]struct{}{SceneGeneralSearch: {}, SceneProfileSearch: {}}
+	tasks, err := fetchTodayPendingFeishuTasks(ctx, client, "https://example.com/bitable/foo", "com.app", 3, allowed)
+	if err != nil {
+		t.Fatalf("fetchTodayPendingFeishuTasks returned error: %v", err)
+	}
+	got := collectTaskIDs(tasks)
+	want := []int64{201, 301, 302}
+	if !equalIDs(got, want) {
+		t.Fatalf("unexpected ids: got %v want %v", got, want)
 	}
 }
 
@@ -361,7 +431,7 @@ func TestUpdateFeishuTaskStatusesAssignsDispatchedDevice(t *testing.T) {
 	}
 
 	dispatchedAt := time.Date(2025, 11, 10, 10, 0, 0, 0, time.UTC)
-	if err := updateFeishuTaskStatuses(context.Background(), []*FeishuTask{task}, "dispatched", "device-xyz", &taskStatusMeta{dispatchedAt: &dispatchedAt}); err != nil {
+	if err := UpdateFeishuTaskStatuses(context.Background(), []*FeishuTask{task}, "dispatched", "device-xyz", &TaskStatusMeta{DispatchedAt: &dispatchedAt}); err != nil {
 		t.Fatalf("updateFeishuTaskStatuses returned error: %v", err)
 	}
 	if len(client.updates) != 1 {
@@ -407,7 +477,7 @@ func TestUpdateFeishuTaskStatusesAssignsElapsedSeconds(t *testing.T) {
 		},
 	}
 	completedAt := dispatchedAt.Add(95 * time.Second)
-	if err := updateFeishuTaskStatuses(context.Background(), []*FeishuTask{task}, "success", "", &taskStatusMeta{completedAt: &completedAt}); err != nil {
+	if err := UpdateFeishuTaskStatuses(context.Background(), []*FeishuTask{task}, "success", "", &TaskStatusMeta{CompletedAt: &completedAt}); err != nil {
 		t.Fatalf("updateFeishuTaskStatuses returned error: %v", err)
 	}
 	if len(client.updates) != 1 {
@@ -428,7 +498,7 @@ func TestUpdateStatusesSkipsDuplicateStatusWrites(t *testing.T) {
 	recorder := &recordingTargetClient{}
 	table := &feishusvc.TaskTable{Fields: feishusvc.DefaultTaskFields}
 	source := &feishuTaskSource{client: recorder, table: table}
-	tasks := []*Task{
+	tasks := []*agenttasks.Task{
 		{Payload: &FeishuTask{TaskID: 11, Status: feishusvc.StatusSuccess, source: source}},
 		{Payload: &FeishuTask{TaskID: 12, Status: feishusvc.StatusSuccess, source: source}},
 	}
@@ -452,7 +522,7 @@ func TestUpdateStatusesStillUpdatesPendingTasks(t *testing.T) {
 	table := &feishusvc.TaskTable{Fields: feishusvc.DefaultTaskFields}
 	source := &feishuTaskSource{client: recorder, table: table}
 	task := &FeishuTask{TaskID: 21, Status: feishusvc.StatusPending, source: source}
-	updated, err := client.updateStatuses(context.Background(), []*Task{{Payload: task}}, feishusvc.StatusSuccess, "device-1")
+	updated, err := client.updateStatuses(context.Background(), []*agenttasks.Task{{Payload: task}}, feishusvc.StatusSuccess, "device-1")
 	if err != nil {
 		t.Fatalf("updateStatuses returned error: %v", err)
 	}

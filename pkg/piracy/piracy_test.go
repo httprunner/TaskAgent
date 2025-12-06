@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/httprunner/TaskAgent/pkg/feishu"
+	feishufields "github.com/httprunner/TaskAgent/pkg/feishu/fields"
 )
 
 func TestAnalyzeRows(t *testing.T) {
@@ -447,7 +448,7 @@ func TestMapAppFieldValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := mapAppFieldValue(tt.input)
+			result := feishufields.MapAppValue(tt.input)
 			if result != tt.expected {
 				t.Errorf("mapAppFieldValue(%q) = %q, want %q", tt.input, result, tt.expected)
 			}

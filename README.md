@@ -5,26 +5,28 @@ TaskAgent is a Go 1.24 module that polls Feishu Bitable queues, keeps Android ca
 ## Overview & Architecture
 
 ```
-Feishu Task Table ──> TaskManager (tasks.go)
+Feishu Task Table ──> tasks.Source (pkg/tasksource/feishu)
         │                  │
         ▼                  ▼
- DeviceProvider ──> DevicePoolAgent (pool.go) ──> JobRunner (your code)
+DeviceProvider ──> internal/agent/{device,scheduler} ──> JobRunner (your code)
         │                  │                          │
         ▼                  ▼                          ▼
- Device recorder   TaskLifecycle hooks        Storage + webhook/piracy packages
+ Device recorder   lifecycle callbacks        Storage + webhook/piracy packages
 ```
 
 ### Core building blocks
-- **DevicePoolAgent** & **TaskLifecycle**: orchestrate polling, dispatching, retrying, and lifecycle callbacks so Feishu status rows & device snapshots stay consistent.
+- **internal/agent** (`device`, `scheduler`, `lifecycle`, `tasks`): encapsulates device discovery, recorder sync, task polling, and lifecycle callbacks. `pool.DevicePoolAgent` is now a thin façade over these modules so downstream API surface stays stable.
+- **pkg/tasksource/feishu**: Feishu-backed implementation of the `tasks.Source` interface, re-exported via `pool.NewFeishuTaskClient`.
 - **feishu package**: wraps Bitable APIs, exposes schema structs (`TaskFields`, `ResultFields`, `DeviceFields`) plus rate-limited result writers (`FEISHU_REPORT_RPS`).
 - **providers/adb**: default ADB-backed device provider; swap in custom providers without touching the pool.
 - **pkg/devrecorder** & **pkg/storage**: optional Feishu device heartbeats and SQLite-first capture storage with async reporting.
-- **cmd/piracy / pkg/piracy**: piracy detection CLI, webhook worker, backfill helpers, and group-task automation.
+- **cmd/piracy / pkg/piracy**: piracy detection CLI, webhook worker, backfill helpers, and group-task automation with shared helpers under `pkg/piracy/types`, `pkg/feishu/fields`, etc.
 
 ### Repository map
-- `pool.go`, `tasks.go`, `pool_test.go`: scheduling core and unit coverage.
+- `pool.go`, `devicemetainfo.go`, `internal/agent/**`: scheduling core, device registry, lifecycle plumbing, and unit coverage.
+- `pkg/tasksource/feishu`: Feishu task polling client + table mirror; re-exported from `pool` for backward compatibility.
 - `feishu/`: API client, schema definitions, spreadsheet helpers, rate limiter, and README.
-- `pkg/piracy/`, `cmd/piracy/`: CLI entry points plus detection/webhook logic.
+- `pkg/piracy/`, `pkg/piracy/types`, `pkg/feishu/fields`, `cmd/piracy/`: CLI entry points plus detection/webhook logic with shared helpers.
 - `pkg/storage/`, `pkg/devrecorder/`: SQLite + Feishu sinks and device recorder helpers.
 - `docs/`: deep dives (Feishu API usage, piracy group tasks, webhook worker, result storage).
 
@@ -137,7 +139,7 @@ running ──> TaskLifecycle.OnTaskResult (success/failed)
 OnTasksCompleted → Feishu updates + recorder cleanup
 ```
 
-`FeishuTaskClient` fetches tasks in prioritized bands (个人页搜索 before 综合页搜索, same-day before backlog, failed before untouched) and only fills the shortfall to `MaxTasksPerJob`. See [`tasks.go`](tasks.go) for the full prioritization table.
+`FeishuTaskClient` fetches tasks in prioritized bands (个人页搜索 before 综合页搜索, same-day before backlog, failed before untouched) and only fills the shortfall to `MaxTasksPerJob`. See [`pkg/tasksource/feishu/client.go`](pkg/tasksource/feishu/client.go) for the full prioritization table.
 
 ## Troubleshooting
 - **Missing tasks** – verify `TASK_BITABLE_URL` points to a view with Status=`pending/failed`, App matches the `Start` argument, and the service account has permission to read.

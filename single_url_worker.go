@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/httprunner/TaskAgent/pkg/feishu"
+	feishusource "github.com/httprunner/TaskAgent/pkg/tasksource/feishu"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 )
@@ -139,7 +140,7 @@ func (m *singleURLMetadata) markFailure(reason string, ts time.Time) {
 // SingleURLWorkerConfig captures the dependencies required to process
 // "单个链接采集" (single URL) tasks independently from device runners.
 type SingleURLWorkerConfig struct {
-	Client         targetTableClient
+	Client         feishusource.TargetTableClient
 	BitableURL     string
 	Limit          int
 	PollInterval   time.Duration
@@ -151,7 +152,7 @@ type SingleURLWorkerConfig struct {
 // SingleURLWorker pulls single-URL capture tasks and dispatches them via
 // API stubs without using physical devices.
 type SingleURLWorker struct {
-	client         targetTableClient
+	client         feishusource.TargetTableClient
 	bitableURL     string
 	limit          int
 	pollInterval   time.Duration
@@ -306,14 +307,14 @@ func (w *SingleURLWorker) fetchSingleURLTasks(ctx context.Context, statuses []st
 				break
 			}
 		}
-		subset, err := fetchFeishuTasksWithStrategy(ctx, w.client, w.bitableURL, fields, "", []string{status}, remaining, SceneSingleURLCapture)
+		subset, err := feishusource.FetchFeishuTasksWithStrategy(ctx, w.client, w.bitableURL, fields, "", []string{status}, remaining, feishusource.SceneSingleURLCapture)
 		if err != nil {
 			log.Warn().Err(err).
 				Str("status", status).
 				Msg("single url worker fetch failed")
 			continue
 		}
-		result = appendUniqueFeishuTasks(result, subset, limit, seen)
+		result = feishusource.AppendUniqueFeishuTasks(result, subset, limit, seen)
 	}
 	return result, nil
 }
@@ -412,14 +413,14 @@ func (w *SingleURLWorker) reconcileSingleURLTask(ctx context.Context, task *Feis
 		if err := w.updateTaskExtra(ctx, task, meta); err != nil {
 			return err
 		}
-		return updateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishu.StatusRunning, "", nil)
+		return feishusource.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishu.StatusRunning, "", nil)
 	case "done":
 		completed := w.clock()
 		meta.markSuccess(status.VID, completed)
 		if err := w.updateTaskExtra(ctx, task, meta); err != nil {
 			return err
 		}
-		if err := updateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishu.StatusSuccess, "", &taskStatusMeta{completedAt: &completed}); err != nil {
+		if err := feishusource.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishu.StatusSuccess, "", &feishusource.TaskStatusMeta{CompletedAt: &completed}); err != nil {
 			return err
 		}
 		task.Status = feishu.StatusSuccess
@@ -449,17 +450,17 @@ func (w *SingleURLWorker) reconcileSingleURLTask(ctx context.Context, task *Feis
 }
 
 func (w *SingleURLWorker) updateTaskExtra(ctx context.Context, task *FeishuTask, meta singleURLMetadata) error {
-	src := task.source
-	if src == nil || src.client == nil || src.table == nil {
-		return errors.New("single url worker: task missing source")
+	_, table, err := feishusource.TaskSourceContext(task)
+	if err != nil {
+		return err
 	}
-	extraField := strings.TrimSpace(src.table.Fields.Extra)
+	extraField := strings.TrimSpace(table.Fields.Extra)
 	if extraField == "" {
 		return nil
 	}
 	encoded := encodeSingleURLMetadata(meta)
 	payload := map[string]any{extraField: encoded}
-	if err := src.client.UpdateTaskFields(ctx, src.table, task.TaskID, payload); err != nil {
+	if err := feishusource.UpdateTaskFields(ctx, task, payload); err != nil {
 		return err
 	}
 	task.Extra = encoded
@@ -467,16 +468,16 @@ func (w *SingleURLWorker) updateTaskExtra(ctx context.Context, task *FeishuTask,
 }
 
 func (w *SingleURLWorker) failSingleURLTask(ctx context.Context, task *FeishuTask, reason string, meta *singleURLMetadata) error {
-	src := task.source
-	if src == nil || src.client == nil || src.table == nil {
-		return errors.New("single url worker: task missing source")
+	_, table, err := feishusource.TaskSourceContext(task)
+	if err != nil {
+		return err
 	}
 	fields := map[string]any{}
-	statusField := strings.TrimSpace(src.table.Fields.Status)
+	statusField := strings.TrimSpace(table.Fields.Status)
 	if statusField != "" {
 		fields[statusField] = feishu.StatusFailed
 	}
-	if extraField := strings.TrimSpace(src.table.Fields.Extra); extraField != "" {
+	if extraField := strings.TrimSpace(table.Fields.Extra); extraField != "" {
 		if meta != nil {
 			fields[extraField] = encodeSingleURLMetadata(*meta)
 		} else {
@@ -486,11 +487,11 @@ func (w *SingleURLWorker) failSingleURLTask(ctx context.Context, task *FeishuTas
 	if len(fields) == 0 {
 		return errors.New("single url worker: no fields to update for failure")
 	}
-	if err := src.client.UpdateTaskFields(ctx, src.table, task.TaskID, fields); err != nil {
+	if err := feishusource.UpdateTaskFields(ctx, task, fields); err != nil {
 		return err
 	}
 	task.Status = feishu.StatusFailed
-	if extra, ok := fields[strings.TrimSpace(src.table.Fields.Extra)].(string); ok {
+	if extra, ok := fields[strings.TrimSpace(table.Fields.Extra)].(string); ok {
 		task.Extra = extra
 	} else {
 		task.Extra = reason
@@ -499,9 +500,9 @@ func (w *SingleURLWorker) failSingleURLTask(ctx context.Context, task *FeishuTas
 }
 
 func (w *SingleURLWorker) markSingleURLTaskQueued(ctx context.Context, task *FeishuTask, groupID string, meta singleURLMetadata) error {
-	src := task.source
-	if src == nil || src.client == nil || src.table == nil {
-		return errors.New("single url worker: task missing source")
+	_, table, err := feishusource.TaskSourceContext(task)
+	if err != nil {
+		return err
 	}
 	now := w.clock()
 	if now.IsZero() {
@@ -510,32 +511,32 @@ func (w *SingleURLWorker) markSingleURLTaskQueued(ctx context.Context, task *Fei
 	nowMillis := now.UTC().UnixMilli()
 	meta.markQueued(now)
 	fields := map[string]any{}
-	if statusField := strings.TrimSpace(src.table.Fields.Status); statusField != "" {
+	if statusField := strings.TrimSpace(table.Fields.Status); statusField != "" {
 		fields[statusField] = singleURLStatusQueued
 	}
-	if groupField := strings.TrimSpace(src.table.Fields.GroupID); groupField != "" && strings.TrimSpace(groupID) != "" {
+	if groupField := strings.TrimSpace(table.Fields.GroupID); groupField != "" && strings.TrimSpace(groupID) != "" {
 		fields[groupField] = groupID
 	}
-	if extraField := strings.TrimSpace(src.table.Fields.Extra); extraField != "" {
+	if extraField := strings.TrimSpace(table.Fields.Extra); extraField != "" {
 		fields[extraField] = encodeSingleURLMetadata(meta)
 	}
-	if dispatchedField := strings.TrimSpace(src.table.Fields.DispatchedAt); dispatchedField != "" {
+	if dispatchedField := strings.TrimSpace(table.Fields.DispatchedAt); dispatchedField != "" {
 		fields[dispatchedField] = nowMillis
 	}
-	if startField := strings.TrimSpace(src.table.Fields.StartAt); startField != "" {
+	if startField := strings.TrimSpace(table.Fields.StartAt); startField != "" {
 		fields[startField] = nowMillis
 	}
 	if len(fields) == 0 {
 		return errors.New("single url worker: no fields to update for queued state")
 	}
-	if err := src.client.UpdateTaskFields(ctx, src.table, task.TaskID, fields); err != nil {
+	if err := feishusource.UpdateTaskFields(ctx, task, fields); err != nil {
 		return err
 	}
 	task.Status = singleURLStatusQueued
 	if strings.TrimSpace(groupID) != "" {
 		task.GroupID = groupID
 	}
-	if extra, ok := fields[strings.TrimSpace(src.table.Fields.Extra)].(string); ok {
+	if extra, ok := fields[strings.TrimSpace(table.Fields.Extra)].(string); ok {
 		task.Extra = extra
 	}
 	updateTimestampFields(task, now, nowMillis)
@@ -626,7 +627,7 @@ func (w *SingleURLWorker) maybeSendGroupSummary(ctx context.Context, task *Feish
 	if err := w.crawler.SendTaskSummary(ctx, payload); err != nil {
 		return err
 	}
-	if err := updateFeishuTaskWebhooks(ctx, tasks, feishu.WebhookSuccess); err != nil {
+	if err := feishusource.UpdateFeishuTaskWebhooks(ctx, tasks, feishu.WebhookSuccess); err != nil {
 		return err
 	}
 	log.Info().
@@ -646,7 +647,7 @@ func (w *SingleURLWorker) fetchSingleURLGroupTasks(ctx context.Context, groupID 
 	}
 	filter := feishu.NewFilterInfo("and")
 	if sceneField := strings.TrimSpace(feishu.DefaultTaskFields.Scene); sceneField != "" {
-		if cond := feishu.NewCondition(sceneField, "is", SceneSingleURLCapture); cond != nil {
+		if cond := feishu.NewCondition(sceneField, "is", feishusource.SceneSingleURLCapture); cond != nil {
 			filter.Conditions = append(filter.Conditions, cond)
 		}
 	}
@@ -656,7 +657,7 @@ func (w *SingleURLWorker) fetchSingleURLGroupTasks(ctx context.Context, groupID 
 	if len(filter.Conditions) == 0 {
 		return nil, nil
 	}
-	return fetchFeishuTasksWithFilter(ctx, w.client, w.bitableURL, filter, singleURLGroupFetchLimit)
+	return feishusource.FetchFeishuTasksWithFilter(ctx, w.client, w.bitableURL, filter, singleURLGroupFetchLimit)
 }
 
 func collectSummaryCombinations(tasks []*FeishuTask) []TaskSummaryCombination {
