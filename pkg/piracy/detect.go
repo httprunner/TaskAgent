@@ -2,12 +2,14 @@ package piracy
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	pool "github.com/httprunner/TaskAgent"
 	"github.com/httprunner/TaskAgent/pkg/feishu"
 	"github.com/httprunner/TaskAgent/pkg/storage"
 	"github.com/rs/zerolog/log"
@@ -17,7 +19,9 @@ const keySeparator = "\u241F" // Unit Separator symbol to avoid conflicts
 
 // ContentRecord represents a record for piracy detection (通用输入结构)
 type ContentRecord struct {
-	Params      string  // 短剧名称/Params
+	Params      string  // 搜索词/Params（用于辅助展示）
+	BookID      string  // 短剧 ID
+	App         string  // App/平台
 	UserID      string  // 用户ID
 	UserName    string  // 用户名称
 	ItemID      string  // 视频 ItemID，用于去重
@@ -26,8 +30,20 @@ type ContentRecord struct {
 
 // DramaRecord represents a drama record (通用剧单结构)
 type DramaRecord struct {
-	Params   string  // 短剧名称/Params
+	BookID   string  // 短剧 ID
+	Name     string  // 短剧名称
 	Duration float64 // 总时长（秒）
+}
+
+type paramTaskKey struct {
+	param string
+	app   string
+}
+
+type paramTaskInfo struct {
+	BookID string
+	App    string
+	Param  string
 }
 
 // ApplyDefaults populates missing config fields from environment variables or sensible defaults.
@@ -45,8 +61,23 @@ func (c *Config) ApplyDefaults() {
 	if strings.TrimSpace(c.ItemIDField) == "" {
 		c.ItemIDField = feishu.DefaultResultFields.ItemID
 	}
+	if strings.TrimSpace(c.ResultAppField) == "" {
+		c.ResultAppField = feishu.DefaultResultFields.App
+	}
 	if strings.TrimSpace(c.TaskParamsField) == "" {
 		c.TaskParamsField = feishu.DefaultTaskFields.Params
+	}
+	if strings.TrimSpace(c.TaskBookIDField) == "" {
+		c.TaskBookIDField = feishu.DefaultTaskFields.BookID
+	}
+	if strings.TrimSpace(c.TaskStatusField) == "" {
+		c.TaskStatusField = feishu.DefaultTaskFields.Status
+	}
+	if strings.TrimSpace(c.TaskSceneField) == "" {
+		c.TaskSceneField = feishu.DefaultTaskFields.Scene
+	}
+	if strings.TrimSpace(c.TaskAppField) == "" {
+		c.TaskAppField = feishu.DefaultTaskFields.App
 	}
 	if strings.TrimSpace(c.DramaIDField) == "" {
 		c.DramaIDField = feishu.DefaultDramaFields.DramaID
@@ -75,6 +106,10 @@ func Detect(ctx context.Context, opts Options) (*Report, error) {
 	// Apply defaults
 	opts.Config.ApplyDefaults()
 
+	if strings.TrimSpace(opts.TaskTable.URL) == "" {
+		return nil, fmt.Errorf("task table url is required for piracy detection")
+	}
+
 	// Create Feishu client
 	client, err := feishu.NewClientFromEnv()
 	if err != nil {
@@ -86,14 +121,34 @@ func Detect(ctx context.Context, opts Options) (*Report, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(resultRows) == 0 {
+		return &Report{Threshold: opts.Config.Threshold}, nil
+	}
 
-	// Fetch original drama rows (source B) - for duration information
-	dramaRows, err := fetchRows(ctx, client, opts.DramaTable)
+	params := collectParamsFromRows(resultRows, opts.Config.ParamsField)
+	if len(params) == 0 {
+		return &Report{Threshold: opts.Config.Threshold}, nil
+	}
+
+	paramTasks, err := fetchParamTaskMap(ctx, client, opts.TaskTable, params, opts.Config)
 	if err != nil {
 		return nil, err
 	}
 
-	return analyzeRows(resultRows, dramaRows, opts.Config), nil
+	bookIDs := collectBookIDs(paramTasks)
+	if len(bookIDs) == 0 {
+		log.Warn().Msg("no book ids resolved from task table; results will be skipped")
+	}
+
+	// Fetch original drama rows (source B) - for duration information
+	dramaCfg := opts.DramaTable
+	dramaCfg.Filter = CombineFiltersAND(dramaCfg.Filter, BuildParamsFilter(bookIDs, opts.Config.DramaIDField))
+	dramaRows, err := fetchRows(ctx, client, dramaCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	return analyzeRows(resultRows, dramaRows, opts.Config, paramTasks), nil
 }
 
 // fetchRows retrieves rows from a Feishu table.
@@ -155,8 +210,110 @@ func isFeishuDataNotReady(err error) bool {
 	return strings.Contains(err.Error(), "\"code\":1254607")
 }
 
+func collectParamsFromRows(rows []Row, field string) []string {
+	seen := make(map[string]struct{})
+	result := make([]string, 0, len(rows))
+	for _, row := range rows {
+		param := strings.TrimSpace(getString(row.Fields, field))
+		if param == "" {
+			continue
+		}
+		if _, ok := seen[param]; ok {
+			continue
+		}
+		seen[param] = struct{}{}
+		result = append(result, param)
+	}
+	return result
+}
+
+func fetchParamTaskMap(ctx context.Context, client *feishu.Client, cfg TableConfig, params []string, c Config) (map[paramTaskKey]paramTaskInfo, error) {
+	if len(params) == 0 {
+		return nil, nil
+	}
+	filters := []*feishu.FilterInfo{
+		cfg.Filter,
+		BuildParamsFilter(params, c.TaskParamsField),
+		EqFilter(c.TaskStatusField, feishu.StatusSuccess),
+		EqFilter(c.TaskSceneField, pool.SceneGeneralSearch),
+	}
+	taskCfg := cfg
+	taskCfg.Filter = CombineFiltersAND(filters...)
+	taskRows, err := fetchRows(ctx, client, taskCfg)
+	if err != nil {
+		return nil, err
+	}
+	return buildParamTaskMap(taskRows, c), nil
+}
+
+func buildParamTaskMap(taskRows []Row, cfg Config) map[paramTaskKey]paramTaskInfo {
+	result := make(map[paramTaskKey]paramTaskInfo)
+	for _, row := range taskRows {
+		param := strings.TrimSpace(getString(row.Fields, cfg.TaskParamsField))
+		bookID := strings.TrimSpace(getString(row.Fields, cfg.TaskBookIDField))
+		if param == "" || bookID == "" {
+			continue
+		}
+		app := strings.TrimSpace(getString(row.Fields, cfg.TaskAppField))
+		info := paramTaskInfo{
+			BookID: bookID,
+			App:    app,
+			Param:  param,
+		}
+		key := makeParamTaskKey(param, app)
+		if _, exists := result[key]; !exists {
+			result[key] = info
+		}
+		emptyKey := makeParamTaskKey(param, "")
+		if _, exists := result[emptyKey]; !exists {
+			result[emptyKey] = info
+		}
+	}
+	return result
+}
+
+func collectBookIDs(mapping map[paramTaskKey]paramTaskInfo) []string {
+	if len(mapping) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	result := make([]string, 0, len(mapping))
+	for _, info := range mapping {
+		id := strings.TrimSpace(info.BookID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		result = append(result, id)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func normalizeKeyPart(val string) string {
+	return strings.ToLower(strings.TrimSpace(val))
+}
+
+func makeParamTaskKey(param, app string) paramTaskKey {
+	return paramTaskKey{param: normalizeKeyPart(param), app: normalizeKeyPart(app)}
+}
+
+func lookupParamTaskInfo(mapping map[paramTaskKey]paramTaskInfo, param, app string) (paramTaskInfo, bool) {
+	if len(mapping) == 0 {
+		return paramTaskInfo{}, false
+	}
+	if info, ok := mapping[makeParamTaskKey(param, app)]; ok {
+		return info, true
+	}
+	info, ok := mapping[makeParamTaskKey(param, "")]
+	return info, ok
+}
+
 // analyzeRows performs the piracy detection analysis on the fetched rows.
-func analyzeRows(resultRows, dramaRows []Row, cfg Config) *Report {
+func analyzeRows(resultRows, dramaRows []Row, cfg Config, paramTasks map[paramTaskKey]paramTaskInfo) *Report {
 	log.Info().Msg("analyzing result rows with drama rows")
 
 	// Convert Feishu rows to common formats
@@ -173,11 +330,26 @@ func analyzeRows(resultRows, dramaRows []Row, cfg Config) *Report {
 			continue
 		}
 
-		userName := strings.TrimSpace(getString(row.Fields, "UserName"))
+		userName := strings.TrimSpace(getString(row.Fields, feishu.DefaultResultFields.UserName))
 		itemID := strings.TrimSpace(getString(row.Fields, cfg.ItemIDField))
+		app := strings.TrimSpace(getString(row.Fields, cfg.ResultAppField))
+		bookID := strings.TrimSpace(getString(row.Fields, cfg.TaskBookIDField))
+		if info, ok := lookupParamTaskInfo(paramTasks, params, app); ok {
+			if bookID == "" {
+				bookID = strings.TrimSpace(info.BookID)
+			}
+			if app == "" {
+				app = strings.TrimSpace(info.App)
+			}
+		}
+		if bookID == "" || app == "" {
+			continue
+		}
 
 		contentRecords = append(contentRecords, ContentRecord{
 			Params:      params,
+			BookID:      bookID,
+			App:         app,
 			UserID:      userID,
 			UserName:    userName,
 			ItemID:      itemID,
@@ -185,31 +357,24 @@ func analyzeRows(resultRows, dramaRows []Row, cfg Config) *Report {
 		})
 	}
 
-	var dramaRecords []DramaRecord
+	dramaIndex := make(map[string]DramaRecord)
 	for _, row := range dramaRows {
-		params := strings.TrimSpace(getString(row.Fields, cfg.DramaNameField))
-		if params == "" {
+		bookID := strings.TrimSpace(getString(row.Fields, cfg.DramaIDField))
+		if bookID == "" {
 			continue
 		}
 		duration, ok := getFloat(row.Fields, cfg.DramaDurationField)
 		if !ok || duration <= 0 {
 			continue
 		}
-		// Store the maximum duration if there are duplicates
-		found := false
-		for i, dr := range dramaRecords {
-			if dr.Params == params && duration > dr.Duration {
-				dramaRecords[i].Duration = duration
-				found = true
-				break
-			}
+		name := strings.TrimSpace(getString(row.Fields, cfg.DramaNameField))
+		if existing, ok := dramaIndex[bookID]; !ok || duration > existing.Duration {
+			dramaIndex[bookID] = DramaRecord{BookID: bookID, Name: name, Duration: duration}
 		}
-		if !found {
-			dramaRecords = append(dramaRecords, DramaRecord{
-				Params:   params,
-				Duration: duration,
-			})
-		}
+	}
+	dramaRecords := make([]DramaRecord, 0, len(dramaIndex))
+	for _, dr := range dramaIndex {
+		dramaRecords = append(dramaRecords, dr)
 	}
 
 	return DetectCommon(contentRecords, dramaRecords, cfg.Threshold)
@@ -218,39 +383,37 @@ func analyzeRows(resultRows, dramaRows []Row, cfg Config) *Report {
 // DetectCommon performs the core piracy detection logic using common data structures.
 // This function is used by both Feishu and local file modes.
 func DetectCommon(contentRecords []ContentRecord, dramaRecords []DramaRecord, threshold float64) *Report {
-	// Build drama index: params -> duration
-	dramaIndex := make(map[string]float64)
-	missingDramas := make(map[string]struct{})
-
+	// Build drama index: BookID -> record
+	dramaIndex := make(map[string]DramaRecord)
 	for _, drama := range dramaRecords {
-		params := strings.TrimSpace(drama.Params)
-		if params == "" {
+		bookID := strings.TrimSpace(drama.BookID)
+		if bookID == "" || drama.Duration <= 0 {
 			continue
 		}
-		if drama.Duration <= 0 {
-			missingDramas[params] = struct{}{}
-			continue
+		if existing, ok := dramaIndex[bookID]; !ok || drama.Duration > existing.Duration {
+			dramaIndex[bookID] = drama
 		}
-		dramaIndex[params] = drama.Duration
 	}
 
-	// Aggregate content records by Params + UserID
+	// Aggregate content records by BookID + UserID + App
 	type aggEntry struct {
-		sum       float64
-		count     int
-		userName  string
-		seenItems map[string]struct{}
+		sum         float64
+		count       int
+		userName    string
+		seenItems   map[string]struct{}
+		sampleParam string
 	}
-	resultAgg := make(map[string]aggEntry) // key: params + separator + userID
+	resultAgg := make(map[string]aggEntry)
 
 	for _, record := range contentRecords {
-		params := strings.TrimSpace(record.Params)
+		bookID := strings.TrimSpace(record.BookID)
 		userID := strings.TrimSpace(record.UserID)
-		if params == "" || userID == "" {
+		app := strings.TrimSpace(record.App)
+		if bookID == "" || userID == "" || app == "" {
 			continue
 		}
 
-		key := params + keySeparator + userID
+		key := strings.Join([]string{bookID, userID, app}, keySeparator)
 		entry := resultAgg[key]
 		if record.ItemID != "" {
 			if entry.seenItems == nil {
@@ -264,71 +427,68 @@ func DetectCommon(contentRecords []ContentRecord, dramaRecords []DramaRecord, th
 		}
 		entry.sum += record.DurationSec
 		entry.count++
-		// Get user name (first non-empty one if duplicates)
 		if entry.userName == "" && record.UserName != "" {
 			entry.userName = record.UserName
+		}
+		if entry.sampleParam == "" && record.Params != "" {
+			entry.sampleParam = record.Params
 		}
 		resultAgg[key] = entry
 	}
 
-	// Build matches where ratio exceeds threshold
 	var matches []Match
-	missingParamsSet := make(map[string]struct{})
+	missingBookIDs := make(map[string]string)
 
 	for key, entry := range resultAgg {
-		// Extract params from key
-		parts := strings.SplitN(key, keySeparator, 2)
-		params := parts[0]
+		parts := strings.SplitN(key, keySeparator, 3)
+		bookID := parts[0]
+		userID := ""
+		if len(parts) > 1 {
+			userID = parts[1]
+		}
+		app := ""
+		if len(parts) > 2 {
+			app = parts[2]
+		}
 
-		dramaDuration, exists := dramaIndex[params]
-		if !exists || dramaDuration <= 0 {
-			missingParamsSet[params] = struct{}{}
+		drama, exists := dramaIndex[bookID]
+		if !exists || drama.Duration <= 0 {
+			if _, recorded := missingBookIDs[bookID]; !recorded {
+				missingBookIDs[bookID] = entry.sampleParam
+			}
 			continue
 		}
 
-		ratio := entry.sum / dramaDuration
+		ratio := entry.sum / drama.Duration
 		if ratio > threshold {
-			userID := ""
-			if len(parts) > 1 {
-				userID = parts[1]
-			}
 			matches = append(matches, Match{
-				Params:        params,
+				Params:        entry.sampleParam,
+				BookID:        bookID,
+				DramaName:     strings.TrimSpace(drama.Name),
+				App:           app,
 				UserID:        userID,
 				UserName:      entry.userName,
 				SumDuration:   entry.sum,
-				TotalDuration: dramaDuration,
+				TotalDuration: drama.Duration,
 				Ratio:         ratio,
 				RecordCount:   entry.count,
 			})
 		}
 	}
 
-	// Sort matches by ratio descending
 	sort.Slice(matches, func(i, j int) bool {
 		return matches[i].Ratio > matches[j].Ratio
 	})
 
-	// Collect missing params
-	missingParams := make([]string, 0, len(missingParamsSet))
-	for p := range missingParamsSet {
-		missingParams = append(missingParams, p)
+	missingParams := make([]string, 0, len(missingBookIDs))
+	for bookID, sample := range missingBookIDs {
+		if strings.TrimSpace(sample) != "" {
+			missingParams = append(missingParams, fmt.Sprintf("%s (%s)", bookID, sample))
+		} else {
+			missingParams = append(missingParams, bookID)
+		}
 	}
 	sort.Strings(missingParams)
-
-	// Also add missing dramas
-	for p := range missingDramas {
-		found := false
-		for _, mp := range missingParams {
-			if mp == p {
-				found = true
-				break
-			}
-		}
-		if !found {
-			missingParams = append(missingParams, p)
-		}
-	}
 
 	return &Report{
 		Matches:       matches,

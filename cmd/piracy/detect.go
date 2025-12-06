@@ -158,7 +158,7 @@ func printReport(report *piracy.Report) {
 		Int("result_rows", report.ResultRows).
 		Float64("threshold_percent", report.Threshold*100).
 		Int("suspicious_combos", len(report.Matches)).
-		Int("params_missing_duration", len(report.MissingParams)).
+		Int("bookids_missing_duration", len(report.MissingParams)).
 		Msg("piracy detection completed")
 
 	if len(report.Matches) == 0 {
@@ -166,7 +166,7 @@ func printReport(report *piracy.Report) {
 		if len(report.MissingParams) > 0 {
 			log.Info().
 				Int("count", len(report.MissingParams)).
-				Msg("params without duration were skipped")
+				Msg("bookIDs without duration were skipped")
 		}
 		return
 	}
@@ -181,7 +181,7 @@ func printReport(report *piracy.Report) {
 		if validCount > 0 {
 			log.Info().
 				Int("count", validCount).
-				Msg("params without duration were skipped")
+				Msg("bookIDs without duration were skipped")
 		}
 	}
 

@@ -65,10 +65,11 @@ func TestBuildPiracyGroupTaskRecordsCopiesBookID(t *testing.T) {
 	details := []MatchDetail{
 		{
 			Match: Match{
-				Params:   "ParamA",
-				UserID:   "User123",
-				UserName: "昵称",
-				Ratio:    0.75,
+				Params:    "AliasA",
+				DramaName: "ParamA",
+				UserID:    "User123",
+				UserName:  "昵称",
+				Ratio:     0.75,
 			},
 			Videos: []VideoDetail{
 				{ItemID: "video-collection", Tags: "合集"},
@@ -77,7 +78,7 @@ func TestBuildPiracyGroupTaskRecordsCopiesBookID(t *testing.T) {
 			},
 		},
 	}
-	records := buildPiracyGroupTaskRecords("com.app.test", 321, &now, "", "  book-xyz  ", details)
+	records := buildPiracyGroupTaskRecords("com.smile.gifmaker", 321, &now, "", "  book-xyz  ", details)
 	if len(records) != 3 {
 		t.Fatalf("expected 3 records (profile, collection, anchor), got %d", len(records))
 	}
@@ -85,8 +86,37 @@ func TestBuildPiracyGroupTaskRecordsCopiesBookID(t *testing.T) {
 		if rec.BookID != "book-xyz" {
 			t.Fatalf("record %d expected bookID book-xyz, got %q", idx, rec.BookID)
 		}
-		if rec.GroupID != "321_1" {
-			t.Fatalf("record %d expected group id 321_1, got %q", idx, rec.GroupID)
+		if rec.GroupID != "快手_book-xyz_User123" {
+			t.Fatalf("record %d expected group id 快手_book-xyz_User123, got %q", idx, rec.GroupID)
 		}
+		if rec.Params != "ParamA" {
+			t.Fatalf("record %d expected params ParamA, got %q", idx, rec.Params)
+		}
+	}
+}
+
+func TestBuildPiracyGroupTaskRecordsSkipWhenDramaNameMissing(t *testing.T) {
+	now := time.Now()
+	details := []MatchDetail{
+		{Match: Match{Params: "AliasOnly", DramaName: "", UserID: "uid"}},
+	}
+	records := buildPiracyGroupTaskRecords("com.smile.gifmaker", 100, &now, "", "book-x", details)
+	if len(records) != 0 {
+		t.Fatalf("expected no records when drama name missing, got %d", len(records))
+	}
+}
+
+func TestBuildPiracyGroupTaskRecordsDedupGroupID(t *testing.T) {
+	now := time.Now()
+	details := []MatchDetail{
+		{Match: Match{DramaName: "ParamA", UserID: "User123", Ratio: 0.6}},
+		{Match: Match{DramaName: "ParamB", UserID: "User123", Ratio: 0.7}},
+	}
+	records := buildPiracyGroupTaskRecords("com.smile.gifmaker", 200, &now, "", "book-xyz", details)
+	if len(records) != 1 {
+		t.Fatalf("expected duplicate AID to be skipped, got %d records", len(records))
+	}
+	if records[0].GroupID != "快手_book-xyz_User123" {
+		t.Fatalf("unexpected group id: %s", records[0].GroupID)
 	}
 }

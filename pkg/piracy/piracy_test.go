@@ -2,6 +2,7 @@ package piracy
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/httprunner/TaskAgent/pkg/feishu"
@@ -11,17 +12,19 @@ func TestAnalyzeRows(t *testing.T) {
 	// Setup test data
 	params := "drama1"
 	user := "user1"
+	bookID := "book-1"
+	app := "kuaishou"
 
 	// Create result rows with item durations summing to 35 seconds
 	resultRows := []Row{
-		{Fields: map[string]any{"Params": params, "UserID": user, "ItemDuration": 10.0}},
-		{Fields: map[string]any{"Params": params, "UserID": user, "ItemDuration": 20.0}},
-		{Fields: map[string]any{"Params": params, "UserID": user, "ItemDuration": 5.0}},
+		{Fields: map[string]any{"Params": params, "UserID": user, "ItemDuration": 10.0, "BookID": bookID, "App": app}},
+		{Fields: map[string]any{"Params": params, "UserID": user, "ItemDuration": 20.0, "BookID": bookID, "App": app}},
+		{Fields: map[string]any{"Params": params, "UserID": user, "ItemDuration": 5.0, "BookID": bookID, "App": app}},
 	}
 
 	// Create drama row with total duration of 60 seconds
 	dramaRows := []Row{
-		{Fields: map[string]any{"Params": params, "TotalDuration": 60.0}},
+		{Fields: map[string]any{"BookID": bookID, "Params": params, "TotalDuration": 60.0}},
 	}
 
 	// Create config with threshold of 0.5 (50%)
@@ -29,13 +32,17 @@ func TestAnalyzeRows(t *testing.T) {
 		ParamsField:        "Params",
 		UserIDField:        "UserID",
 		DurationField:      "ItemDuration",
+		ItemIDField:        "ItemID",
+		ResultAppField:     "App",
+		TaskBookIDField:    "BookID",
+		DramaIDField:       "BookID",
 		DramaNameField:     "Params",
 		DramaDurationField: "TotalDuration",
 		Threshold:          0.5,
 	}
 
 	// Run analysis
-	report := analyzeRows(resultRows, dramaRows, cfg)
+	report := analyzeRows(resultRows, dramaRows, cfg, nil)
 
 	// Verify results
 	if len(report.Matches) != 1 {
@@ -45,6 +52,9 @@ func TestAnalyzeRows(t *testing.T) {
 	match := report.Matches[0]
 	if match.Params != params {
 		t.Errorf("expected params %s, got %s", params, match.Params)
+	}
+	if match.DramaName != params {
+		t.Errorf("expected drama name %s, got %s", params, match.DramaName)
 	}
 	if match.UserID != user {
 		t.Errorf("expected user %s, got %s", user, match.UserID)
@@ -75,28 +85,33 @@ func TestAnalyzeRowsBelowThreshold(t *testing.T) {
 	// Setup test data
 	params := "drama1"
 	user := "user1"
+	bookID := "book-1"
+	app := "kuaishou"
 
 	// Create result rows with item durations summing to 20 seconds (below 50% threshold)
 	resultRows := []Row{
-		{Fields: map[string]any{"Params": params, "UserID": user, "ItemDuration": 10.0}},
-		{Fields: map[string]any{"Params": params, "UserID": user, "ItemDuration": 10.0}},
+		{Fields: map[string]any{"Params": params, "UserID": user, "ItemDuration": 10.0, "BookID": bookID, "App": app}},
+		{Fields: map[string]any{"Params": params, "UserID": user, "ItemDuration": 10.0, "BookID": bookID, "App": app}},
 	}
 
 	// Create drama row with total duration of 60 seconds
 	dramaRows := []Row{
-		{Fields: map[string]any{"Params": params, "TotalDuration": 60.0}},
+		{Fields: map[string]any{"BookID": bookID, "Params": params, "TotalDuration": 60.0}},
 	}
 
 	cfg := Config{
 		ParamsField:        "Params",
 		UserIDField:        "UserID",
 		DurationField:      "ItemDuration",
+		ResultAppField:     "App",
+		TaskBookIDField:    "BookID",
+		DramaIDField:       "BookID",
 		DramaNameField:     "Params",
 		DramaDurationField: "TotalDuration",
 		Threshold:          0.5,
 	}
 
-	report := analyzeRows(resultRows, dramaRows, cfg)
+	report := analyzeRows(resultRows, dramaRows, cfg, nil)
 
 	// Should have no matches since ratio (0.333) is below threshold (0.5)
 	if len(report.Matches) != 0 {
@@ -108,27 +123,32 @@ func TestAnalyzeRowsMissingTarget(t *testing.T) {
 	// Setup test data
 	params := "drama1"
 	user := "user1"
+	bookID := "book-1"
+	app := "kuaishou"
 
 	// Create result rows
 	resultRows := []Row{
-		{Fields: map[string]any{"Params": params, "UserID": user, "ItemDuration": 10.0}},
+		{Fields: map[string]any{"Params": params, "UserID": user, "ItemDuration": 10.0, "BookID": bookID, "App": app}},
 	}
 
 	// Create drama rows without the expected params
 	dramaRows := []Row{
-		{Fields: map[string]any{"Params": "drama2", "TotalDuration": 60.0}},
+		{Fields: map[string]any{"BookID": "book-2", "Params": "drama2", "TotalDuration": 60.0}},
 	}
 
 	cfg := Config{
 		ParamsField:        "Params",
 		UserIDField:        "UserID",
 		DurationField:      "ItemDuration",
+		ResultAppField:     "App",
+		TaskBookIDField:    "BookID",
+		DramaIDField:       "BookID",
 		DramaNameField:     "Params",
 		DramaDurationField: "TotalDuration",
 		Threshold:          0.5,
 	}
 
-	report := analyzeRows(resultRows, dramaRows, cfg)
+	report := analyzeRows(resultRows, dramaRows, cfg, nil)
 
 	// Should have no matches since target is missing
 	if len(report.Matches) != 0 {
@@ -138,7 +158,7 @@ func TestAnalyzeRowsMissingTarget(t *testing.T) {
 	// Should have missing params
 	found := false
 	for _, p := range report.MissingParams {
-		if p == params {
+		if strings.Contains(p, bookID) {
 			found = true
 			break
 		}
@@ -150,30 +170,35 @@ func TestAnalyzeRowsMissingTarget(t *testing.T) {
 
 func TestAnalyzeRowsMultipleMatches(t *testing.T) {
 	// Setup test data for multiple users
+	bookID := "book-1"
+	app := "kuaishou"
 	resultRows := []Row{
 		// User 1 - 35 seconds for drama1
-		{Fields: map[string]any{"Params": "drama1", "UserID": "user1", "ItemDuration": 10.0}},
-		{Fields: map[string]any{"Params": "drama1", "UserID": "user1", "ItemDuration": 25.0}},
+		{Fields: map[string]any{"Params": "drama1", "UserID": "user1", "ItemDuration": 10.0, "BookID": bookID, "App": app}},
+		{Fields: map[string]any{"Params": "drama1", "UserID": "user1", "ItemDuration": 25.0, "BookID": bookID, "App": app}},
 
 		// User 2 - 40 seconds for drama1
-		{Fields: map[string]any{"Params": "drama1", "UserID": "user2", "ItemDuration": 20.0}},
-		{Fields: map[string]any{"Params": "drama1", "UserID": "user2", "ItemDuration": 20.0}},
+		{Fields: map[string]any{"Params": "drama1", "UserID": "user2", "ItemDuration": 20.0, "BookID": bookID, "App": app}},
+		{Fields: map[string]any{"Params": "drama1", "UserID": "user2", "ItemDuration": 20.0, "BookID": bookID, "App": app}},
 	}
 
 	dramaRows := []Row{
-		{Fields: map[string]any{"Params": "drama1", "TotalDuration": 60.0}},
+		{Fields: map[string]any{"BookID": bookID, "Params": "drama1", "TotalDuration": 60.0}},
 	}
 
 	cfg := Config{
 		ParamsField:        "Params",
 		UserIDField:        "UserID",
 		DurationField:      "ItemDuration",
+		ResultAppField:     "App",
+		TaskBookIDField:    "BookID",
+		DramaIDField:       "BookID",
 		DramaNameField:     "Params",
 		DramaDurationField: "TotalDuration",
 		Threshold:          0.5,
 	}
 
-	report := analyzeRows(resultRows, dramaRows, cfg)
+	report := analyzeRows(resultRows, dramaRows, cfg, nil)
 
 	// Should have 2 matches (one for each user)
 	if len(report.Matches) != 2 {
@@ -189,14 +214,16 @@ func TestAnalyzeRowsMultipleMatches(t *testing.T) {
 }
 
 func TestAnalyzeRowsDedupByItemID(t *testing.T) {
+	bookID := "book-1"
+	app := "kuaishou"
 	resultRows := []Row{
-		{Fields: map[string]any{"Params": "drama1", "UserID": "user1", "ItemDuration": 30.0, "ItemID": "dup"}},
-		{Fields: map[string]any{"Params": "drama1", "UserID": "user1", "ItemDuration": 30.0, "ItemID": "dup"}},
-		{Fields: map[string]any{"Params": "drama1", "UserID": "user1", "ItemDuration": 40.0, "ItemID": "unique"}},
+		{Fields: map[string]any{"Params": "drama1", "UserID": "user1", "ItemDuration": 30.0, "ItemID": "dup", "BookID": bookID, "App": app}},
+		{Fields: map[string]any{"Params": "drama1", "UserID": "user1", "ItemDuration": 30.0, "ItemID": "dup", "BookID": bookID, "App": app}},
+		{Fields: map[string]any{"Params": "drama1", "UserID": "user1", "ItemDuration": 40.0, "ItemID": "unique", "BookID": bookID, "App": app}},
 	}
 
 	dramaRows := []Row{
-		{Fields: map[string]any{"Params": "drama1", "TotalDuration": 60.0}},
+		{Fields: map[string]any{"BookID": bookID, "Params": "drama1", "TotalDuration": 60.0}},
 	}
 
 	cfg := Config{
@@ -204,12 +231,15 @@ func TestAnalyzeRowsDedupByItemID(t *testing.T) {
 		UserIDField:        "UserID",
 		DurationField:      "ItemDuration",
 		ItemIDField:        "ItemID",
+		ResultAppField:     "App",
+		TaskBookIDField:    "BookID",
+		DramaIDField:       "BookID",
 		DramaNameField:     "Params",
 		DramaDurationField: "TotalDuration",
 		Threshold:          0.5,
 	}
 
-	report := analyzeRows(resultRows, dramaRows, cfg)
+	report := analyzeRows(resultRows, dramaRows, cfg, nil)
 	if len(report.Matches) != 1 {
 		t.Fatalf("expected 1 match, got %d", len(report.Matches))
 	}

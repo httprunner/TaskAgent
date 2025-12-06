@@ -150,6 +150,7 @@ func readVideoRecords(filePath string) ([]ContentRecord, error) {
 	var records []ContentRecord
 	decoder := json.NewDecoder(file)
 
+	const offlineApp = "offline"
 	for {
 		var record videoRecordJSON
 		if err := decoder.Decode(&record); err != nil {
@@ -158,8 +159,11 @@ func readVideoRecords(filePath string) ([]ContentRecord, error) {
 			}
 			return nil, fmt.Errorf("failed to decode JSON line: %w", err)
 		}
+		query := strings.TrimSpace(record.Query)
 		records = append(records, ContentRecord{
-			Params:      record.Query,
+			Params:      query,
+			BookID:      query,
+			App:         offlineApp,
 			UserID:      record.UserID,
 			UserName:    record.UserName,
 			DurationSec: float64(record.Duration) / 1000, // convert to seconds
@@ -245,7 +249,8 @@ func readDramaRecords(filePath string) ([]DramaRecord, error) {
 		}
 
 		dramas = append(dramas, DramaRecord{
-			Params:   name,
+			BookID:   name,
+			Name:     name,
 			Duration: duration,
 		})
 	}

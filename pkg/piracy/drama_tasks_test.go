@@ -118,3 +118,16 @@ func TestCreateDramaSearchTasksErrors(t *testing.T) {
 		t.Fatal("expected error when CreateTaskRecords fails")
 	}
 }
+
+func TestBuildAliasParamsDeduplicates(t *testing.T) {
+	got := buildAliasParams("Primary", "AliasA|AliasB|AliasA|Primary", "|")
+	want := []string{"Primary", "AliasA", "AliasB"}
+	if len(got) != len(want) {
+		t.Fatalf("unexpected param count: got %d want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("unexpected param order: got %v want %v", got, want)
+		}
+	}
+}

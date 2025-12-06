@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	pool "github.com/httprunner/TaskAgent"
+	"github.com/httprunner/TaskAgent/pkg/feishu"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 )
@@ -28,6 +30,11 @@ type Workflow struct {
 	reporter     *Reporter
 	feishuClient *pool.FeishuTaskClient
 	profileScene string
+}
+
+type bucketKey struct {
+	bookID string
+	app    string
 }
 
 // NewWorkflow builds a workflow from the provided configuration. If the target table URL
@@ -104,50 +111,60 @@ func (w *Workflow) handleGeneralSearch(ctx context.Context, pkg string, tasks []
 		return nil
 	}
 
-	// Process each general search task individually to use its TaskID as parentTaskID
-	var errs []string
+	grouped := make(map[bucketKey][]*pool.FeishuTask)
 	for _, task := range tasks {
 		if task == nil {
 			continue
 		}
-		params := strings.TrimSpace(task.Params)
-		if params == "" {
+		bookID := strings.TrimSpace(task.BookID)
+		app := strings.TrimSpace(task.App)
+		if bookID == "" || app == "" {
+			continue
+		}
+		key := bucketKey{bookID: bookID, app: app}
+		grouped[key] = append(grouped[key], task)
+	}
+
+	var errs []string
+	for key, bucket := range grouped {
+		if len(bucket) == 0 {
+			continue
+		}
+		parent := firstFeishuTask(bucket)
+		params, ready := w.collectBookParams(ctx, key, parent, bucket)
+		if !ready {
+			log.Debug().
+				Str("book_id", key.bookID).
+				Str("app", key.app).
+				Msg("piracy workflow skipping bucket: tasks not ready for detection")
+			continue
+		}
+		if len(params) == 0 || parent == nil {
 			continue
 		}
 
 		log.Info().
-			Int64("task_id", task.TaskID).
-			Str("params", params).
-			Msg("piracy workflow running detection with video details for general task")
+			Str("book_id", key.bookID).
+			Str("app", key.app).
+			Int("task_count", len(bucket)).
+			Int("params", len(params)).
+			Msg("piracy workflow running detection for completed bucket")
 
-		// Detect piracy matches with video details (ItemID, Tags, AnchorPoint)
-		details, err := w.reporter.DetectMatchesWithDetails(ctx, []string{params})
+		details, err := w.reporter.DetectMatchesWithDetails(ctx, params)
 		if err != nil {
-			errs = append(errs, fmt.Sprintf("task %d detection failed: %v", task.TaskID, err))
+			errs = append(errs, fmt.Sprintf("book %s detection failed: %v", key.bookID, err))
 			continue
 		}
-
 		if len(details) == 0 {
-			log.Info().
-				Int64("task_id", task.TaskID).
-				Str("params", params).
-				Msg("no piracy matches found for task")
+			continue
+		}
+		filtered := filterDetailsByBookID(details, key.bookID)
+		if len(filtered) == 0 {
 			continue
 		}
 
-		log.Info().
-			Int64("task_id", task.TaskID).
-			Str("params", params).
-			Int("match_details", len(details)).
-			Msg("piracy matches found with video details, creating child tasks")
-
-		// Create group tasks based on video details:
-		// - 1 "个人页搜索" task per match
-		// - 1 "合集视频采集" task if any video has collection tag
-		// - N "视频锚点采集" tasks for each video with appLink
-		if err := w.reporter.CreateGroupTasksForPiracyMatches(ctx, pkg, task.TaskID, task.Datetime, task.DatetimeRaw, task.BookID, details); err != nil {
-			errs = append(errs, fmt.Sprintf("task %d report failed: %v", task.TaskID, err))
-			continue
+		if err := w.reporter.CreateGroupTasksForPiracyMatches(ctx, pkg, parent.TaskID, parent.Datetime, parent.DatetimeRaw, key.bookID, filtered); err != nil {
+			errs = append(errs, fmt.Sprintf("book %s report failed: %v", key.bookID, err))
 		}
 	}
 
@@ -155,6 +172,102 @@ func (w *Workflow) handleGeneralSearch(ctx context.Context, pkg string, tasks []
 		return errors.New(strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+func (w *Workflow) collectBookParams(ctx context.Context, key bucketKey, parent *pool.FeishuTask, bucket []*pool.FeishuTask) ([]string, bool) {
+	date := taskDayFromFeishuTask(parent)
+	rows, err := fetchBookCaptureTasks(ctx, key.bookID, key.app, pool.SceneGeneralSearch, date)
+	if err != nil {
+		log.Warn().
+			Err(err).
+			Str("book_id", key.bookID).
+			Str("app", key.app).
+			Msg("piracy workflow: capture_tasks lookup failed; falling back to in-memory bucket")
+		return paramsFromFeishuTasks(bucket)
+	}
+	if len(rows) == 0 {
+		log.Debug().
+			Str("book_id", key.bookID).
+			Str("app", key.app).
+			Msg("piracy workflow: no capture_tasks rows found; falling back to bucket statuses")
+		return paramsFromFeishuTasks(bucket)
+	}
+	if !captureTasksAllSuccess(rows) {
+		return nil, false
+	}
+	params := paramsFromCaptureTasks(rows)
+	if len(params) == 0 {
+		return nil, false
+	}
+	return params, true
+}
+
+func paramsFromFeishuTasks(tasks []*pool.FeishuTask) ([]string, bool) {
+	seen := make(map[string]struct{}, len(tasks))
+	params := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		if strings.TrimSpace(task.Status) != feishu.StatusSuccess {
+			return nil, false
+		}
+		if trimmed := strings.TrimSpace(task.Params); trimmed != "" {
+			if _, ok := seen[trimmed]; ok {
+				continue
+			}
+			seen[trimmed] = struct{}{}
+			params = append(params, trimmed)
+		}
+	}
+	if len(params) == 0 {
+		return nil, false
+	}
+	return params, true
+}
+
+func firstFeishuTask(tasks []*pool.FeishuTask) *pool.FeishuTask {
+	for _, task := range tasks {
+		if task != nil {
+			return task
+		}
+	}
+	return nil
+}
+
+func taskDayFromFeishuTask(task *pool.FeishuTask) *time.Time {
+	if task == nil {
+		return nil
+	}
+	if task.Datetime != nil {
+		local := task.Datetime.In(time.Local)
+		return &local
+	}
+	trimmed := strings.TrimSpace(task.DatetimeRaw)
+	if trimmed == "" {
+		return nil
+	}
+	if parsed, _ := parseBackfillDatetime(trimmed); parsed != nil {
+		return parsed
+	}
+	return nil
+}
+
+func filterDetailsByBookID(details []MatchDetail, bookID string) []MatchDetail {
+	if len(details) == 0 {
+		return nil
+	}
+	trimmed := strings.TrimSpace(bookID)
+	if trimmed == "" {
+		return details
+	}
+	filtered := make([]MatchDetail, 0, len(details))
+	for _, detail := range details {
+		if strings.TrimSpace(detail.Match.BookID) == trimmed {
+			filtered = append(filtered, detail)
+		}
+	}
+	return filtered
 }
 
 func (w *Workflow) handleProfileSearch(ctx context.Context, pkg string, tasks []*pool.FeishuTask) error {
@@ -243,11 +356,16 @@ func (w *Workflow) matchReportForTask(report *Report, task *pool.FeishuTask) *Ma
 		return nil
 	}
 	param := strings.TrimSpace(task.Params)
+	bookID := strings.TrimSpace(task.BookID)
 	userID := strings.TrimSpace(task.UserID)
 	userName := strings.TrimSpace(task.UserName)
 	for idx := range report.Matches {
 		match := report.Matches[idx]
-		if strings.TrimSpace(match.Params) != param {
+		if bookID != "" {
+			if strings.TrimSpace(match.BookID) != bookID {
+				continue
+			}
+		} else if strings.TrimSpace(match.Params) != param {
 			continue
 		}
 		if userID != "" && strings.TrimSpace(match.UserID) == userID {

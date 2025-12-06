@@ -91,7 +91,7 @@ func RunAuto(ctx context.Context, opts AutoOptions) (*AutoSummary, error) {
 
 	for idx, drama := range dramas {
 		name := strings.TrimSpace(drama.Name)
-		if name == "" || drama.Duration <= 0 {
+		if name == "" || drama.Duration <= 0 || strings.TrimSpace(drama.BookID) == "" {
 			continue
 		}
 
@@ -141,9 +141,17 @@ func RunAuto(ctx context.Context, opts AutoOptions) (*AutoSummary, error) {
 			dramaRow := Row{Fields: map[string]any{
 				cfg.DramaNameField:     name,
 				cfg.DramaDurationField: drama.Duration,
+				cfg.DramaIDField:       drama.BookID,
 			}}
 
-			report := analyzeRows(resultRows, []Row{dramaRow}, cfg)
+			for i := range resultRows {
+				if resultRows[i].Fields == nil {
+					resultRows[i].Fields = make(map[string]any)
+				}
+				resultRows[i].Fields[cfg.TaskBookIDField] = drama.BookID
+			}
+
+			report := analyzeRows(resultRows, []Row{dramaRow}, cfg, nil)
 			if len(report.Matches) == 0 {
 				log.Info().
 					Str("drama", name).

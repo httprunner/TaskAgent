@@ -119,7 +119,7 @@ func (pr *Reporter) ReportPiracyForParams(ctx context.Context, app string, param
 		Int("task_rows", report.TaskRows).
 		Int("result_rows", report.ResultRows).
 		Int("suspicious_combos", len(report.Matches)).
-		Int("missing_params", len(report.MissingParams)).
+		Int("missing_book_ids", len(report.MissingParams)).
 		Float64("threshold", report.Threshold).
 		Msg("Piracy detection completed")
 
@@ -165,6 +165,9 @@ func (pr *Reporter) detectWithFiltersInternal(ctx context.Context, paramsList []
 			URL:    pr.resultTableURL,
 			Filter: finalResultFilter,
 		},
+		TaskTable: TableConfig{
+			URL: pr.taskTableURL,
+		},
 		DramaTable: TableConfig{
 			URL:    pr.dramaTableURL,
 			Filter: finalDramaFilter,
@@ -196,7 +199,7 @@ func (pr *Reporter) detectWithFiltersInternal(ctx context.Context, paramsList []
 			if err != nil {
 				return nil, err
 			}
-			return analyzeRows(sqliteRows, dramaRows, ops.Config), nil
+			return analyzeRows(sqliteRows, dramaRows, ops.Config, nil), nil
 		}
 	}
 
@@ -228,15 +231,28 @@ func (pr *Reporter) ReportMatches(ctx context.Context, app string, matches []Mat
 		if match.Ratio < pr.threshold {
 			continue
 		}
+		bookID := strings.TrimSpace(match.BookID)
+		if bookID == "" {
+			continue
+		}
+		params := strings.TrimSpace(match.DramaName)
+		if params == "" {
+			log.Warn().
+				Str("book_id", bookID).
+				Str("user_id", strings.TrimSpace(match.UserID)).
+				Msg("piracy reporter: missing drama name, skip profile task")
+			continue
+		}
 		records = append(records, feishu.TaskRecordInput{
 			App:      strings.TrimSpace(app),
 			Scene:    pool.SceneProfileSearch,
-			Params:   strings.TrimSpace(match.Params),
+			Params:   params,
 			UserID:   strings.TrimSpace(match.UserID),
 			UserName: strings.TrimSpace(match.UserName),
 			Extra:    fmt.Sprintf("ratio=%.2f%%", match.Ratio*100), // 存储实际检测比例值（百分比形式）
 			Status:   feishu.StatusPending,
 			Webhook:  feishu.WebhookPending,
+			BookID:   bookID,
 		})
 	}
 
@@ -287,7 +303,7 @@ func (pr *Reporter) DetectMatchesWithDetails(ctx context.Context, paramsList []s
 	// Filter matches by threshold
 	filteredMatches := make([]Match, 0, len(report.Matches))
 	for _, match := range report.Matches {
-		if match.Ratio >= pr.threshold {
+		if match.Ratio >= pr.threshold && strings.TrimSpace(match.BookID) != "" {
 			filteredMatches = append(filteredMatches, match)
 		}
 	}
@@ -306,7 +322,7 @@ func (pr *Reporter) DetectMatchesWithDetails(ctx context.Context, paramsList []s
 
 	details := make([]MatchDetail, 0, len(filteredMatches))
 	for _, match := range filteredMatches {
-		videos, err := pr.fetchVideosForMatch(ctx, &feishuClient, match.Params, match.UserID)
+		videos, err := pr.fetchVideosForMatch(ctx, &feishuClient, match)
 		if err != nil {
 			log.Warn().Err(err).
 				Str("params", match.Params).
@@ -329,19 +345,19 @@ func (pr *Reporter) DetectMatchesWithDetails(ctx context.Context, paramsList []s
 // fetchVideosForMatch retrieves video details (ItemID, Tags, AnchorPoint) for a specific match.
 // It tries sqlite first (local data, always up-to-date), then falls back to Feishu if sqlite fails or returns empty.
 // The feishu client is created lazily only when fallback is needed.
-func (pr *Reporter) fetchVideosForMatch(ctx context.Context, clientPtr **feishu.Client, params, userID string) ([]VideoDetail, error) {
+func (pr *Reporter) fetchVideosForMatch(ctx context.Context, clientPtr **feishu.Client, match Match) ([]VideoDetail, error) {
 	// Try sqlite first (preferred: local data is immediately available after capture)
 	if pr.sqliteSource != nil {
-		videos, err := pr.sqliteSource.FetchVideoDetails(ctx, params, userID)
+		videos, err := pr.sqliteSource.FetchVideoDetails(ctx, match.Params, match.UserID, match.App)
 		if err != nil {
 			log.Warn().Err(err).
-				Str("params", params).
-				Str("user_id", userID).
+				Str("params", match.Params).
+				Str("user_id", match.UserID).
 				Msg("sqlite video details fetch failed, fallback to Feishu")
 		} else if len(videos) > 0 {
 			log.Debug().
-				Str("params", params).
-				Str("user_id", userID).
+				Str("params", match.Params).
+				Str("user_id", match.UserID).
 				Int("video_count", len(videos)).
 				Msg("video details fetched from sqlite")
 			return videos, nil
@@ -356,20 +372,23 @@ func (pr *Reporter) fetchVideosForMatch(ctx context.Context, clientPtr **feishu.
 		}
 		*clientPtr = client
 	}
-	return pr.fetchVideosFromFeishu(ctx, *clientPtr, params, userID)
+	return pr.fetchVideosFromFeishu(ctx, *clientPtr, match)
 }
 
 // fetchVideosFromFeishu retrieves video details from Feishu bitable.
-func (pr *Reporter) fetchVideosFromFeishu(ctx context.Context, client *feishu.Client, params, userID string) ([]VideoDetail, error) {
+func (pr *Reporter) fetchVideosFromFeishu(ctx context.Context, client *feishu.Client, match Match) ([]VideoDetail, error) {
 	fields := feishu.DefaultResultFields
 
 	// Build filter for params + userID
 	filter := feishu.NewFilterInfo("and")
-	if paramsField := strings.TrimSpace(fields.Params); paramsField != "" {
-		filter.Conditions = append(filter.Conditions, feishu.NewCondition(paramsField, "is", params))
+	if paramsField := strings.TrimSpace(fields.Params); paramsField != "" && strings.TrimSpace(match.Params) != "" {
+		filter.Conditions = append(filter.Conditions, feishu.NewCondition(paramsField, "is", strings.TrimSpace(match.Params)))
 	}
-	if userIDField := strings.TrimSpace(fields.UserID); userIDField != "" {
-		filter.Conditions = append(filter.Conditions, feishu.NewCondition(userIDField, "is", userID))
+	if userIDField := strings.TrimSpace(fields.UserID); userIDField != "" && strings.TrimSpace(match.UserID) != "" {
+		filter.Conditions = append(filter.Conditions, feishu.NewCondition(userIDField, "is", strings.TrimSpace(match.UserID)))
+	}
+	if appField := strings.TrimSpace(fields.App); appField != "" && strings.TrimSpace(match.App) != "" {
+		filter.Conditions = append(filter.Conditions, feishu.NewCondition(appField, "is", strings.TrimSpace(match.App)))
 	}
 
 	rows, err := fetchRows(ctx, client, TableConfig{
@@ -473,13 +492,31 @@ func buildPiracyGroupTaskRecords(
 	bookID := strings.TrimSpace(parentBookID)
 	inheritRaw := inheritDatetimeRaw(parentDatetimeRaw, parentDatetime)
 	records := make([]feishu.TaskRecordInput, 0, len(details)*3)
+	usedGroups := make(map[string]struct{})
+	mappedApp := mapAppFieldValue(trimmedApp)
+	if mappedApp == "" {
+		mappedApp = strings.TrimSpace(trimmedApp)
+	}
 
-	for idx, detail := range details {
-		groupID := fmt.Sprintf("%d_%d", parentTaskID, idx+1)
-
-		// 1. Create "个人页搜索" task
-		params := strings.TrimSpace(detail.Match.Params)
+	for _, detail := range details {
+		params := strings.TrimSpace(detail.Match.DramaName)
+		if params == "" {
+			log.Warn().
+				Str("book_id", bookID).
+				Int64("parent_task_id", parentTaskID).
+				Msg("piracy reporter: missing drama name for child tasks, skip detail")
+			continue
+		}
 		userID := strings.TrimSpace(detail.Match.UserID)
+		groupID := buildGroupID(mappedApp, bookID, userID)
+		if _, exists := usedGroups[groupID]; exists {
+			log.Warn().
+				Str("group_id", groupID).
+				Str("book_id", bookID).
+				Msg("piracy reporter: duplicate AID detected, skip detail")
+			continue
+		}
+		usedGroups[groupID] = struct{}{}
 		userName := strings.TrimSpace(detail.Match.UserName)
 		records = append(records, feishu.TaskRecordInput{
 			App:         trimmedApp,
@@ -552,4 +589,20 @@ func inheritDatetimeRaw(parentRaw string, parent *time.Time) string {
 		return ""
 	}
 	return strconv.FormatInt(parent.UTC().UnixMilli(), 10)
+}
+
+func buildGroupID(appName, bookID, userID string) string {
+	mappedApp := mapAppFieldValue(strings.TrimSpace(appName))
+	if mappedApp == "" {
+		mappedApp = strings.TrimSpace(appName)
+	}
+	trimmedBook := strings.TrimSpace(bookID)
+	if trimmedBook == "" {
+		trimmedBook = "unknown_book"
+	}
+	trimmedUser := strings.TrimSpace(userID)
+	if trimmedUser == "" {
+		trimmedUser = "unknown_user"
+	}
+	return fmt.Sprintf("%s_%s_%s", mappedApp, trimmedBook, trimmedUser)
 }

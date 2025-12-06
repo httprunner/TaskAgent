@@ -5,13 +5,18 @@ import "github.com/httprunner/TaskAgent/pkg/feishu"
 // Config defines the configuration for piracy detection.
 type Config struct {
 	// Fields in result table (source A)
-	ParamsField   string
-	UserIDField   string
-	DurationField string // item duration seconds
-	ItemIDField   string // video/item identifier column (用于去重)
+	ParamsField    string
+	UserIDField    string
+	DurationField  string // item duration seconds
+	ItemIDField    string // video/item identifier column (用于去重)
+	ResultAppField string // App field in result table
 
 	// Fields in task table (source B)
 	TaskParamsField string // Params field in task table
+	TaskBookIDField string // BookID field in task table
+	TaskStatusField string // Status field in task table
+	TaskSceneField  string // Scene field in task table
+	TaskAppField    string // App field in task table
 
 	// Fields in original drama table (source C)
 	DramaIDField       string // 短剧 ID
@@ -41,8 +46,11 @@ type Options struct {
 // Match represents a suspicious Params+UserID combination.
 type Match struct {
 	Params        string
+	BookID        string
+	DramaName     string
 	UserID        string
 	UserName      string
+	App           string
 	SumDuration   float64
 	TotalDuration float64
 	Ratio         float64
@@ -51,6 +59,7 @@ type Match struct {
 
 // Drama captures a single drama entry from the drama table.
 type Drama struct {
+	BookID   string
 	Name     string
 	Duration float64
 }
@@ -60,7 +69,7 @@ type Report struct {
 	Matches       []Match
 	ResultRows    int
 	TaskRows      int
-	MissingParams []string // Params in result without corresponding target
+	MissingParams []string // BookIDs without corresponding drama duration
 	Threshold     float64
 }
 

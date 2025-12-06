@@ -301,9 +301,7 @@ func buildAliasParams(primary, aliasRaw, sep string) []string {
 	if strings.TrimSpace(aliasRaw) == "" {
 		return params
 	}
-	replacer := strings.NewReplacer("\n", sep, "\r", sep, "，", sep, ",", sep, "｜", sep)
-	normalized := replacer.Replace(aliasRaw)
-	parts := strings.Split(normalized, sep)
+	parts := strings.Split(aliasRaw, sep)
 	for _, part := range parts {
 		add(&params, seen, part)
 	}

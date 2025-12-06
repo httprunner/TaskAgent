@@ -4,7 +4,7 @@
 
 ## 1. 概述
 
-当「综合页搜索」任务完成盗版初筛后，会根据检测结果自动创建子任务。子任务的类型由视频详情数据动态决定，同一盗版线索的所有子任务共享 GroupID，Webhook 在同组所有任务成功后触发。
+当「综合页搜索」任务完成盗版初筛后，会根据检测结果自动创建子任务。子任务的类型由视频详情数据动态决定，同一盗版线索（AID = App + BookID + UserID）的所有子任务共享 GroupID，Webhook 在同组所有任务成功后触发。
 
 ## 2. 子任务类型
 
@@ -36,7 +36,7 @@
     │
     ▼
 ┌─────────────────────────────────────────────────────────┐
-│  子任务 (GroupID=123_1)                                  │
+│  子任务 (GroupID=快手_B1234_U5678)                      │
 │  ├─ 个人页搜索 (Params=短剧X)                            │
 │  ├─ 合集视频采集 (Params=短剧X, ItemID=3xz7ghufhmggzfy) [可选] │
 │  └─ 视频锚点采集 (Params=短剧X, Extra=kwai://...) [可选, 可多个] │
@@ -50,15 +50,14 @@ Webhook worker (见 `docs/webhook-worker.md`) 监控 GroupID，全部任务
 ## 4. GroupID 格式
 
 ```
-{parentTaskID}_{index}
+{mapAppFieldValue(App)}_{BookID}_{UserID}
 ```
 
-- `parentTaskID`: 父任务（综合页搜索）的 TaskID
-- `index`: 盗版线索序号，从 1 开始
+- `mapAppFieldValue(App)`: 将包名映射成可读平台名，例如 `com.smile.gifmaker → 快手`
+- `BookID`: 短剧 ID
+- `UserID`: 盗版账号 ID
 
-示例：父任务 TaskID=123，检测到 2 个盗版线索
-- 第 1 个线索的子任务 GroupID: `123_1`
-- 第 2 个线索的子任务 GroupID: `123_2`
+同一 AID 只允许存在一个 GroupID；若检测到重复 AID，会跳过创建以避免重复子任务。
 
 ## 5. 视频详情获取
 
@@ -92,9 +91,9 @@ type VideoDetail struct {
 ## 6. 子任务创建逻辑
 
 ```go
-for idx, detail := range matchDetails {
-    groupID := fmt.Sprintf("%d_%d", parentTaskID, idx+1)
-    params := detail.Match.Params
+for _, detail := range matchDetails {
+    groupID := fmt.Sprintf("%s_%s_%s", mapAppFieldValue(detail.Match.App), bookID, detail.Match.UserID)
+    params := detail.Match.DramaName
     userID := detail.Match.UserID
     userName := detail.Match.UserName
 
@@ -139,6 +138,7 @@ for idx, detail := range matchDetails {
 ```
 
 **去重规则**:
+- AID（App+BookID+UserID）去重：若同一组合已写入过子任务，本轮检测会跳过，避免重复 GroupID。
 - 合集视频采集：同一 GroupID 只创建 1 个（取第一个匹配的视频）
 - 视频锚点采集：按 appLink 去重，同一锚点不重复建任务
 
@@ -153,7 +153,7 @@ for idx, detail := range matchDetails {
 | Params | 始终沿用父任务短剧名称 |
 | UserID | 继承盗版线索的用户 ID |
 | UserName | 继承盗版线索的用户名 |
-| GroupID | `{parentTaskID}_{index}` |
+| GroupID | `{mapAppFieldValue(App)}_{BookID}_{UserID}` |
 | Datetime | 继承父任务 |
 | Status | 个人页搜索=`pending`；其他场景留空等待调度后更新 |
 | Webhook | 个人页搜索=`pending`；其他场景留空 |
