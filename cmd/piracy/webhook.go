@@ -71,7 +71,7 @@ func newWebhookCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flagWebhookURL, "webhook-url", "", "Summary webhook URL (default from SUMMARY_WEBHOOK_URL)")
 	cmd.Flags().StringVar(&flagApp, "app", "", "Optional App filter (defaults to BUNDLE_ID env)")
 	cmd.Flags().DurationVar(&flagPoll, "poll-interval", 30*time.Second, "Interval between webhook scans")
-	cmd.Flags().IntVar(&flagBatchLimit, "batch-limit", 20, "Maximum number of webhook tasks processed per scan")
+	cmd.Flags().IntVar(&flagBatchLimit, "batch-limit", 50, "Maximum number of webhook tasks processed per scan")
 
 	return cmd
 }

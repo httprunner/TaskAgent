@@ -222,25 +222,56 @@ func (w *WebhookWorker) handleGroupRow(ctx context.Context, table *feishu.TaskTa
 		return outcome, fmt.Errorf("fetch group %s tasks failed: %w", groupID, err)
 	}
 	readyTasks := filterTasksWithStatus(groupTasks)
-	if len(readyTasks) == 0 || !allGroupTasksSuccess(readyTasks) {
+	if len(readyTasks) == 0 {
 		log.Debug().
 			Str("scene", row.Scene).
 			Str("group_id", groupID).
 			Int("total", len(groupTasks)).
-			Int("evaluated", len(readyTasks)).
-			Int("success", countSuccessTasks(readyTasks)).
-			Msg("group not ready, waiting for success statuses")
+			Msg("group not ready: no tasks with status")
+		return outcome, nil
+	}
+
+	referenceDay, ok := normalizeTaskDay(row.Datetime)
+	if !ok {
+		log.Warn().
+			Str("scene", row.Scene).
+			Str("group_id", groupID).
+			Int64("task_id", row.TaskID).
+			Msg("group task missing datetime, skip webhook readiness")
+		return outcome, nil
+	}
+	dayTasks := filterTasksByDate(readyTasks, referenceDay)
+	if len(dayTasks) == 0 {
+		log.Debug().
+			Str("scene", row.Scene).
+			Str("group_id", groupID).
+			Time("reference_day", referenceDay).
+			Int("total", len(groupTasks)).
+			Int("with_status", len(readyTasks)).
+			Msg("group not ready: no tasks match reference day")
+		return outcome, nil
+	}
+	if !allGroupTasksSuccess(dayTasks) {
+		log.Debug().
+			Str("scene", row.Scene).
+			Str("group_id", groupID).
+			Time("reference_day", referenceDay).
+			Int("total", len(groupTasks)).
+			Int("with_status", len(readyTasks)).
+			Int("evaluated", len(dayTasks)).
+			Int("success", countSuccessTasks(dayTasks)).
+			Msg("group day not ready, waiting for success statuses")
 		return outcome, nil
 	}
 
 	processedGroups[groupID] = true
-	taskIDs := extractTaskIDs(readyTasks)
-	if err := w.sendGroupWebhook(ctx, app, groupID, readyTasks); err != nil {
+	taskIDs := extractTaskIDs(dayTasks)
+	if err := w.sendGroupWebhook(ctx, app, groupID, dayTasks); err != nil {
 		log.Error().Err(err).
 			Str("scene", row.Scene).
 			Str("group_id", groupID).
 			Str("app", app).
-			Int("task_count", len(readyTasks)).
+			Int("task_count", len(dayTasks)).
 			Msg("group webhook delivery failed")
 		outcome.failedIDs = append(outcome.failedIDs, taskIDs...)
 		if updErr := w.updateWebhookState(ctx, table, taskIDs, feishu.WebhookFailed); updErr != nil {
@@ -253,10 +284,40 @@ func (w *WebhookWorker) handleGroupRow(ctx context.Context, table *feishu.TaskTa
 		Str("scene", row.Scene).
 		Str("group_id", groupID).
 		Str("app", app).
-		Int("task_count", len(readyTasks)).
+		Int("task_count", len(dayTasks)).
 		Msg("group webhook delivered")
 	outcome.successIDs = append(outcome.successIDs, taskIDs...)
 	return outcome, w.updateWebhookState(ctx, table, taskIDs, feishu.WebhookSuccess)
+}
+
+func normalizeTaskDay(ts *time.Time) (time.Time, bool) {
+	if ts == nil {
+		return time.Time{}, false
+	}
+	local := ts.In(time.Local)
+	day := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, local.Location())
+	return day, true
+}
+
+func filterTasksByDate(tasks []feishu.TaskRow, referenceDay time.Time) []feishu.TaskRow {
+	if len(tasks) == 0 {
+		return nil
+	}
+	ref := referenceDay.In(time.Local)
+	filtered := make([]feishu.TaskRow, 0, len(tasks))
+	for _, t := range tasks {
+		if t.Datetime == nil {
+			continue
+		}
+		currDay, ok := normalizeTaskDay(t.Datetime)
+		if !ok {
+			continue
+		}
+		if currDay.Year() == ref.Year() && currDay.YearDay() == ref.YearDay() {
+			filtered = append(filtered, t)
+		}
+	}
+	return filtered
 }
 
 func (w *WebhookWorker) handleVideoCaptureRow(ctx context.Context, table *feishu.TaskTable, row feishu.TaskRow, app string) (webhookOutcome, error) {

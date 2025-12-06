@@ -2,6 +2,7 @@ package piracy
 
 import (
 	"testing"
+	"time"
 
 	"github.com/httprunner/TaskAgent/pkg/feishu"
 )
@@ -102,5 +103,35 @@ func TestAllGroupTasksSuccessIgnoresEmptyStatus(t *testing.T) {
 				t.Fatalf("allGroupTasksSuccess()=%v, want %v", got, tc.ready)
 			}
 		})
+	}
+}
+
+func TestFilterTasksByDateMixedDays(t *testing.T) {
+	reference := time.Date(2025, 12, 6, 12, 0, 0, 0, time.Local)
+	dayBefore := reference.Add(-24 * time.Hour)
+	dayAfter := reference.Add(24 * time.Hour)
+	rows := []feishu.TaskRow{
+		{TaskID: 1, Datetime: &reference, Status: feishu.StatusSuccess},
+		{TaskID: 2, Datetime: &dayBefore, Status: feishu.StatusSuccess},
+		{TaskID: 3, Datetime: &dayAfter, Status: feishu.StatusSuccess},
+		{TaskID: 4, Datetime: nil, Status: feishu.StatusSuccess},
+	}
+	filtered := filterTasksByDate(rows, reference)
+	if len(filtered) != 1 {
+		t.Fatalf("expected 1 task on reference day, got %d", len(filtered))
+	}
+	if filtered[0].TaskID != 1 {
+		t.Fatalf("expected task 1, got %d", filtered[0].TaskID)
+	}
+}
+
+func TestNormalizeTaskDay(t *testing.T) {
+	day := time.Date(2025, 12, 6, 23, 59, 59, 0, time.Local)
+	norm, ok := normalizeTaskDay(&day)
+	if !ok {
+		t.Fatalf("expected normalizeTaskDay to succeed")
+	}
+	if norm.Hour() != 0 || norm.Minute() != 0 || norm.Second() != 0 {
+		t.Fatalf("expected normalized day to be midnight, got %v", norm)
 	}
 }
