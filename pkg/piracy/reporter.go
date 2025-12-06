@@ -227,40 +227,33 @@ func (pr *Reporter) ReportMatches(ctx context.Context, app string, matches []Mat
 		return fmt.Errorf("failed to create feishu client: %w", err)
 	}
 
-	records := make([]feishu.TaskRecordInput, 0, len(matches))
-	for _, match := range matches {
-		if match.Ratio < pr.threshold {
-			continue
-		}
-		bookID := strings.TrimSpace(match.BookID)
-		if bookID == "" {
-			continue
-		}
-		params := strings.TrimSpace(match.DramaName)
-		if params == "" {
-			log.Warn().
-				Str("book_id", bookID).
-				Str("user_id", strings.TrimSpace(match.UserID)).
-				Msg("piracy reporter: missing drama name, skip profile task")
-			continue
-		}
-		records = append(records, feishu.TaskRecordInput{
-			App:      strings.TrimSpace(app),
-			Scene:    pool.SceneProfileSearch,
-			Params:   params,
-			UserID:   strings.TrimSpace(match.UserID),
-			UserName: strings.TrimSpace(match.UserName),
-			Extra:    fmt.Sprintf("ratio=%.2f%%", match.Ratio*100), // 存储实际检测比例值（百分比形式）
-			Status:   feishu.StatusPending,
-			Webhook:  feishu.WebhookPending,
-			BookID:   bookID,
-		})
+	candidates, intraDuplicates := buildProfileTaskCandidates(app, matches, pr.threshold)
+	if intraDuplicates > 0 {
+		log.Info().
+			Int("duplicate_candidates", intraDuplicates).
+			Msg("piracy reporter: skipped duplicate profile matches in batch")
 	}
-
-	if len(records) == 0 {
+	if len(candidates) == 0 {
 		log.Info().Msg("No records meet the threshold, nothing to write")
 		return nil
 	}
+
+	existingKeys, err := pr.fetchExistingProfileTaskKeys(ctx, client, app, candidates)
+	if err != nil {
+		return err
+	}
+	candidates, existingSkipped := filterProfileCandidatesByExisting(candidates, existingKeys)
+	if existingSkipped > 0 {
+		log.Info().
+			Int("existing_duplicates", existingSkipped).
+			Msg("piracy reporter: skipped profile tasks already present in task table")
+	}
+	if len(candidates) == 0 {
+		log.Info().Msg("All candidate profile tasks already exist, nothing to write")
+		return nil
+	}
+
+	records := profileCandidatesToRecords(candidates)
 
 	log.Info().
 		Int("record_count", len(records)).
@@ -453,7 +446,14 @@ func (pr *Reporter) CreateGroupTasksForPiracyMatches(
 		return fmt.Errorf("failed to create feishu client: %w", err)
 	}
 
-	records := buildPiracyGroupTaskRecords(app, parentTaskID, parentDatetime, parentDatetimeRaw, parentBookID, details)
+	trimmedApp := strings.TrimSpace(app)
+	targetGroupIDs := collectTargetGroupIDs(trimmedApp, parentBookID, details)
+	existingGroupIDs, err := pr.fetchExistingGroupIDs(ctx, client, trimmedApp, targetGroupIDs)
+	if err != nil {
+		return err
+	}
+
+	records := buildPiracyGroupTaskRecords(trimmedApp, parentTaskID, parentDatetime, parentDatetimeRaw, parentBookID, details, existingGroupIDs)
 
 	if len(records) == 0 {
 		log.Info().Msg("No child tasks to create")
@@ -485,6 +485,7 @@ func buildPiracyGroupTaskRecords(
 	parentDatetimeRaw string,
 	parentBookID string,
 	details []MatchDetail,
+	existingGroupIDs map[string]struct{},
 ) []feishu.TaskRecordInput {
 	if len(details) == 0 {
 		return nil
@@ -510,6 +511,19 @@ func buildPiracyGroupTaskRecords(
 		}
 		userID := strings.TrimSpace(detail.Match.UserID)
 		groupID := buildGroupID(mappedApp, bookID, userID)
+		if groupID == "" {
+			continue
+		}
+		if existingGroupIDs != nil {
+			if _, exists := existingGroupIDs[groupID]; exists {
+				log.Info().
+					Str("group_id", groupID).
+					Str("book_id", bookID).
+					Int64("parent_task_id", parentTaskID).
+					Msg("piracy reporter: child tasks already exist for group, skip")
+				continue
+			}
+		}
 		if _, exists := usedGroups[groupID]; exists {
 			log.Warn().
 				Str("group_id", groupID).
@@ -606,4 +620,275 @@ func buildGroupID(appName, bookID, userID string) string {
 		trimmedUser = "unknown_user"
 	}
 	return fmt.Sprintf("%s_%s_%s", mappedApp, trimmedBook, trimmedUser)
+}
+
+type profileTaskCandidate struct {
+	key    string
+	record feishu.TaskRecordInput
+	bookID string
+	userID string
+}
+
+func buildProfileTaskCandidates(app string, matches []Match, threshold float64) ([]profileTaskCandidate, int) {
+	trimmedApp := strings.TrimSpace(app)
+	seen := make(map[string]struct{}, len(matches))
+	candidates := make([]profileTaskCandidate, 0, len(matches))
+	duplicateCount := 0
+	for _, match := range matches {
+		if match.Ratio < threshold {
+			continue
+		}
+		bookID := strings.TrimSpace(match.BookID)
+		if bookID == "" {
+			continue
+		}
+		params := strings.TrimSpace(match.DramaName)
+		if params == "" {
+			log.Warn().
+				Str("book_id", bookID).
+				Str("user_id", strings.TrimSpace(match.UserID)).
+				Msg("piracy reporter: missing drama name, skip profile task")
+			continue
+		}
+		userID := strings.TrimSpace(match.UserID)
+		key := buildGroupID(trimmedApp, bookID, userID)
+		if _, exists := seen[key]; exists {
+			duplicateCount++
+			continue
+		}
+		seen[key] = struct{}{}
+		record := feishu.TaskRecordInput{
+			App:      trimmedApp,
+			Scene:    pool.SceneProfileSearch,
+			Params:   params,
+			UserID:   userID,
+			UserName: strings.TrimSpace(match.UserName),
+			Extra:    fmt.Sprintf("ratio=%.2f%%", match.Ratio*100),
+			Status:   feishu.StatusPending,
+			Webhook:  feishu.WebhookPending,
+			BookID:   bookID,
+		}
+		candidates = append(candidates, profileTaskCandidate{
+			key:    key,
+			record: record,
+			bookID: bookID,
+			userID: userID,
+		})
+	}
+	return candidates, duplicateCount
+}
+
+func filterProfileCandidatesByExisting(candidates []profileTaskCandidate, existing map[string]struct{}) ([]profileTaskCandidate, int) {
+	if len(existing) == 0 {
+		return candidates, 0
+	}
+	filtered := make([]profileTaskCandidate, 0, len(candidates))
+	skipped := 0
+	for _, candidate := range candidates {
+		if _, ok := existing[candidate.key]; ok {
+			skipped++
+			continue
+		}
+		filtered = append(filtered, candidate)
+	}
+	return filtered, skipped
+}
+
+func profileCandidatesToRecords(candidates []profileTaskCandidate) []feishu.TaskRecordInput {
+	if len(candidates) == 0 {
+		return nil
+	}
+	records := make([]feishu.TaskRecordInput, 0, len(candidates))
+	for _, candidate := range candidates {
+		records = append(records, candidate.record)
+	}
+	return records
+}
+
+func (pr *Reporter) fetchExistingProfileTaskKeys(ctx context.Context, client *feishu.Client, app string, candidates []profileTaskCandidate) (map[string]struct{}, error) {
+	result := make(map[string]struct{})
+	if client == nil || len(candidates) == 0 {
+		return result, nil
+	}
+	fields := feishu.DefaultTaskFields
+	bookField := strings.TrimSpace(fields.BookID)
+	if bookField == "" {
+		return nil, fmt.Errorf("task table book id field is not configured")
+	}
+	trimmedApp := strings.TrimSpace(app)
+	allowedUsers := make(map[string]map[string]struct{}, len(candidates))
+	bookOrder := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.bookID == "" {
+			continue
+		}
+		set, exists := allowedUsers[candidate.bookID]
+		if !exists {
+			set = make(map[string]struct{})
+			allowedUsers[candidate.bookID] = set
+			bookOrder = append(bookOrder, candidate.bookID)
+		}
+		set[candidate.userID] = struct{}{}
+	}
+	if len(bookOrder) == 0 {
+		return result, nil
+	}
+	const bookChunkSize = 20
+	for start := 0; start < len(bookOrder); start += bookChunkSize {
+		end := start + bookChunkSize
+		if end > len(bookOrder) {
+			end = len(bookOrder)
+		}
+		chunk := bookOrder[start:end]
+		filter := feishu.NewFilterInfo("and")
+		if field := strings.TrimSpace(fields.App); field != "" && trimmedApp != "" {
+			filter.Conditions = append(filter.Conditions, feishu.NewCondition(field, "is", trimmedApp))
+		}
+		if field := strings.TrimSpace(fields.Scene); field != "" {
+			filter.Conditions = append(filter.Conditions, feishu.NewCondition(field, "is", pool.SceneProfileSearch))
+		}
+		bookChild := feishu.NewChildrenFilter("or")
+		for _, book := range chunk {
+			trimmed := strings.TrimSpace(book)
+			if trimmed == "" {
+				continue
+			}
+			if cond := feishu.NewCondition(bookField, "is", trimmed); cond != nil {
+				bookChild.Conditions = append(bookChild.Conditions, cond)
+			}
+		}
+		if len(bookChild.Conditions) == 0 {
+			continue
+		}
+		filter.Children = append(filter.Children, bookChild)
+		limit := len(chunk) * 200
+		if limit < 200 {
+			limit = 200
+		}
+		opts := &feishu.TaskQueryOptions{
+			Filter: filter,
+			Limit:  limit,
+		}
+		table, err := client.FetchTaskTableWithOptions(ctx, pr.taskTableURL, nil, opts)
+		if err != nil {
+			return nil, fmt.Errorf("fetch existing profile tasks failed: %w", err)
+		}
+		if table == nil {
+			continue
+		}
+		for _, row := range table.Rows {
+			book := strings.TrimSpace(row.BookID)
+			allowed := allowedUsers[book]
+			if len(allowed) == 0 {
+				continue
+			}
+			user := strings.TrimSpace(row.UserID)
+			if _, ok := allowed[user]; !ok {
+				continue
+			}
+			key := buildGroupID(trimmedApp, book, user)
+			result[key] = struct{}{}
+		}
+	}
+	return result, nil
+}
+
+func collectTargetGroupIDs(app string, bookID string, details []MatchDetail) []string {
+	trimmedApp := strings.TrimSpace(app)
+	trimmedBook := strings.TrimSpace(bookID)
+	seen := make(map[string]struct{}, len(details))
+	ids := make([]string, 0, len(details))
+	for _, detail := range details {
+		userID := strings.TrimSpace(detail.Match.UserID)
+		groupID := buildGroupID(trimmedApp, trimmedBook, userID)
+		if groupID == "" {
+			continue
+		}
+		if _, exists := seen[groupID]; exists {
+			continue
+		}
+		seen[groupID] = struct{}{}
+		ids = append(ids, groupID)
+	}
+	return ids
+}
+
+func uniqueStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, val := range values {
+		trimmed := strings.TrimSpace(val)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
+}
+
+func (pr *Reporter) fetchExistingGroupIDs(ctx context.Context, client *feishu.Client, app string, groupIDs []string) (map[string]struct{}, error) {
+	result := make(map[string]struct{})
+	if client == nil || len(groupIDs) == 0 {
+		return result, nil
+	}
+	fields := feishu.DefaultTaskFields
+	groupField := strings.TrimSpace(fields.GroupID)
+	if groupField == "" {
+		return nil, fmt.Errorf("task table group id field is not configured")
+	}
+	trimmedApp := strings.TrimSpace(app)
+	unique := uniqueStrings(groupIDs)
+	if len(unique) == 0 {
+		return result, nil
+	}
+	const groupChunkSize = 50
+	for start := 0; start < len(unique); start += groupChunkSize {
+		end := start + groupChunkSize
+		if end > len(unique) {
+			end = len(unique)
+		}
+		chunk := unique[start:end]
+		filter := feishu.NewFilterInfo("and")
+		if field := strings.TrimSpace(fields.App); field != "" && trimmedApp != "" {
+			filter.Conditions = append(filter.Conditions, feishu.NewCondition(field, "is", trimmedApp))
+		}
+		groupChild := feishu.NewChildrenFilter("or")
+		for _, gid := range chunk {
+			if cond := feishu.NewCondition(groupField, "is", gid); cond != nil {
+				groupChild.Conditions = append(groupChild.Conditions, cond)
+			}
+		}
+		if len(groupChild.Conditions) == 0 {
+			continue
+		}
+		filter.Children = append(filter.Children, groupChild)
+		limit := len(chunk) * 10
+		if limit < 50 {
+			limit = 50
+		}
+		opts := &feishu.TaskQueryOptions{
+			Filter: filter,
+			Limit:  limit,
+		}
+		table, err := client.FetchTaskTableWithOptions(ctx, pr.taskTableURL, nil, opts)
+		if err != nil {
+			return nil, fmt.Errorf("fetch existing group tasks failed: %w", err)
+		}
+		if table == nil {
+			continue
+		}
+		for _, row := range table.Rows {
+			if gid := strings.TrimSpace(row.GroupID); gid != "" {
+				result[gid] = struct{}{}
+			}
+		}
+	}
+	return result, nil
 }
