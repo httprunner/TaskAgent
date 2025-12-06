@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/httprunner/TaskAgent/pkg/feishu"
+	feishufields "github.com/httprunner/TaskAgent/pkg/feishu/fields"
 	feishusource "github.com/httprunner/TaskAgent/pkg/tasksource/feishu"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
@@ -410,7 +411,7 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 		createdAt = time.Now()
 	}
 	meta.appendAttempt(jobID, singleURLStatusQueued, createdAt)
-	groupID := fmt.Sprintf("%s_%s", bookID, userID)
+	groupID := buildSingleURLGroupID(task.App, bookID, userID)
 	if err := w.markSingleURLTaskQueued(ctx, task, groupID, meta); err != nil {
 		return err
 	}
@@ -757,6 +758,22 @@ func collectSummaryCombinations(tasks []*FeishuTask) []TaskSummaryCombination {
 		result = append(result, combos[key])
 	}
 	return result
+}
+
+func buildSingleURLGroupID(app, bookID, userID string) string {
+	mappedApp := feishufields.MapAppValue(strings.TrimSpace(app))
+	if mappedApp == "" {
+		mappedApp = strings.TrimSpace(app)
+	}
+	trimmedBook := strings.TrimSpace(bookID)
+	if trimmedBook == "" {
+		trimmedBook = "unknown_book"
+	}
+	trimmedUser := strings.TrimSpace(userID)
+	if trimmedUser == "" {
+		trimmedUser = "unknown_user"
+	}
+	return fmt.Sprintf("%s_%s_%s", mappedApp, trimmedBook, trimmedUser)
 }
 
 func firstNonEmpty(values ...string) string {

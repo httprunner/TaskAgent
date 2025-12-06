@@ -216,7 +216,7 @@ func TestSingleURLWorkerMarksCrawlerFailure(t *testing.T) {
 }
 
 func TestSingleURLWorkerSendsGroupSummaryWhenAllSuccess(t *testing.T) {
-	groupID := "B001_U001"
+	groupID := buildSingleURLGroupID("com.smile.gifmaker", "B001", "U001")
 	client := &singleURLTestClient{
 		rows: map[string][]feishusvc.TaskRow{
 			singleURLStatusQueued: {
@@ -291,7 +291,7 @@ func TestSingleURLWorkerSendsGroupSummaryWhenAllSuccess(t *testing.T) {
 }
 
 func TestSingleURLWorkerSkipsGroupSummaryWhenNotAllSuccess(t *testing.T) {
-	groupID := "B010_U010"
+	groupID := buildSingleURLGroupID("com.smile.gifmaker", "B010", "U010")
 	client := &singleURLTestClient{
 		rows: map[string][]feishusvc.TaskRow{
 			singleURLStatusQueued: {
