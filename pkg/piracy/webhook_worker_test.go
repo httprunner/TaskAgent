@@ -58,9 +58,9 @@ func TestEligibleForWebhook(t *testing.T) {
 func TestFilterTasksWithStatus(t *testing.T) {
 	rows := []feishu.TaskRow{
 		{TaskID: 1, Status: ""},
-		{TaskID: 2, Status: feishu.StatusSuccess},
-		{TaskID: 3, Status: " success "},
-		{TaskID: 4, Status: " error "},
+		{TaskID: 2, Status: feishu.StatusSuccess, Webhook: feishu.WebhookPending},
+		{TaskID: 3, Status: " success ", Webhook: feishu.WebhookFailed},
+		{TaskID: 4, Status: " error ", Webhook: feishu.WebhookPending},
 	}
 	filtered := filterTasksWithStatus(rows)
 	if len(filtered) != 2 {
@@ -73,12 +73,23 @@ func TestFilterTasksWithStatus(t *testing.T) {
 
 func TestFilterTasksWithStatusSkipsError(t *testing.T) {
 	rows := []feishu.TaskRow{
-		{TaskID: 10, Status: feishu.StatusError},
-		{TaskID: 11, Status: feishu.StatusSuccess},
+		{TaskID: 10, Status: feishu.StatusError, Webhook: feishu.WebhookPending},
+		{TaskID: 11, Status: feishu.StatusSuccess, Webhook: feishu.WebhookPending},
 	}
 	filtered := filterTasksWithStatus(rows)
 	if len(filtered) != 1 || filtered[0].TaskID != 11 {
 		t.Fatalf("expected only success task to remain, got %+v", filtered)
+	}
+}
+
+func TestFilterTasksWithStatusSkipsRowsWithoutWebhook(t *testing.T) {
+	rows := []feishu.TaskRow{
+		{TaskID: 20, Status: feishu.StatusSuccess, Webhook: ""},
+		{TaskID: 21, Status: feishu.StatusSuccess, Webhook: feishu.WebhookPending},
+	}
+	filtered := filterTasksWithStatus(rows)
+	if len(filtered) != 1 || filtered[0].TaskID != 21 {
+		t.Fatalf("expected only webhook-ready task to remain, got %+v", filtered)
 	}
 }
 

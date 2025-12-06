@@ -512,7 +512,11 @@ func filterTasksWithStatus(tasks []feishu.TaskRow) []feishu.TaskRow {
 	filtered := make([]feishu.TaskRow, 0, len(tasks))
 	for _, t := range tasks {
 		status := strings.ToLower(strings.TrimSpace(t.Status))
+		webhook := strings.TrimSpace(t.Webhook)
 		if status == "" || status == feishu.StatusError {
+			continue
+		}
+		if webhook == "" {
 			continue
 		}
 		filtered = append(filtered, t)
