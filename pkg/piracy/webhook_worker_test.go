@@ -1,9 +1,11 @@
 package piracy
 
 import (
+	"strings"
 	"testing"
 	"time"
 
+	pool "github.com/httprunner/TaskAgent"
 	"github.com/httprunner/TaskAgent/pkg/feishu"
 )
 
@@ -181,4 +183,69 @@ func TestGroupCooldownLifecycle(t *testing.T) {
 	if worker.shouldSkipGroup(groupID) {
 		t.Fatalf("group cooldown should expire automatically")
 	}
+}
+
+func TestPartitionFailureStatesPromotesToError(t *testing.T) {
+	worker := &WebhookWorker{taskFailures: make(map[int64]int)}
+	taskID := int64(12345)
+	groupID := "kwai_group"
+	for attempt := 1; attempt <= maxWebhookFailures; attempt++ {
+		failed, errored := worker.partitionFailureStates([]int64{taskID}, groupID)
+		if attempt < maxWebhookFailures {
+			if len(failed) != 1 || len(errored) != 0 {
+				t.Fatalf("attempt %d expected failed slice, got failed=%v error=%v", attempt, failed, errored)
+			}
+			continue
+		}
+		if len(errored) != 1 || errored[0] != taskID {
+			t.Fatalf("expected task to escalate to error on attempt %d, got %v", attempt, errored)
+		}
+	}
+}
+
+func TestResetFailureCounts(t *testing.T) {
+	worker := &WebhookWorker{taskFailures: map[int64]int{1: 2, 2: 1}}
+	worker.resetFailureCounts([]int64{1})
+	if _, ok := worker.taskFailures[1]; ok {
+		t.Fatalf("task failure counter should be cleared for task 1")
+	}
+	if _, ok := worker.taskFailures[2]; !ok {
+		t.Fatalf("task failure counter for unrelated task should remain")
+	}
+}
+
+func TestBuildFilterInfoAddsDatetimeCondition(t *testing.T) {
+	worker := &WebhookWorker{app: "com.smile.gifmaker"}
+	filter := worker.buildFilterInfo(pool.SceneProfileSearch, feishu.WebhookPending)
+	if filter == nil {
+		t.Fatalf("expected non-nil filter")
+	}
+	datetimeField := strings.TrimSpace(feishu.DefaultTaskFields.Datetime)
+	if datetimeField == "" {
+		t.Fatalf("test setup missing datetime field")
+	}
+	if !conditionExists(filter.Conditions, datetimeField, "Today") {
+		t.Fatalf("expected datetime condition for Today, got %+v", filter.Conditions)
+	}
+}
+
+func conditionExists(conditions []*feishu.Condition, field, value string) bool {
+	for _, cond := range conditions {
+		if cond == nil {
+			continue
+		}
+		name := ""
+		if cond.FieldName != nil {
+			name = strings.TrimSpace(*cond.FieldName)
+		}
+		if name != field {
+			continue
+		}
+		for _, v := range cond.Value {
+			if strings.TrimSpace(v) == value {
+				return true
+			}
+		}
+	}
+	return false
 }

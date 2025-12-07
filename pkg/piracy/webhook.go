@@ -38,6 +38,7 @@ type WebhookOptions struct {
 	UserID     string
 	UserName   string
 	Scene      string
+	GroupID    string
 	WebhookURL string
 
 	// SkipDramaLookup bypasses drama table queries (e.g. for video capture tasks whose Params are JSON payloads).
@@ -118,6 +119,7 @@ func SendSummaryWebhook(ctx context.Context, opts WebhookOptions) (map[string]an
 		log.Debug().
 			Str("params", params).
 			Str("app", strings.TrimSpace(opts.App)).
+			Str("group_id", strings.TrimSpace(opts.GroupID)).
 			Msg("skip drama lookup for summary webhook")
 		drama = fallbackDramaInfoFromParams(params, fields)
 	} else {
@@ -161,6 +163,7 @@ func SendSummaryWebhook(ctx context.Context, opts WebhookOptions) (map[string]an
 		Str("app", strings.TrimSpace(opts.App)).
 		Str("user_id", strings.TrimSpace(opts.UserID)).
 		Str("user_name", strings.TrimSpace(opts.UserName)).
+		Str("group_id", strings.TrimSpace(opts.GroupID)).
 		Int("record_count", len(flattenedRecords)).
 		Strs("item_ids", itemIDs).
 		Msg("sending summary webhook")

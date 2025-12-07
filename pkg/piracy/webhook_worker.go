@@ -35,7 +35,10 @@ type WebhookWorker struct {
 	batchLimit    int
 	groupCooldown map[string]time.Time
 	cooldownDur   time.Duration
+	taskFailures  map[int64]int
 }
+
+const maxWebhookFailures = 3
 
 type webhookOutcome struct {
 	successIDs []int64
@@ -122,6 +125,7 @@ func NewWebhookWorker(cfg WebhookWorkerConfig) (*WebhookWorker, error) {
 		batchLimit:    batch,
 		groupCooldown: make(map[string]time.Time),
 		cooldownDur:   cooldown,
+		taskFailures:  make(map[int64]int),
 	}, nil
 }
 
@@ -320,11 +324,11 @@ func (w *WebhookWorker) handleGroupRow(ctx context.Context, table *feishu.TaskTa
 			Str("app", app).
 			Int("task_count", len(dayTasks)).
 			Msg("group webhook delivery failed")
-		outcome.failedIDs = append(outcome.failedIDs, taskIDs...)
-		if updErr := w.updateWebhookState(ctx, table, taskIDs, feishu.WebhookFailed); updErr != nil {
-			return outcome, updErr
+		failureOutcome, updErr := w.applyWebhookFailure(ctx, table, taskIDs, groupID)
+		if updErr != nil {
+			return failureOutcome, updErr
 		}
-		return outcome, nil
+		return failureOutcome, nil
 	}
 
 	log.Info().
@@ -334,6 +338,7 @@ func (w *WebhookWorker) handleGroupRow(ctx context.Context, table *feishu.TaskTa
 		Int("task_count", len(dayTasks)).
 		Msg("group webhook delivered")
 	outcome.successIDs = append(outcome.successIDs, taskIDs...)
+	w.resetFailureCounts(taskIDs)
 	w.clearGroupCooldown(groupID)
 	return outcome, w.updateWebhookState(ctx, table, taskIDs, feishu.WebhookSuccess)
 }
@@ -368,9 +373,15 @@ func filterTasksByDate(tasks []feishu.TaskRow, referenceDay time.Time) []feishu.
 	return filtered
 }
 
+func filterRowsByDay(tasks []feishu.TaskRow, day time.Time) []feishu.TaskRow {
+	normalized := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, day.Location())
+	return filterTasksByDate(tasks, normalized)
+}
+
 func (w *WebhookWorker) handleVideoCaptureRow(ctx context.Context, table *feishu.TaskTable, row feishu.TaskRow, app string) (webhookOutcome, error) {
 	var outcome webhookOutcome
 	itemID := strings.TrimSpace(row.ItemID)
+	groupID := strings.TrimSpace(row.GroupID)
 	if itemID == "" {
 		log.Warn().
 			Str("scene", row.Scene).
@@ -386,6 +397,7 @@ func (w *WebhookWorker) handleVideoCaptureRow(ctx context.Context, table *feishu
 		UserID:          strings.TrimSpace(row.UserID),
 		UserName:        strings.TrimSpace(row.UserName),
 		Scene:           row.Scene,
+		GroupID:         groupID,
 		ItemID:          itemID,
 		SkipDramaLookup: true,
 		RecordLimit:     1,
@@ -398,15 +410,18 @@ func (w *WebhookWorker) handleVideoCaptureRow(ctx context.Context, table *feishu
 		log.Info().
 			Str("scene", row.Scene).
 			Int64("task_id", row.TaskID).
+			Str("group_id", groupID).
 			Str("app", app).
 			Str("item_id", itemID).
 			Msg("webhook delivered")
 		outcome.successIDs = append(outcome.successIDs, row.TaskID)
+		w.resetFailureCounts([]int64{row.TaskID})
 		return outcome, w.updateWebhookState(ctx, table, []int64{row.TaskID}, feishu.WebhookSuccess)
 	case stdErrors.Is(sendErr, ErrNoCaptureRecords):
 		log.Warn().
 			Str("scene", row.Scene).
 			Int64("task_id", row.TaskID).
+			Str("group_id", groupID).
 			Str("app", app).
 			Str("item_id", itemID).
 			Msg("webhook skipped: no capture records")
@@ -417,21 +432,24 @@ func (w *WebhookWorker) handleVideoCaptureRow(ctx context.Context, table *feishu
 			Str("scene", row.Scene).
 			Str("webhook_url", w.webhookURL).
 			Int64("task_id", row.TaskID).
+			Str("group_id", groupID).
 			Str("item_id", itemID).
 			Msg("video capture webhook delivery failed")
-		outcome.failedIDs = append(outcome.failedIDs, row.TaskID)
-		return outcome, w.updateWebhookState(ctx, table, []int64{row.TaskID}, feishu.WebhookFailed)
+		failureOutcome, updErr := w.applyWebhookFailure(ctx, table, []int64{row.TaskID}, groupID)
+		return failureOutcome, updErr
 	}
 }
 
 func (w *WebhookWorker) handleSingleRow(ctx context.Context, table *feishu.TaskTable, row feishu.TaskRow, app, params string) (webhookOutcome, error) {
 	var outcome webhookOutcome
+	groupID := strings.TrimSpace(row.GroupID)
 	opts := WebhookOptions{
 		App:      app,
 		Params:   params,
 		UserID:   strings.TrimSpace(row.UserID),
 		UserName: strings.TrimSpace(row.UserName),
 		Scene:    row.Scene,
+		GroupID:  groupID,
 		ItemID:   strings.TrimSpace(row.ItemID),
 	}
 
@@ -442,17 +460,20 @@ func (w *WebhookWorker) handleSingleRow(ctx context.Context, table *feishu.TaskT
 			Str("scene", row.Scene).
 			Int64("task_id", row.TaskID).
 			Str("params", params).
+			Str("group_id", groupID).
 			Str("app", app).
 			Str("user_id", strings.TrimSpace(row.UserID)).
 			Str("user_name", strings.TrimSpace(row.UserName)).
 			Msg("webhook delivered")
 		outcome.successIDs = append(outcome.successIDs, row.TaskID)
+		w.resetFailureCounts([]int64{row.TaskID})
 		return outcome, w.updateWebhookState(ctx, table, []int64{row.TaskID}, feishu.WebhookSuccess)
 	case stdErrors.Is(sendErr, ErrNoCaptureRecords):
 		log.Warn().
 			Str("scene", row.Scene).
 			Int64("task_id", row.TaskID).
 			Str("params", params).
+			Str("group_id", groupID).
 			Str("app", app).
 			Str("user_id", strings.TrimSpace(row.UserID)).
 			Msg("webhook skipped: no capture records")
@@ -464,9 +485,10 @@ func (w *WebhookWorker) handleSingleRow(ctx context.Context, table *feishu.TaskT
 			Str("webhook_url", w.webhookURL).
 			Int64("task_id", row.TaskID).
 			Str("params", params).
+			Str("group_id", groupID).
 			Msg("webhook delivery failed")
-		outcome.failedIDs = append(outcome.failedIDs, row.TaskID)
-		return outcome, w.updateWebhookState(ctx, table, []int64{row.TaskID}, feishu.WebhookFailed)
+		failureOutcome, updErr := w.applyWebhookFailure(ctx, table, []int64{row.TaskID}, groupID)
+		return failureOutcome, updErr
 	}
 }
 
@@ -522,6 +544,64 @@ func filterTasksWithStatus(tasks []feishu.TaskRow) []feishu.TaskRow {
 		filtered = append(filtered, t)
 	}
 	return filtered
+}
+
+func (w *WebhookWorker) applyWebhookFailure(ctx context.Context, table *feishu.TaskTable, taskIDs []int64, groupID string) (webhookOutcome, error) {
+	var outcome webhookOutcome
+	failedIDs, errorIDs := w.partitionFailureStates(taskIDs, groupID)
+	var errs []string
+	if len(failedIDs) > 0 {
+		outcome.failedIDs = append(outcome.failedIDs, failedIDs...)
+		if err := w.updateWebhookState(ctx, table, failedIDs, feishu.WebhookFailed); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+	if len(errorIDs) > 0 {
+		outcome.errorIDs = append(outcome.errorIDs, errorIDs...)
+		if err := w.updateWebhookState(ctx, table, errorIDs, feishu.WebhookError); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+	if len(errs) > 0 {
+		return outcome, errors.New(strings.Join(errs, "; "))
+	}
+	return outcome, nil
+}
+
+func (w *WebhookWorker) partitionFailureStates(taskIDs []int64, groupID string) (failedIDs, errorIDs []int64) {
+	if len(taskIDs) == 0 {
+		return nil, nil
+	}
+	if w.taskFailures == nil {
+		w.taskFailures = make(map[int64]int)
+	}
+	for _, id := range taskIDs {
+		if id == 0 {
+			continue
+		}
+		w.taskFailures[id]++
+		if w.taskFailures[id] >= maxWebhookFailures {
+			errorIDs = append(errorIDs, id)
+			log.Warn().
+				Int64("task_id", id).
+				Str("group_id", groupID).
+				Int("failures", w.taskFailures[id]).
+				Msg("webhook delivery upgraded to error after repeated failures")
+			delete(w.taskFailures, id)
+			continue
+		}
+		failedIDs = append(failedIDs, id)
+	}
+	return failedIDs, errorIDs
+}
+
+func (w *WebhookWorker) resetFailureCounts(taskIDs []int64) {
+	if w == nil || len(taskIDs) == 0 || w.taskFailures == nil {
+		return
+	}
+	for _, id := range taskIDs {
+		delete(w.taskFailures, id)
+	}
 }
 
 // allGroupTasksSuccess checks if all tasks in the group have Status = "success".
@@ -612,6 +692,7 @@ func (w *WebhookWorker) sendGroupWebhook(ctx context.Context, app, groupID strin
 		Params:      params,
 		UserID:      userID,
 		UserName:    userName,
+		GroupID:     groupID,
 		RecordLimit: -1,
 	}
 	err := w.sendSummary(ctx, opts)
@@ -731,6 +812,10 @@ func (w *WebhookWorker) fetchWebhookBatch(ctx context.Context, scene, webhookSta
 		return nil, 0, nil
 	}
 	skipped := 0
+	if len(table.Rows) > 0 {
+		today := time.Now()
+		table.Rows = filterRowsByDay(table.Rows, today)
+	}
 	if scene == pool.SceneProfileSearch {
 		filtered := make([]feishu.TaskRow, 0, len(table.Rows))
 		for _, row := range table.Rows {
@@ -762,6 +847,9 @@ func (w *WebhookWorker) buildFilterInfo(scene, webhookState string) *feishu.Filt
 		if strings.TrimSpace(webhookState) != "" {
 			filter.Conditions = append(filter.Conditions, feishu.NewCondition(webhookRef, "is", strings.TrimSpace(webhookState)))
 		}
+	}
+	if datetimeRef := strings.TrimSpace(fields.Datetime); datetimeRef != "" {
+		filter.Conditions = append(filter.Conditions, feishu.NewCondition(datetimeRef, "is", "Today"))
 	}
 	if sceneRef := strings.TrimSpace(fields.Scene); sceneRef != "" && strings.TrimSpace(scene) != "" {
 		filter.Conditions = append(filter.Conditions, feishu.NewCondition(sceneRef, "is", strings.TrimSpace(scene)))
@@ -816,6 +904,7 @@ func (w *WebhookWorker) sendSummary(ctx context.Context, opts WebhookOptions) er
 		Err(sqliteErr).
 		Str("params", strings.TrimSpace(opts.Params)).
 		Str("app", strings.TrimSpace(opts.App)).
+		Str("group_id", strings.TrimSpace(opts.GroupID)).
 		Msg("sqlite summary lookup failed, falling back to feishu")
 
 	feishuErr := w.sendSummaryWithSource(ctx, opts, WebhookSourceFeishu)
