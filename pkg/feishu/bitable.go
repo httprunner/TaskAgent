@@ -341,9 +341,10 @@ type TaskTable struct {
 
 // TaskQueryOptions allows configuring additional filters when fetching task tables.
 type TaskQueryOptions struct {
-	ViewID string
-	Filter *FilterInfo
-	Limit  int
+	ViewID     string
+	Filter     *FilterInfo
+	Limit      int
+	IgnoreView bool
 }
 
 // RecordIDByTaskID returns the record id for a given TaskID if present.
@@ -1333,9 +1334,16 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 		}
 	}
 
-	viewID := strings.TrimSpace(ref.ViewID)
-	if opts != nil && strings.TrimSpace(opts.ViewID) != "" {
-		viewID = strings.TrimSpace(opts.ViewID)
+	useView := true
+	if opts != nil && opts.IgnoreView {
+		useView = false
+	}
+	viewID := ""
+	if useView {
+		viewID = strings.TrimSpace(ref.ViewID)
+		if opts != nil && strings.TrimSpace(opts.ViewID) != "" {
+			viewID = strings.TrimSpace(opts.ViewID)
+		}
 	}
 
 	var filterInfo *FilterInfo

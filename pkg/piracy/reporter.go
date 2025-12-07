@@ -766,8 +766,9 @@ func (pr *Reporter) fetchExistingProfileTaskKeys(ctx context.Context, client *fe
 			limit = 200
 		}
 		opts := &feishu.TaskQueryOptions{
-			Filter: filter,
-			Limit:  limit,
+			Filter:     filter,
+			Limit:      limit,
+			IgnoreView: true,
 		}
 		table, err := client.FetchTaskTableWithOptions(ctx, pr.taskTableURL, nil, opts)
 		if err != nil {
@@ -874,8 +875,9 @@ func (pr *Reporter) fetchExistingGroupIDs(ctx context.Context, client *feishu.Cl
 			limit = 50
 		}
 		opts := &feishu.TaskQueryOptions{
-			Filter: filter,
-			Limit:  limit,
+			Filter:     filter,
+			Limit:      limit,
+			IgnoreView: true,
 		}
 		table, err := client.FetchTaskTableWithOptions(ctx, pr.taskTableURL, nil, opts)
 		if err != nil {
