@@ -113,24 +113,6 @@ func BackfillTasks(ctx context.Context, cfg BackfillConfig) (*BackfillStats, err
 			continue
 		}
 
-		if cfg.SkipExisting && feishuClient != nil {
-			exists, err := groupTasksExist(ctx, feishuClient, cfg.TaskTableURL, task.TaskID)
-			if err != nil {
-				log.Error().Err(err).Int64("task_id", task.TaskID).Msg("piracy backfill: 检查已有子任务失败")
-				errs = append(errs, fmt.Sprintf("task %d check: %v", task.TaskID, err))
-				stats.Failures[task.TaskID] = err.Error()
-				res.Action = "check-error"
-				res.Error = err.Error()
-				continue
-			}
-			if exists {
-				stats.SkippedExisting++
-				log.Info().Int64("task_id", task.TaskID).Msg("piracy backfill: 已存在子任务，跳过写入")
-				res.Action = "skip-existing"
-				continue
-			}
-		}
-
 		appName := task.App
 		if strings.TrimSpace(appName) == "" {
 			appName = cfg.AppOverride
@@ -143,6 +125,26 @@ func BackfillTasks(ctx context.Context, cfg BackfillConfig) (*BackfillStats, err
 			res.Action = "invalid"
 			res.Error = msg
 			continue
+		}
+
+		if cfg.SkipExisting && feishuClient != nil {
+			day := taskDayString(task.Datetime, task.DatetimeRaw)
+			groupIDs := collectTargetGroupIDs(appName, task.BookID, details)
+			existing, err := reporter.fetchExistingGroupIDs(ctx, feishuClient, strings.TrimSpace(appName), groupIDs, day)
+			if err != nil {
+				log.Error().Err(err).Int64("task_id", task.TaskID).Msg("piracy backfill: 检查已有子任务失败")
+				errs = append(errs, fmt.Sprintf("task %d check: %v", task.TaskID, err))
+				stats.Failures[task.TaskID] = err.Error()
+				res.Action = "check-error"
+				res.Error = err.Error()
+				continue
+			}
+			if len(existing) > 0 {
+				stats.SkippedExisting++
+				log.Info().Int64("task_id", task.TaskID).Msg("piracy backfill: 已存在当日子任务，跳过写入")
+				res.Action = "skip-existing"
+				continue
+			}
 		}
 
 		if err := reporter.CreateGroupTasksForPiracyMatches(
