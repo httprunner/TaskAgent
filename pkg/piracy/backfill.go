@@ -18,14 +18,15 @@ import (
 
 // BackfillConfig 描述回放综合页任务的配置。
 type BackfillConfig struct {
-	Date         string // YYYY-MM-DD，可选
-	Sync         bool   // true 时写回子任务
-	SkipExisting bool   // true 时若已有 group 任务则跳过
-	DBPath       string // 覆盖 capture_tasks sqlite 路径
-	TaskTableURL string // 覆盖任务状态表 URL
-	AppOverride  string // 当任务缺少 App 字段时使用
-	Scene        string // 默认综合页搜索
-	Status       string // 默认 success
+	Date         string   // YYYY-MM-DD，可选
+	Sync         bool     // true 时写回子任务
+	SkipExisting bool     // true 时若已有 group 任务则跳过
+	DBPath       string   // 覆盖 capture_tasks sqlite 路径
+	TaskTableURL string   // 覆盖任务状态表 URL
+	AppOverride  string   // 当任务缺少 App 字段时使用
+	BookIDs      []string // 仅处理指定 BookID
+	Scene        string   // 默认综合页搜索
+	Status       string   // 默认 success
 }
 
 // BackfillStats 记录执行统计。
@@ -319,6 +320,7 @@ func loadBackfillTasks(ctx context.Context, cfg BackfillConfig) ([]*backfillTask
 	var (
 		tasks      []*backfillTask
 		targetDate string
+		bookAllow  map[string]struct{}
 	)
 	if trimmed := strings.TrimSpace(cfg.Date); trimmed != "" {
 		parsed, err := time.ParseInLocation("2006-01-02", trimmed, time.Local)
@@ -326,6 +328,14 @@ func loadBackfillTasks(ctx context.Context, cfg BackfillConfig) ([]*backfillTask
 			return nil, fmt.Errorf("--date 解析失败: %w", err)
 		}
 		targetDate = parsed.Format("2006-01-02")
+	}
+	if len(cfg.BookIDs) > 0 {
+		bookAllow = make(map[string]struct{}, len(cfg.BookIDs))
+		for _, id := range cfg.BookIDs {
+			if trimmed := strings.TrimSpace(id); trimmed != "" {
+				bookAllow[trimmed] = struct{}{}
+			}
+		}
 	}
 
 	for rows.Next() {
@@ -349,6 +359,11 @@ func loadBackfillTasks(ctx context.Context, cfg BackfillConfig) ([]*backfillTask
 				continue
 			}
 			if parsedTime.In(time.Local).Format("2006-01-02") != targetDate {
+				continue
+			}
+		}
+		if len(bookAllow) > 0 {
+			if _, ok := bookAllow[strings.TrimSpace(bookID.String)]; !ok {
 				continue
 			}
 		}

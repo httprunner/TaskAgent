@@ -1,6 +1,8 @@
 package main
 
 import (
+	"strings"
+
 	"github.com/httprunner/TaskAgent/pkg/piracy"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
@@ -12,12 +14,14 @@ func newBackfillCmd() *cobra.Command {
 		flagSync         bool
 		flagSkipExisting bool
 		flagDBPath       string
+		flagBookIDs      string
 	)
 
 	cmd := &cobra.Command{
 		Use:   "backfill",
 		Short: "重新扫描综合页成功任务，按需补写个人页/合集/锚点任务",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			bookIDs := parseCSV(flagBookIDs)
 			cfg := piracy.BackfillConfig{
 				Date:         flagDate,
 				Sync:         flagSync,
@@ -25,6 +29,7 @@ func newBackfillCmd() *cobra.Command {
 				DBPath:       flagDBPath,
 				TaskTableURL: rootTaskURL,
 				AppOverride:  rootApp,
+				BookIDs:      bookIDs,
 			}
 			stats, err := piracy.BackfillTasks(cmd.Context(), cfg)
 			if stats != nil {
@@ -44,5 +49,28 @@ func newBackfillCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&flagSync, "sync", false, "开启写表；默认仅检测不写入")
 	cmd.Flags().BoolVar(&flagSkipExisting, "skip-existing", false, "写表前若检测到已有 Group 任务则跳过")
 	cmd.Flags().StringVar(&flagDBPath, "db-path", "", "自定义 capture_tasks sqlite 路径")
+	cmd.Flags().StringVar(&flagBookIDs, "book-id", "", "仅处理指定 BookID（逗号分隔）")
 	return cmd
+}
+
+func parseCSV(raw string) []string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	parts := strings.Split(trimmed, ",")
+	result := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		v := strings.TrimSpace(part)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		result = append(result, v)
+	}
+	return result
 }
