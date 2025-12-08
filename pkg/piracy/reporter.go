@@ -453,7 +453,9 @@ func (pr *Reporter) CreateGroupTasksForPiracyMatches(
 		return err
 	}
 
-	records := buildPiracyGroupTaskRecords(trimmedApp, parentTaskID, parentDatetime, parentDatetimeRaw, parentBookID, details, existingGroupIDs)
+	records := buildPiracyGroupTaskRecords(
+		trimmedApp, parentTaskID, parentDatetime, parentDatetimeRaw,
+		parentBookID, details, existingGroupIDs)
 
 	if len(records) == 0 {
 		log.Info().Msg("No child tasks to create")
@@ -532,6 +534,8 @@ func buildPiracyGroupTaskRecords(
 			continue
 		}
 		usedGroups[groupID] = struct{}{}
+
+		// 1. Create "个人页搜索" task
 		userName := strings.TrimSpace(detail.Match.UserName)
 		records = append(records, feishu.TaskRecordInput{
 			App:         trimmedApp,

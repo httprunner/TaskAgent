@@ -193,9 +193,6 @@ func (a *DevicePoolAgent) Start(ctx context.Context, app string) error {
 	if ctx == nil {
 		return errors.New("context cannot be nil")
 	}
-	if err := a.runCycle(ctx, app); err != nil {
-		log.Error().Err(err).Msg("device pool initial cycle failed")
-	}
 
 	ticker := time.NewTicker(a.cfg.PollInterval)
 	defer ticker.Stop()

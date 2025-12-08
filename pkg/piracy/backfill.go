@@ -145,7 +145,8 @@ func BackfillTasks(ctx context.Context, cfg BackfillConfig) (*BackfillStats, err
 			continue
 		}
 
-		if err := reporter.CreateGroupTasksForPiracyMatches(ctx, appName, task.TaskID, task.Datetime, task.DatetimeRaw, task.BookID, details); err != nil {
+		if err := reporter.CreateGroupTasksForPiracyMatches(
+			ctx, appName, task.TaskID, task.Datetime, task.DatetimeRaw, task.BookID, details); err != nil {
 			log.Error().Err(err).Int64("task_id", task.TaskID).Msg("piracy backfill: 写入子任务失败")
 			stats.Failures[task.TaskID] = err.Error()
 			errs = append(errs, fmt.Sprintf("task %d report: %v", task.TaskID, err))

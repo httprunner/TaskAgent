@@ -163,7 +163,8 @@ func (w *Workflow) handleGeneralSearch(ctx context.Context, pkg string, tasks []
 			continue
 		}
 
-		if err := w.reporter.CreateGroupTasksForPiracyMatches(ctx, pkg, parent.TaskID, parent.Datetime, parent.DatetimeRaw, key.bookID, filtered); err != nil {
+		if err := w.reporter.CreateGroupTasksForPiracyMatches(
+			ctx, pkg, parent.TaskID, parent.Datetime, parent.DatetimeRaw, key.bookID, filtered); err != nil {
 			errs = append(errs, fmt.Sprintf("book %s report failed: %v", key.bookID, err))
 		}
 	}
