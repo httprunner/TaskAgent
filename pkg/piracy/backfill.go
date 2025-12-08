@@ -83,6 +83,7 @@ func BackfillTasks(ctx context.Context, cfg BackfillConfig) (*BackfillStats, err
 			Params: strings.TrimSpace(task.Params),
 			App:    firstNonEmpty(task.App, cfg.AppOverride),
 			Scene:  cfg.Scene,
+			BookID: strings.TrimSpace(task.BookID),
 		}
 		details, err := reporter.DetectMatchesWithDetails(ctx, []string{task.Params}, task.BookID)
 		if err != nil {
@@ -94,6 +95,7 @@ func BackfillTasks(ctx context.Context, cfg BackfillConfig) (*BackfillStats, err
 				App:    base.App,
 				Scene:  base.Scene,
 				Params: base.Params,
+				BookID: base.BookID,
 				Action: "detect-error",
 				Error:  err.Error(),
 			})
@@ -106,12 +108,12 @@ func BackfillTasks(ctx context.Context, cfg BackfillConfig) (*BackfillStats, err
 				App:    base.App,
 				Scene:  base.Scene,
 				Params: base.Params,
+				BookID: base.BookID,
 				Action: "no-match",
 			})
 			continue
 		}
 		stats.Matched++
-		matchesCount := len(details)
 
 		if !cfg.Sync {
 			log.Info().Int64("task_id", task.TaskID).
@@ -126,7 +128,8 @@ func BackfillTasks(ctx context.Context, cfg BackfillConfig) (*BackfillStats, err
 					Params:   base.Params,
 					UserID:   strings.TrimSpace(detail.Match.UserID),
 					UserName: strings.TrimSpace(detail.Match.UserName),
-					Matches:  matchesCount,
+					BookID:   strings.TrimSpace(detail.Match.BookID),
+					Ratio:    detail.Match.Ratio,
 					Action:   "dry-run",
 				})
 			}
@@ -143,13 +146,13 @@ func BackfillTasks(ctx context.Context, cfg BackfillConfig) (*BackfillStats, err
 			stats.Failures[task.TaskID] = msg
 			errs = append(errs, fmt.Sprintf("task %d: %s", task.TaskID, msg))
 			results = append(results, &backfillResult{
-				TaskID:  base.TaskID,
-				App:     base.App,
-				Scene:   base.Scene,
-				Params:  base.Params,
-				Matches: matchesCount,
-				Action:  "invalid",
-				Error:   msg,
+				TaskID: base.TaskID,
+				App:    base.App,
+				Scene:  base.Scene,
+				Params: base.Params,
+				BookID: base.BookID,
+				Action: "invalid",
+				Error:  msg,
 			})
 			continue
 		}
@@ -163,13 +166,13 @@ func BackfillTasks(ctx context.Context, cfg BackfillConfig) (*BackfillStats, err
 				errs = append(errs, fmt.Sprintf("task %d check: %v", task.TaskID, err))
 				stats.Failures[task.TaskID] = err.Error()
 				results = append(results, &backfillResult{
-					TaskID:  base.TaskID,
-					App:     base.App,
-					Scene:   base.Scene,
-					Params:  base.Params,
-					Matches: matchesCount,
-					Action:  "check-error",
-					Error:   err.Error(),
+					TaskID: base.TaskID,
+					App:    base.App,
+					Scene:  base.Scene,
+					Params: base.Params,
+					BookID: base.BookID,
+					Action: "check-error",
+					Error:  err.Error(),
 				})
 				continue
 			}
@@ -185,7 +188,8 @@ func BackfillTasks(ctx context.Context, cfg BackfillConfig) (*BackfillStats, err
 						Params:   base.Params,
 						UserID:   strings.TrimSpace(detail.Match.UserID),
 						UserName: strings.TrimSpace(detail.Match.UserName),
-						Matches:  matchesCount,
+						BookID:   strings.TrimSpace(detail.Match.BookID),
+						Ratio:    detail.Match.Ratio,
 						Action:   "skip-existing",
 					})
 				}
@@ -207,7 +211,8 @@ func BackfillTasks(ctx context.Context, cfg BackfillConfig) (*BackfillStats, err
 					Params:   base.Params,
 					UserID:   strings.TrimSpace(detail.Match.UserID),
 					UserName: strings.TrimSpace(detail.Match.UserName),
-					Matches:  matchesCount,
+					BookID:   strings.TrimSpace(detail.Match.BookID),
+					Ratio:    detail.Match.Ratio,
 					Action:   "write-error",
 					Error:    err.Error(),
 				})
@@ -228,7 +233,8 @@ func BackfillTasks(ctx context.Context, cfg BackfillConfig) (*BackfillStats, err
 				Params:   base.Params,
 				UserID:   strings.TrimSpace(detail.Match.UserID),
 				UserName: strings.TrimSpace(detail.Match.UserName),
-				Matches:  matchesCount,
+				BookID:   strings.TrimSpace(detail.Match.BookID),
+				Ratio:    detail.Match.Ratio,
 				Action:   "created",
 			})
 		}
@@ -261,7 +267,8 @@ type backfillTask struct {
 
 type backfillResult struct {
 	TaskID   int64
-	Matches  int
+	BookID   string
+	Ratio    float64
 	Action   string
 	Error    string
 	App      string
@@ -431,9 +438,10 @@ func buildBackfillTable(results []*backfillResult) string {
 		{Header: "App", Value: func(r *backfillResult) string { return r.App }},
 		{Header: "Scene", Value: func(r *backfillResult) string { return r.Scene }},
 		{Header: "Params", Value: func(r *backfillResult) string { return r.Params }},
+		{Header: "BookID", Value: func(r *backfillResult) string { return r.BookID }},
 		{Header: "UserID", Value: func(r *backfillResult) string { return r.UserID }},
 		{Header: "UserName", Value: func(r *backfillResult) string { return r.UserName }},
-		{Header: "Matches", Value: func(r *backfillResult) string { return fmt.Sprintf("%d", r.Matches) }},
+		{Header: "Ratio", Value: func(r *backfillResult) string { return fmt.Sprintf("%.2f%%", r.Ratio*100) }},
 		{Header: "Action", Value: func(r *backfillResult) string { return r.Action }},
 		{Header: "Error", Value: func(r *backfillResult) string { return r.Error }},
 	}
