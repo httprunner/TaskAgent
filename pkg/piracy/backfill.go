@@ -84,7 +84,7 @@ func BackfillTasks(ctx context.Context, cfg BackfillConfig) (*BackfillStats, err
 			App:    firstNonEmpty(task.App, cfg.AppOverride),
 			Scene:  cfg.Scene,
 		}
-		details, err := reporter.DetectMatchesWithDetails(ctx, []string{task.Params})
+		details, err := reporter.DetectMatchesWithDetails(ctx, []string{task.Params}, task.BookID)
 		if err != nil {
 			log.Error().Err(err).Int64("task_id", task.TaskID).Msg("piracy backfill: 盗版检测失败")
 			errs = append(errs, fmt.Sprintf("task %d detect: %v", task.TaskID, err))

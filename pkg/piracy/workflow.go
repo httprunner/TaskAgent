@@ -150,7 +150,7 @@ func (w *Workflow) handleGeneralSearch(ctx context.Context, pkg string, tasks []
 			Int("params", len(params)).
 			Msg("piracy workflow running detection for completed bucket")
 
-		details, err := w.reporter.DetectMatchesWithDetails(ctx, params)
+		details, err := w.reporter.DetectMatchesWithDetails(ctx, params, key.bookID)
 		if err != nil {
 			errs = append(errs, fmt.Sprintf("book %s detection failed: %v", key.bookID, err))
 			continue

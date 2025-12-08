@@ -54,7 +54,7 @@ func ReplayTask(ctx context.Context, cfg ReplayConfig) error {
 		Str("params", row.Params).
 		Msg("replaying piracy workflow from sqlite")
 
-	details, err := reporter.DetectMatchesWithDetails(ctx, []string{row.Params})
+	details, err := reporter.DetectMatchesWithDetails(ctx, []string{row.Params}, row.BookID)
 	if err != nil {
 		return fmt.Errorf("detect matches failed: %w", err)
 	}

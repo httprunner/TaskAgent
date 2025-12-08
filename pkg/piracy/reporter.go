@@ -134,24 +134,27 @@ func (pr *Reporter) DetectMatchesForParams(ctx context.Context, paramsList []str
 
 // DetectWithFilters returns detection report for the provided params with additional table filters.
 func (pr *Reporter) DetectWithFilters(ctx context.Context, paramsList []string, resultExtraFilter, dramaExtraFilter *feishu.FilterInfo) (*Report, error) {
-	return pr.detectWithFiltersInternal(ctx, paramsList, resultExtraFilter, dramaExtraFilter, nil)
+	return pr.detectWithFiltersInternal(ctx, paramsList, nil, resultExtraFilter, dramaExtraFilter, nil)
 }
 
 // DetectWithFiltersThreshold runs piracy detection with an explicit threshold override.
 func (pr *Reporter) DetectWithFiltersThreshold(ctx context.Context, paramsList []string, resultExtraFilter, dramaExtraFilter *feishu.FilterInfo, threshold float64) (*Report, error) {
 	override := &Config{}
 	override.Threshold = threshold
-	return pr.detectWithFiltersInternal(ctx, paramsList, resultExtraFilter, dramaExtraFilter, override)
+	return pr.detectWithFiltersInternal(ctx, paramsList, nil, resultExtraFilter, dramaExtraFilter, override)
 }
 
-func (pr *Reporter) detectWithFiltersInternal(ctx context.Context, paramsList []string, resultExtraFilter, dramaExtraFilter *feishu.FilterInfo, cfgOverride *Config) (*Report, error) {
+func (pr *Reporter) detectWithFiltersInternal(ctx context.Context, paramsList []string, bookIDs []string, resultExtraFilter, dramaExtraFilter *feishu.FilterInfo, cfgOverride *Config) (*Report, error) {
 	if len(paramsList) == 0 {
 		return &Report{Threshold: pr.threshold}, nil
 	}
 
 	paramsFilter := BuildParamsFilter(paramsList, pr.config.ParamsField)
-	// use BookID to match drama rows
-	dramaFilter := BuildBookIDFilter(paramsList, pr.config.DramaIDField)
+	var dramaFilter *feishu.FilterInfo
+	if len(bookIDs) > 0 {
+		// use BookID to match drama rows
+		dramaFilter = BuildBookIDFilter(bookIDs, pr.config.DramaIDField)
+	}
 
 	finalResultFilter := CombineFiltersAND(resultExtraFilter, paramsFilter)
 	finalDramaFilter := CombineFiltersAND(dramaExtraFilter, dramaFilter)
@@ -273,8 +276,9 @@ func (pr *Reporter) ReportMatches(ctx context.Context, app string, matches []Mat
 }
 
 // DetectMatchesWithDetails detects piracy matches and fetches video details for each match.
+// Optional bookIDs constrains drama lookup; when provided, matching uses BookID only.
 // This method returns MatchDetail which includes the Match and associated VideoDetails (ItemID, Tags, AnchorPoint).
-func (pr *Reporter) DetectMatchesWithDetails(ctx context.Context, paramsList []string) ([]MatchDetail, error) {
+func (pr *Reporter) DetectMatchesWithDetails(ctx context.Context, paramsList []string, bookIDs ...string) ([]MatchDetail, error) {
 	if !pr.IsConfigured() {
 		log.Warn().Msg("Reporter not configured, skipping piracy detection")
 		return nil, nil
@@ -286,7 +290,7 @@ func (pr *Reporter) DetectMatchesWithDetails(ctx context.Context, paramsList []s
 	}
 
 	// Step 1: Detect piracy matches
-	report, err := pr.DetectWithFilters(ctx, paramsList, nil, nil)
+	report, err := pr.detectWithFiltersInternal(ctx, paramsList, bookIDs, nil, nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("piracy detection failed: %w", err)
 	}
