@@ -866,13 +866,7 @@ func (pr *Reporter) fetchExistingGroupIDs(ctx context.Context, client *feishu.Cl
 	if len(unique) == 0 {
 		return result, nil
 	}
-	const groupChunkSize = 50
-	for start := 0; start < len(unique); start += groupChunkSize {
-		end := start + groupChunkSize
-		if end > len(unique) {
-			end = len(unique)
-		}
-		chunk := unique[start:end]
+	for _, gid := range unique {
 		filter := feishu.NewFilterInfo("and")
 		if field := strings.TrimSpace(fields.App); field != "" && trimmedApp != "" {
 			filter.Conditions = append(filter.Conditions, feishu.NewCondition(field, "is", trimmedApp))
@@ -880,23 +874,12 @@ func (pr *Reporter) fetchExistingGroupIDs(ctx context.Context, client *feishu.Cl
 		if datetimeField != "" && trimmedDay != "" {
 			filter.Conditions = append(filter.Conditions, feishu.NewCondition(datetimeField, "is", trimmedDay))
 		}
-		groupChild := feishu.NewChildrenFilter("or")
-		for _, gid := range chunk {
-			if cond := feishu.NewCondition(groupField, "is", gid); cond != nil {
-				groupChild.Conditions = append(groupChild.Conditions, cond)
-			}
-		}
-		if len(groupChild.Conditions) == 0 {
-			continue
-		}
-		filter.Children = append(filter.Children, groupChild)
-		limit := len(chunk) * 10
-		if limit < 50 {
-			limit = 50
+		if cond := feishu.NewCondition(groupField, "is", gid); cond != nil {
+			filter.Conditions = append(filter.Conditions, cond)
 		}
 		opts := &feishu.TaskQueryOptions{
 			Filter:     filter,
-			Limit:      limit,
+			Limit:      1,
 			IgnoreView: true,
 		}
 		table, err := client.FetchTaskTableWithOptions(ctx, pr.taskTableURL, nil, opts)
@@ -907,8 +890,8 @@ func (pr *Reporter) fetchExistingGroupIDs(ctx context.Context, client *feishu.Cl
 			continue
 		}
 		for _, row := range table.Rows {
-			if gid := strings.TrimSpace(row.GroupID); gid != "" {
-				result[gid] = struct{}{}
+			if existing := strings.TrimSpace(row.GroupID); existing != "" {
+				result[existing] = struct{}{}
 			}
 		}
 	}
