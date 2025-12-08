@@ -11,6 +11,7 @@ import (
 	"github.com/httprunner/TaskAgent/internal/config"
 	"github.com/httprunner/TaskAgent/pkg/feishu"
 	feishufields "github.com/httprunner/TaskAgent/pkg/feishu/fields"
+	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 )
 
@@ -854,7 +855,8 @@ func uniqueStrings(values []string) []string {
 	return result
 }
 
-func (pr *Reporter) fetchExistingGroupIDs(ctx context.Context, client *feishu.Client, app string, groupIDs []string, day string) (map[string]struct{}, error) {
+func (pr *Reporter) fetchExistingGroupIDs(
+	ctx context.Context, client *feishu.Client, app string, groupIDs []string, day string) (map[string]struct{}, error) {
 	result := make(map[string]struct{})
 	if client == nil || len(groupIDs) == 0 {
 		return result, nil
@@ -877,7 +879,10 @@ func (pr *Reporter) fetchExistingGroupIDs(ctx context.Context, client *feishu.Cl
 			filter.Conditions = append(filter.Conditions, feishu.NewCondition(field, "is", trimmedApp))
 		}
 		if datetimeField != "" && trimmedDay != "" {
-			filter.Conditions = append(filter.Conditions, feishu.NewCondition(datetimeField, "is", trimmedDay))
+			if dayTime, err := time.ParseInLocation("2006-01-02", trimmedDay, time.Local); err == nil {
+				tsMs := strconv.FormatInt(dayTime.UnixMilli(), 10)
+				filter.Conditions = append(filter.Conditions, feishu.NewCondition(datetimeField, "is", "ExactDate", tsMs))
+			}
 		}
 		if cond := feishu.NewCondition(groupField, "is", gid); cond != nil {
 			filter.Conditions = append(filter.Conditions, cond)
@@ -889,7 +894,7 @@ func (pr *Reporter) fetchExistingGroupIDs(ctx context.Context, client *feishu.Cl
 		}
 		table, err := client.FetchTaskTableWithOptions(ctx, pr.taskTableURL, nil, opts)
 		if err != nil {
-			return nil, fmt.Errorf("fetch existing group tasks failed: %w", err)
+			return nil, errors.Wrapf(err, "fetch existing group tasks failed, opts: %+v", opts)
 		}
 		if table == nil {
 			continue

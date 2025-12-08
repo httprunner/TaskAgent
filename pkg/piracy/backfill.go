@@ -159,7 +159,10 @@ func BackfillTasks(ctx context.Context, cfg BackfillConfig) (*BackfillStats, err
 		}
 
 		if cfg.SkipExisting && feishuClient != nil {
-			day := taskDayString(task.Datetime, task.DatetimeRaw)
+			day := strings.TrimSpace(cfg.Date)
+			if day == "" {
+				day = taskDayString(task.Datetime, task.DatetimeRaw)
+			}
 			groupIDs := collectTargetGroupIDs(appName, task.BookID, details)
 			existing, err := reporter.fetchExistingGroupIDs(ctx, feishuClient, strings.TrimSpace(appName), groupIDs, day)
 			if err != nil {
