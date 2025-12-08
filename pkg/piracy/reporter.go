@@ -447,8 +447,9 @@ func (pr *Reporter) CreateGroupTasksForPiracyMatches(
 	}
 
 	trimmedApp := strings.TrimSpace(app)
+	day := taskDayString(parentDatetime, parentDatetimeRaw)
 	targetGroupIDs := collectTargetGroupIDs(trimmedApp, parentBookID, details)
-	existingGroupIDs, err := pr.fetchExistingGroupIDs(ctx, client, trimmedApp, targetGroupIDs)
+	existingGroupIDs, err := pr.fetchExistingGroupIDs(ctx, client, trimmedApp, targetGroupIDs, day)
 	if err != nil {
 		return err
 	}
@@ -608,6 +609,16 @@ func inheritDatetimeRaw(parentRaw string, parent *time.Time) string {
 		return ""
 	}
 	return strconv.FormatInt(parent.UTC().UnixMilli(), 10)
+}
+
+func taskDayString(parent *time.Time, raw string) string {
+	if parent != nil {
+		return parent.In(time.Local).Format("2006-01-02")
+	}
+	if parsed, _ := parseBackfillDatetime(raw); parsed != nil {
+		return parsed.In(time.Local).Format("2006-01-02")
+	}
+	return ""
 }
 
 func buildGroupID(appName, bookID, userID string) string {
@@ -838,7 +849,7 @@ func uniqueStrings(values []string) []string {
 	return result
 }
 
-func (pr *Reporter) fetchExistingGroupIDs(ctx context.Context, client *feishu.Client, app string, groupIDs []string) (map[string]struct{}, error) {
+func (pr *Reporter) fetchExistingGroupIDs(ctx context.Context, client *feishu.Client, app string, groupIDs []string, day string) (map[string]struct{}, error) {
 	result := make(map[string]struct{})
 	if client == nil || len(groupIDs) == 0 {
 		return result, nil
@@ -849,6 +860,8 @@ func (pr *Reporter) fetchExistingGroupIDs(ctx context.Context, client *feishu.Cl
 		return nil, fmt.Errorf("task table group id field is not configured")
 	}
 	trimmedApp := strings.TrimSpace(app)
+	trimmedDay := strings.TrimSpace(day)
+	datetimeField := strings.TrimSpace(fields.Datetime)
 	unique := uniqueStrings(groupIDs)
 	if len(unique) == 0 {
 		return result, nil
@@ -863,6 +876,9 @@ func (pr *Reporter) fetchExistingGroupIDs(ctx context.Context, client *feishu.Cl
 		filter := feishu.NewFilterInfo("and")
 		if field := strings.TrimSpace(fields.App); field != "" && trimmedApp != "" {
 			filter.Conditions = append(filter.Conditions, feishu.NewCondition(field, "is", trimmedApp))
+		}
+		if datetimeField != "" && trimmedDay != "" {
+			filter.Conditions = append(filter.Conditions, feishu.NewCondition(datetimeField, "is", trimmedDay))
 		}
 		groupChild := feishu.NewChildrenFilter("or")
 		for _, gid := range chunk {
