@@ -10,7 +10,7 @@ func newDramaTasksCmd() *cobra.Command {
 	var (
 		flagDate      string
 		flagDramaURL  string
-		flagAliasSep  string
+		flagAliasSeps []string
 		flagBatchSize int
 	)
 
@@ -19,13 +19,13 @@ func newDramaTasksCmd() *cobra.Command {
 		Short: "Create 综合页搜索 tasks from drama catalog aliases",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := piracy.DramaTaskConfig{
-				Date:           flagDate,
-				App:            firstNonEmpty(rootApp, ""),
-				Scene:          "",
-				TaskTableURL:   firstNonEmpty(rootTaskURL, ""),
-				DramaTableURL:  flagDramaURL,
-				AliasSeparator: flagAliasSep,
-				BatchSize:      flagBatchSize,
+				Date:            flagDate,
+				App:             firstNonEmpty(rootApp, ""),
+				Scene:           "",
+				TaskTableURL:    firstNonEmpty(rootTaskURL, ""),
+				DramaTableURL:   flagDramaURL,
+				AliasSeparators: flagAliasSeps,
+				BatchSize:       flagBatchSize,
 			}
 			if cfg.App == "" {
 				cfg.App = "com.smile.gifmaker"
@@ -54,7 +54,7 @@ func newDramaTasksCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&flagDate, "date", "", "采集日期 (YYYY-MM-DD)")
 	cmd.Flags().StringVar(&flagDramaURL, "drama-url", "", "覆盖 $DRAMA_BITABLE_URL 的剧单表 URL")
-	cmd.Flags().StringVar(&flagAliasSep, "alias-sep", "|", "搜索别名分隔符（默认 | ）")
+	cmd.Flags().StringSliceVar(&flagAliasSeps, "alias-sep", []string{"|", "｜"}, "搜索别名分隔符列表（默认支持 | 和 ｜）")
 	cmd.Flags().IntVar(&flagBatchSize, "batch-size", 500, "写入任务时的批大小 (<=500)")
 	_ = cmd.MarkFlagRequired("date")
 

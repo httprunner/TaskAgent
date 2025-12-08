@@ -21,6 +21,8 @@ const (
 	dateLayoutYYYYMMDD        = "2006-01-02"
 )
 
+var defaultAliasSeparators = []string{defaultAliasSeparator, "｜"}
+
 type dramaTaskFeishuClient interface {
 	FetchBitableRows(ctx context.Context, rawURL string, opts *feishu.TaskQueryOptions) ([]feishu.BitableRow, error)
 	CreateTaskRecords(ctx context.Context, rawURL string, records []feishu.TaskRecordInput, override *feishu.TaskFields) ([]string, error)
@@ -28,14 +30,14 @@ type dramaTaskFeishuClient interface {
 
 // DramaTaskConfig controls how drama catalog rows are converted into tasks.
 type DramaTaskConfig struct {
-	Date           string
-	App            string
-	Scene          string
-	TaskTableURL   string
-	DramaTableURL  string
-	Status         string
-	AliasSeparator string
-	BatchSize      int
+	Date            string
+	App             string
+	Scene           string
+	TaskTableURL    string
+	DramaTableURL   string
+	Status          string
+	AliasSeparators []string
+	BatchSize       int
 
 	client dramaTaskFeishuClient
 }
@@ -99,10 +101,7 @@ func CreateDramaSearchTasks(ctx context.Context, cfg DramaTaskConfig) (*DramaTas
 		return result, fmt.Errorf("fetch drama table rows failed: %w", err)
 	}
 
-	aliasSep := cfg.AliasSeparator
-	if aliasSep == "" {
-		aliasSep = defaultAliasSeparator
-	}
+	aliasSeps := normalizeAliasSeparators(cfg.AliasSeparators)
 	batchSize := cfg.BatchSize
 	if batchSize <= 0 {
 		batchSize = defaultDramaTaskBatchSize
@@ -137,7 +136,7 @@ func CreateDramaSearchTasks(ctx context.Context, cfg DramaTaskConfig) (*DramaTas
 		if strings.TrimSpace(fields.SearchAlias) != "" {
 			aliasField = getString(row.Fields, fields.SearchAlias)
 		}
-		params := buildAliasParams(name, aliasField, aliasSep)
+		params := buildAliasParams(name, aliasField, aliasSeps)
 		if len(params) == 0 {
 			continue
 		}
@@ -214,9 +213,7 @@ func (cfg *DramaTaskConfig) applyDefaults() {
 	if cfg.DramaTableURL == "" {
 		cfg.DramaTableURL = strings.TrimSpace(os.Getenv("DRAMA_BITABLE_URL"))
 	}
-	if cfg.AliasSeparator == "" {
-		cfg.AliasSeparator = defaultAliasSeparator
-	}
+	cfg.AliasSeparators = normalizeAliasSeparators(cfg.AliasSeparators)
 	if cfg.BatchSize <= 0 {
 		cfg.BatchSize = defaultDramaTaskBatchSize
 	}
@@ -281,7 +278,27 @@ func timestampToTime(ts int64) time.Time {
 	}
 }
 
-func buildAliasParams(primary, aliasRaw, sep string) []string {
+func normalizeAliasSeparators(seps []string) []string {
+	seen := make(map[string]struct{})
+	cleaned := make([]string, 0, len(seps))
+	for _, sep := range seps {
+		trimmed := strings.TrimSpace(sep)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		cleaned = append(cleaned, trimmed)
+	}
+	if len(cleaned) == 0 {
+		return append([]string(nil), defaultAliasSeparators...)
+	}
+	return cleaned
+}
+
+func buildAliasParams(primary, aliasRaw string, seps []string) []string {
 	add := func(order *[]string, seen map[string]struct{}, value string) {
 		trimmed := strings.TrimSpace(value)
 		if trimmed == "" {
@@ -301,7 +318,18 @@ func buildAliasParams(primary, aliasRaw, sep string) []string {
 	if strings.TrimSpace(aliasRaw) == "" {
 		return params
 	}
-	parts := strings.Split(aliasRaw, sep)
+	normalizedSeps := normalizeAliasSeparators(seps)
+	primarySep := normalizedSeps[0]
+	replacePairs := make([]string, 0, 2*len(normalizedSeps))
+	for _, sep := range normalizedSeps[1:] {
+		replacePairs = append(replacePairs, sep, primarySep)
+	}
+	processed := aliasRaw
+	if len(replacePairs) > 0 {
+		replacer := strings.NewReplacer(replacePairs...)
+		processed = replacer.Replace(aliasRaw)
+	}
+	parts := strings.Split(processed, primarySep)
 	for _, part := range parts {
 		add(&params, seen, part)
 	}

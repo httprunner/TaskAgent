@@ -120,7 +120,7 @@ func TestCreateDramaSearchTasksErrors(t *testing.T) {
 }
 
 func TestBuildAliasParamsDeduplicates(t *testing.T) {
-	got := buildAliasParams("Primary", "AliasA|AliasB|AliasA|Primary", "|")
+	got := buildAliasParams("Primary", "AliasA|AliasB|AliasA|Primary", []string{"|"})
 	want := []string{"Primary", "AliasA", "AliasB"}
 	if len(got) != len(want) {
 		t.Fatalf("unexpected param count: got %d want %d", len(got), len(want))
@@ -129,5 +129,47 @@ func TestBuildAliasParamsDeduplicates(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("unexpected param order: got %v want %v", got, want)
 		}
+	}
+}
+
+func TestBuildAliasParamsSupportsFullWidthSeparator(t *testing.T) {
+	tests := []struct {
+		name     string
+		aliasRaw string
+		seps     []string
+		want     []string
+	}{
+		{
+			name:     "defaultSeparators",
+			aliasRaw: "AliasA｜AliasB|AliasC",
+			seps:     nil,
+			want:     []string{"Primary", "AliasA", "AliasB", "AliasC"},
+		},
+		{
+			name:     "explicitList",
+			aliasRaw: "AliasA|AliasB｜AliasC",
+			seps:     []string{"|", "｜"},
+			want:     []string{"Primary", "AliasA", "AliasB", "AliasC"},
+		},
+		{
+			name:     "mixedList",
+			aliasRaw: "AliasA/AliasB｜AliasC",
+			seps:     []string{"|", "｜", "/"},
+			want:     []string{"Primary", "AliasA", "AliasB", "AliasC"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildAliasParams("Primary", tc.aliasRaw, tc.seps)
+			if len(got) != len(tc.want) {
+				t.Fatalf("unexpected param count: got %d want %d", len(got), len(tc.want))
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Fatalf("unexpected param order: got %v want %v", got, tc.want)
+				}
+			}
+		})
 	}
 }
