@@ -83,9 +83,9 @@ func Detect(ctx context.Context, opts Options) (*Report, error) {
 		log.Warn().Msg("no book ids resolved from task table; results will be skipped")
 	}
 
-	// Fetch original drama rows (source B) - for duration information
+	// Fetch original drama rows (source B) - for duration information (match by BookID only)
 	dramaCfg := opts.DramaTable
-	dramaCfg.Filter = CombineFiltersAND(dramaCfg.Filter, BuildParamsFilter(bookIDs, opts.Config.DramaIDField))
+	dramaCfg.Filter = CombineFiltersAND(dramaCfg.Filter, BuildBookIDFilter(bookIDs, opts.Config.DramaIDField))
 	dramaRows, err := fetchRows(ctx, client, dramaCfg)
 	if err != nil {
 		return nil, err

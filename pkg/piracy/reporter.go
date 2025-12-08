@@ -150,7 +150,8 @@ func (pr *Reporter) detectWithFiltersInternal(ctx context.Context, paramsList []
 	}
 
 	paramsFilter := BuildParamsFilter(paramsList, pr.config.ParamsField)
-	dramaFilter := BuildParamsFilter(paramsList, pr.config.DramaNameField)
+	// use BookID to match drama rows
+	dramaFilter := BuildBookIDFilter(paramsList, pr.config.DramaIDField)
 
 	finalResultFilter := CombineFiltersAND(resultExtraFilter, paramsFilter)
 	finalDramaFilter := CombineFiltersAND(dramaExtraFilter, dramaFilter)

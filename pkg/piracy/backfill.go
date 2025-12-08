@@ -77,39 +77,59 @@ func BackfillTasks(ctx context.Context, cfg BackfillConfig) (*BackfillStats, err
 	results := make([]*backfillResult, 0, len(tasks))
 	var errs []string
 	for _, task := range tasks {
-		res := &backfillResult{TaskID: task.TaskID}
-		res.Params = strings.TrimSpace(task.Params)
-		res.App = firstNonEmpty(task.App, cfg.AppOverride)
-		res.Scene = cfg.Scene
-		results = append(results, res)
 		stats.Scanned++
+		base := backfillResult{
+			TaskID: task.TaskID,
+			Params: strings.TrimSpace(task.Params),
+			App:    firstNonEmpty(task.App, cfg.AppOverride),
+			Scene:  cfg.Scene,
+		}
 		details, err := reporter.DetectMatchesWithDetails(ctx, []string{task.Params})
 		if err != nil {
 			log.Error().Err(err).Int64("task_id", task.TaskID).Msg("piracy backfill: 盗版检测失败")
 			errs = append(errs, fmt.Sprintf("task %d detect: %v", task.TaskID, err))
 			stats.Failures[task.TaskID] = err.Error()
-			res.Action = "detect-error"
-			res.Error = err.Error()
+			results = append(results, &backfillResult{
+				TaskID: base.TaskID,
+				App:    base.App,
+				Scene:  base.Scene,
+				Params: base.Params,
+				Action: "detect-error",
+				Error:  err.Error(),
+			})
 			continue
 		}
 		if len(details) == 0 {
 			log.Info().Int64("task_id", task.TaskID).Msg("piracy backfill: 未检测到疑似账号")
-			res.Action = "no-match"
+			results = append(results, &backfillResult{
+				TaskID: base.TaskID,
+				App:    base.App,
+				Scene:  base.Scene,
+				Params: base.Params,
+				Action: "no-match",
+			})
 			continue
 		}
 		stats.Matched++
-		res.Matches = len(details)
-		if top := firstMatchDetail(details); top != nil {
-			res.UserID = strings.TrimSpace(top.Match.UserID)
-			res.UserName = strings.TrimSpace(top.Match.UserName)
-			res.ItemID = firstVideoItemID(top.Videos)
-		}
+		matchesCount := len(details)
 
 		if !cfg.Sync {
 			log.Info().Int64("task_id", task.TaskID).
 				Int("match_groups", len(details)).
 				Msg("piracy backfill: 仅检测不写表")
-			res.Action = "dry-run"
+			for _, d := range details {
+				detail := d
+				results = append(results, &backfillResult{
+					TaskID:   base.TaskID,
+					App:      base.App,
+					Scene:    base.Scene,
+					Params:   base.Params,
+					UserID:   strings.TrimSpace(detail.Match.UserID),
+					UserName: strings.TrimSpace(detail.Match.UserName),
+					Matches:  matchesCount,
+					Action:   "dry-run",
+				})
+			}
 			continue
 		}
 
@@ -122,8 +142,15 @@ func BackfillTasks(ctx context.Context, cfg BackfillConfig) (*BackfillStats, err
 			log.Error().Int64("task_id", task.TaskID).Msg("piracy backfill: " + msg)
 			stats.Failures[task.TaskID] = msg
 			errs = append(errs, fmt.Sprintf("task %d: %s", task.TaskID, msg))
-			res.Action = "invalid"
-			res.Error = msg
+			results = append(results, &backfillResult{
+				TaskID:  base.TaskID,
+				App:     base.App,
+				Scene:   base.Scene,
+				Params:  base.Params,
+				Matches: matchesCount,
+				Action:  "invalid",
+				Error:   msg,
+			})
 			continue
 		}
 
@@ -135,14 +162,33 @@ func BackfillTasks(ctx context.Context, cfg BackfillConfig) (*BackfillStats, err
 				log.Error().Err(err).Int64("task_id", task.TaskID).Msg("piracy backfill: 检查已有子任务失败")
 				errs = append(errs, fmt.Sprintf("task %d check: %v", task.TaskID, err))
 				stats.Failures[task.TaskID] = err.Error()
-				res.Action = "check-error"
-				res.Error = err.Error()
+				results = append(results, &backfillResult{
+					TaskID:  base.TaskID,
+					App:     base.App,
+					Scene:   base.Scene,
+					Params:  base.Params,
+					Matches: matchesCount,
+					Action:  "check-error",
+					Error:   err.Error(),
+				})
 				continue
 			}
 			if len(existing) > 0 {
 				stats.SkippedExisting++
 				log.Info().Int64("task_id", task.TaskID).Msg("piracy backfill: 已存在当日子任务，跳过写入")
-				res.Action = "skip-existing"
+				for _, d := range details {
+					detail := d
+					results = append(results, &backfillResult{
+						TaskID:   base.TaskID,
+						App:      base.App,
+						Scene:    base.Scene,
+						Params:   base.Params,
+						UserID:   strings.TrimSpace(detail.Match.UserID),
+						UserName: strings.TrimSpace(detail.Match.UserName),
+						Matches:  matchesCount,
+						Action:   "skip-existing",
+					})
+				}
 				continue
 			}
 		}
@@ -152,8 +198,20 @@ func BackfillTasks(ctx context.Context, cfg BackfillConfig) (*BackfillStats, err
 			log.Error().Err(err).Int64("task_id", task.TaskID).Msg("piracy backfill: 写入子任务失败")
 			stats.Failures[task.TaskID] = err.Error()
 			errs = append(errs, fmt.Sprintf("task %d report: %v", task.TaskID, err))
-			res.Action = "write-error"
-			res.Error = err.Error()
+			for _, d := range details {
+				detail := d
+				results = append(results, &backfillResult{
+					TaskID:   base.TaskID,
+					App:      base.App,
+					Scene:    base.Scene,
+					Params:   base.Params,
+					UserID:   strings.TrimSpace(detail.Match.UserID),
+					UserName: strings.TrimSpace(detail.Match.UserName),
+					Matches:  matchesCount,
+					Action:   "write-error",
+					Error:    err.Error(),
+				})
+			}
 			continue
 		}
 
@@ -161,7 +219,19 @@ func BackfillTasks(ctx context.Context, cfg BackfillConfig) (*BackfillStats, err
 		log.Info().Int64("task_id", task.TaskID).
 			Int("match_groups", len(details)).
 			Msg("piracy backfill: 子任务写入完成")
-		res.Action = "created"
+		for _, d := range details {
+			detail := d
+			results = append(results, &backfillResult{
+				TaskID:   base.TaskID,
+				App:      base.App,
+				Scene:    base.Scene,
+				Params:   base.Params,
+				UserID:   strings.TrimSpace(detail.Match.UserID),
+				UserName: strings.TrimSpace(detail.Match.UserName),
+				Matches:  matchesCount,
+				Action:   "created",
+			})
+		}
 	}
 
 	printBackfillResults(results)
@@ -199,7 +269,6 @@ type backfillResult struct {
 	Params   string
 	UserID   string
 	UserName string
-	ItemID   string
 }
 
 func applyBackfillDefaults(cfg *BackfillConfig) {
@@ -364,7 +433,6 @@ func buildBackfillTable(results []*backfillResult) string {
 		{Header: "Params", Value: func(r *backfillResult) string { return r.Params }},
 		{Header: "UserID", Value: func(r *backfillResult) string { return r.UserID }},
 		{Header: "UserName", Value: func(r *backfillResult) string { return r.UserName }},
-		{Header: "ItemID", Value: func(r *backfillResult) string { return r.ItemID }},
 		{Header: "Matches", Value: func(r *backfillResult) string { return fmt.Sprintf("%d", r.Matches) }},
 		{Header: "Action", Value: func(r *backfillResult) string { return r.Action }},
 		{Header: "Error", Value: func(r *backfillResult) string { return r.Error }},
@@ -462,27 +530,6 @@ func displayWidth(s string) int {
 		width += 2
 	}
 	return width
-}
-
-func firstMatchDetail(details []MatchDetail) *MatchDetail {
-	for i := range details {
-		if details[i].Match.Params != "" {
-			return &details[i]
-		}
-	}
-	if len(details) > 0 {
-		return &details[0]
-	}
-	return nil
-}
-
-func firstVideoItemID(videos []VideoDetail) string {
-	for _, v := range videos {
-		if trimmed := strings.TrimSpace(v.ItemID); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }
 
 func firstNonEmpty(values ...string) string {

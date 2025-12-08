@@ -73,6 +73,32 @@ func BuildParamsFilter(values []string, fieldName string) *feishu.FilterInfo {
 	return filter
 }
 
+// BuildBookIDFilter generates an OR group over BookID field values.
+func BuildBookIDFilter(values []string, fieldName string) *feishu.FilterInfo {
+	field := strings.TrimSpace(fieldName)
+	if field == "" {
+		field = "BookID"
+	}
+	conds := make([]*feishu.Condition, 0, len(values))
+	for _, raw := range values {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			continue
+		}
+		if cond := feishu.NewCondition(field, "is", trimmed); cond != nil {
+			conds = append(conds, cond)
+		}
+	}
+	if len(conds) == 0 {
+		return nil
+	}
+	child := feishu.NewChildrenFilter("or")
+	child.Conditions = conds
+	filter := feishu.NewFilterInfo("and")
+	filter.Children = append(filter.Children, child)
+	return filter
+}
+
 // EqFilter creates a filter that matches a single "field is value" condition.
 func EqFilter(fieldName, value string) *feishu.FilterInfo {
 	if strings.TrimSpace(fieldName) == "" || strings.TrimSpace(value) == "" {
