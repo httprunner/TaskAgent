@@ -82,10 +82,15 @@ func (w *Workflow) Process(ctx context.Context, pkg string, tasks []*pool.Feishu
 		if task == nil {
 			continue
 		}
-		if w.isProfileSearchTask(task) {
-			personal = append(personal, task)
-		} else {
+		scene := strings.TrimSpace(task.Scene)
+		switch scene {
+		case pool.SceneGeneralSearch:
 			general = append(general, task)
+		case pool.SceneProfileSearch:
+			personal = append(personal, task)
+		default:
+			// Skip child tasks like "合集视频采集" and "视频锚点采集"
+			// to prevent them from re-triggering piracy detection.
 		}
 	}
 

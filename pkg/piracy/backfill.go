@@ -411,26 +411,6 @@ func parseBackfillDatetime(raw string) (*time.Time, string) {
 	return nil, trimmed
 }
 
-func groupTasksExist(ctx context.Context, client *feishu.Client, tableURL string, parentTaskID int64) (bool, error) {
-	if client == nil || strings.TrimSpace(tableURL) == "" || parentTaskID == 0 {
-		return false, fmt.Errorf("检测子任务参数缺失")
-	}
-	groupField := strings.TrimSpace(feishu.DefaultTaskFields.GroupID)
-	if groupField == "" {
-		return false, fmt.Errorf("任务表未配置 GroupID 字段")
-	}
-	filter := feishu.NewFilterInfo("and")
-	groupID := fmt.Sprintf("%d_1", parentTaskID)
-	filter.Conditions = append(filter.Conditions, feishu.NewCondition(groupField, "is", groupID))
-
-	opts := &feishu.TaskQueryOptions{Filter: filter, Limit: 1}
-	table, err := client.FetchTaskTableWithOptions(ctx, tableURL, nil, opts)
-	if err != nil {
-		return false, err
-	}
-	return len(table.Rows) > 0, nil
-}
-
 func printBackfillResults(results []*backfillResult) {
 	if len(results) == 0 {
 		return
