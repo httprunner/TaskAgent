@@ -1,8 +1,8 @@
 # Repository Guidelines
 
 ## 1. Project orientation
-- **Core packages**: `internal/agent/{device,scheduler,lifecycle,tasks}` host the scheduling core (re-exported via `pool.DevicePoolAgent`), `pkg/tasksource/feishu` provides the default Feishu-backed task source, `pkg/feishu` wraps every Bitable call, `pkg/storage` handles SQLite + Feishu reporting, `pkg/piracy` + its subpackages (`types`, `webhook`, `reporter`) implement detection workflows, and `providers/adb` is the default device provider. Read [`README.md`](README.md) for the architecture diagram and [`docs/`](docs) for deep dives.
-- **Configuration**: keep Feishu credentials plus table URLs in `.env` (`FEISHU_APP_ID`, `FEISHU_APP_SECRET`, `TASK_BITABLE_URL`, etc.). `internal/config` wraps env lookups on top of `internal/envload.Ensure`, so prefer it over raw `os.Getenv` in new code.
+- **Core packages**: root package `taskagent`（模块路径 `github.com/httprunner/TaskAgent`）hosts the scheduling core（设备池 + Feishu 任务源 + 生命周期回调，作为外部集成的唯一入口），`internal/feishusdk` wraps every Bitable call（通过 `taskagent` 根包对外暴露常量和高层 API），`internal/storage` handles SQLite + Feishu reporting（对外通过 `taskagent` 暴露结果存储 API），`pkg/webhook` implements summary webhook flows, and `providers/adb` is the default device provider. Read [`README.md`](README.md) for the architecture diagram and [`docs/`](docs) for deep dives.
+- **Configuration**: keep Feishu credentials plus table URLs in `.env` (`FEISHU_APP_ID`, `FEISHU_APP_SECRET`, `TASK_BITABLE_URL`, etc.). Use `internal/env` helpers for reading configuration (they auto-call `env.Ensure`), and avoid raw `os.Getenv` in new code.
 
 ## 2. Daily development workflow
 1. Install deps via `go mod download` and keep Go at 1.24+.
@@ -12,20 +12,20 @@
    go vet ./...
    go test ./...
    ```
-   Add `FEISHU_LIVE_TEST=1 go test ./feishu -run Live` only when you have access to production Bitables.
-3. When touching schedulers/piracy workflows, update the relevant doc under `docs/` and cross-link from the README if behavior changes.
+   Add `FEISHU_LIVE_TEST=1 go test ./internal/feishusdk -run Live` only when you have access to production Bitables.
+3. When touching schedulers/webhook workflows, update the relevant doc under `docs/` and cross-link from the README if behavior changes.
 
 ## 3. Coding conventions
 - Gofmt everything, keep packages short + lowercase, and colocate mocks in `*_test.go` files.
-- Use interfaces (`pool.DeviceProvider`, `tasks.Source`, `pool.JobRunner`) instead of wiring business logic directly into the pool.
+- Use interfaces (`taskagent.DeviceProvider`, `taskagent.TaskManager`, `taskagent.JobRunner`) instead of wiring business logic directly into the pool.
 - Honor `TaskLifecycle`: invoke `OnTaskStarted` before the device work begins and call `OnTaskResult` exactly once per task so Feishu status + recorder state stay consistent.
 - Prefer structured logging via `zerolog` and propagate `context.Context` through every exported API so callers can cancel long-running Feishu calls.
 
 ## 4. Feature-specific guidance
 - **New JobRunners**: surface clear errors, respect context cancellation, and avoid blocking the scheduler (long runs should stream progress via the lifecycle hooks).
 - **New device providers**: add them under `providers/<name>`; never modify ADB-specific code to keep platform concerns isolated. Provide unit fakes if the provider shells out.
-- **Storage & recorder**: if you change schema fields, update `pkg/feishu/constants.go`, `docs/result-storage.md`, and the env matrix. Async reporter tuning knobs (`RESULT_REPORT_*`, `FEISHU_REPORT_RPS`) must be documented whenever defaults shift.
-- **Piracy/webhook flows**: keep group-task semantics aligned with [`docs/piracy-group-tasks.md`](docs/piracy-group-tasks.md) and ensure webhook-worker changes include table-driven tests in `pkg/piracy`.
+- **Storage & recorder**: if you change schema fields, update `internal/feishusdk/constants.go`, `docs/result-storage.md`, and the env matrix. Async reporter tuning knobs (`RESULT_REPORT_*`, `FEISHU_REPORT_RPS`) must be documented whenever defaults shift.
+- **Group/webhook flows**: keep group-task semantics aligned with the expectations in `pkg/webhook`（尤其是 GroupID / Status / Webhook 字段约定），并确保 webhook-worker 变更时在 `pkg/webhook` 中补充表驱动测试。
 
 ## 5. Testing expectations
 - Table-driven tests for every scheduling or webhook branch (`Test<Component><Scenario>` naming).
@@ -45,7 +45,7 @@
 
 ## 8. Documentation touchpoints
 - README → high-level overview, `docs/ENVIRONMENT.md` → authoritative env reference, `docs/` → subsystem deep dives. Keep them in sync with code changes.
-- If you add a new env var or CLI flag, update `docs/ENVIRONMENT.md` plus the relevant doc (storage, webhook, piracy, recorder, etc.).
+- If you add a new env var or CLI flag, update `docs/ENVIRONMENT.md` plus the relevant doc (storage, webhook, recorder, etc.).
 
 ## 9. Language & submission rules
 - Use Chinese for day-to-day discussions in code reviews, PR descriptions, and issues unless stakeholders request otherwise.

@@ -1,34 +1,34 @@
 # Environment Variables
 
-`internal/envload.Ensure` automatically loads the first `.env` file it finds above the current working directory, so place all secrets/configuration in that file rather than exporting them manually. The tables below enumerate every environment variable TaskAgent reads via `os.Getenv`/`LookupEnv` along with defaults and consumers.
+`internal/env.Ensure` automatically loads the first `.env` file it finds above the current working directory, so place all secrets/configuration in that file rather than exporting them manually. The tables below enumerate every environment variable TaskAgent reads via `os.Getenv`/`LookupEnv` along with defaults and consumers.
 
 ## Feishu credentials & API endpoints
 
 | Variable | Required | Default | Used by | Notes |
 | --- | --- | --- | --- | --- |
-| `FEISHU_APP_ID` | Yes | – | `pkg/feishu`, `cmd/piracy`, `pkg/storage`, `pkg/devrecorder` | App ID for the Feishu Open Platform. |
+| `FEISHU_APP_ID` | Yes | – | `internal/feishusdk`, `cmd`, `internal/storage`, `internal/devrecorder` | App ID for the Feishu Open Platform. |
 | `FEISHU_APP_SECRET` | Yes | – | Same as above | App secret paired with the App ID. |
-| `FEISHU_TENANT_KEY` | Optional | empty | `pkg/feishu` | Needed only for tenant-scoped self-built apps. |
-| `FEISHU_BASE_URL` | Optional | `https://open.feishu.cn` | `pkg/feishu`, `examples/create_task_with_http` | Override for sandbox domains. |
-| `FEISHU_REPORT_RPS` | Optional | `1` | `pkg/feishu/storage.go` | Global limiter for result-table writes (floating-point, rows/sec). |
+| `FEISHU_TENANT_KEY` | Optional | empty | `internal/feishusdk` | Needed only for tenant-scoped self-built apps. |
+| `FEISHU_BASE_URL` | Optional | `https://open.feishu.cn` | `internal/feishusdk`, `examples/create_task_with_http` | Override for sandbox domains. |
+| `FEISHU_REPORT_RPS` | Optional | `1` | `internal/feishusdk/storage.go` | Global limiter for result-table writes (floating-point, rows/sec). |
 
 ## Table URLs (Feishu Bitables)
 
 | Variable | Required | Default | Used by | Description |
 | --- | --- | --- | --- | --- |
-| `TASK_BITABLE_URL` | Yes for Feishu-backed schedulers | – | `pool.Config`, `pkg/piracy`, `cmd/piracy` | Source of pending tasks (个人页搜索 / 综合页搜索等). |
-| `RESULT_BITABLE_URL` | Yes when uploading captures to Feishu | – | `pkg/storage`, `pkg/piracy`, `cmd/piracy` | Result table receiving capture rows + webhook summaries. |
-| `DRAMA_BITABLE_URL` | Required when fetching drama metadata from Feishu | – | `pkg/piracy`, `cmd/piracy` | Drama catalog table for ratio/metadata lookups. |
-| `DEVICE_BITABLE_URL` | Optional | empty | `pkg/devrecorder` | Device heartbeat table; leave blank to disable recorder writes. |
-| `DEVICE_TASK_BITABLE_URL` | Optional | empty | `pkg/devrecorder`, `pkg/storage` | Device-dispatch history table (one row per job). |
+| `TASK_BITABLE_URL` | Yes for Feishu-backed schedulers | – | `taskagent.Config`, `cmd` | Source of pending tasks (个人页搜索 / 综合页搜索等). |
+| `RESULT_BITABLE_URL` | Yes when uploading captures to Feishu | – | `internal/storage`, `cmd` | Result table receiving capture rows + webhook summaries. |
+| `DRAMA_BITABLE_URL` | Required when fetching drama metadata from Feishu | – | `pkg/webhook`, `cmd` | Drama catalog table for ratio/metadata lookups. |
+| `DEVICE_BITABLE_URL` | Optional | empty | `internal/devrecorder` | Device heartbeat table; leave blank to disable recorder writes. |
+| `DEVICE_TASK_BITABLE_URL` | Optional | empty | `internal/devrecorder`, `internal/storage` | Device-dispatch history table (one row per job). |
 
 ## 资源下载服务
 
 | Variable | Required | Default | Used by | Description |
 | --- | --- | --- | --- | --- |
-| `CRAWLER_SERVICE_BASE_URL` | Optional | `http://localhost:8080` | `pool/single_url_worker` | Base URL for `content_web_crawler` 的 `/download/tasks` API，SingleURLWorker 始终携带 `sync_to_hive=true` 并轮询 Redis 持久化的 job 状态。 |
-| `COOKIE_BITABLE_URL` | Optional | – | `pool/single_url_worker` | Feishu bitable storing account cookies（字段：`Cookies`、`Platform`、`Status`），worker 会轮询 `Status=valid` 的 cookies 并随机/轮流使用。 |
-| `ENABLE_COOKIE_VALIDATION` | Optional | unset (`false`) | `pool/single_url_worker` | 设为 `true` 时才会对快手 cookies 发送首页请求校验登录态；默认跳过校验直接使用表里记录。 |
+| `CRAWLER_SERVICE_BASE_URL` | Optional | `http://localhost:8080` | `pkg/singleurl`, `cmd singleurl` | Base URL for `content_web_crawler` 的 `/download/tasks` API，SingleURLWorker 始终携带 `sync_to_hive=true` 并轮询 Redis 持久化的 job 状态。 |
+| `COOKIE_BITABLE_URL` | Optional | – | `pkg/singleurl` | Feishu bitable storing account cookies（字段：`Cookies`、`Platform`、`Status`），worker 会轮询 `Status=valid` 的 cookies 并随机/轮流使用。 |
+| `ENABLE_COOKIE_VALIDATION` | Optional | unset (`false`) | `pkg/singleurl` | 设为 `true` 时才会对快手 cookies 发送首页请求校验登录态；默认跳过校验直接使用表里记录。 |
 
 Cookies 表字段要求：
 - `Cookies`：账号 Web 登录态字符串；
@@ -37,7 +37,7 @@ Cookies 表字段要求：
 
 ## Field overrides
 
-TaskAgent exposes per-table override knobs so you can align with custom schemas without recompiling. Leave them unset to keep the defaults defined in `pkg/feishu/constants.go`.
+TaskAgent exposes per-table override knobs so you can align with custom schemas without recompiling. Leave them unset to keep the defaults defined in `internal/feishusdk/constants.go`.
 
 ### Task table (`TASK_FIELD_*`)
 | Variable | Default | Purpose |
@@ -129,15 +129,15 @@ Device-task history tables follow the same pattern; set `DEVICE_TASK_FIELD_*` (e
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `THRESHOLD` | `0.5` | Suspicion threshold for piracy detector (0–1). Used by `cmd/piracy detect/auto`. |
+| `THRESHOLD` | `0.5` | detection threshold（0–1）. |
 
 ## Testing & tooling toggles
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `FEISHU_LIVE_TEST` | unset (`0`) | When set to `1`, enables live Feishu integration tests (`go test ./feishu -run Live`, `pkg/piracy` live tests). Keep unset in CI to avoid touching production tables. |
+| `FEISHU_LIVE_TEST` | unset (`0`) | When set to `1`, enables live Feishu integration tests（`go test ./internal/feishusdk -run Live`、`go test ./pkg/webhook -run Live` 等）。Keep unset in CI to avoid touching production tables. |
 
 ## Tips
 - Keep every secret/URL in `.env`; never commit the file. `godotenv` + `envload` ensure both CLI tools and Go binaries see the same configuration.
-- Field override vars accept any non-empty string; call `feishu.RefreshFieldMappings()` in tests when you mutate env vars mid-run.
+- Field override vars accept any non-empty string; call `feishusdk.RefreshFieldMappings()` in tests when you mutate env vars mid-run.
 - When enabling result uploads, configure both `RESULT_BITABLE_URL` and `RESULT_STORAGE_ENABLE_FEISHU=1`; tune the reporter via `RESULT_REPORT_*` + `FEISHU_REPORT_RPS` to stay under Feishu’s rate limits.

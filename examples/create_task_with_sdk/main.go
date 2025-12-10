@@ -10,8 +10,7 @@ import (
 	"strings"
 	"time"
 
-	pool "github.com/httprunner/TaskAgent"
-	feishu "github.com/httprunner/TaskAgent/pkg/feishu"
+	taskagent "github.com/httprunner/TaskAgent"
 )
 
 func main() {
@@ -31,7 +30,7 @@ func main() {
 		log.Fatal("missing -eid value")
 	}
 
-	client, err := feishu.NewClientFromEnv()
+	client, err := taskagent.NewFeishuClientFromEnv()
 	if err != nil {
 		log.Fatalf("init Feishu client: %v", err)
 	}
@@ -49,9 +48,9 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
-	record := feishu.TaskRecordInput{
+	record := taskagent.TaskRecordInput{
 		App:     "com.smile.gifmaker",
-		Scene:   pool.SceneVideoScreenCapture,
+		Scene:   taskagent.SceneVideoScreenCapture,
 		ItemID:  itemID,
 		Params:  string(payload),
 		Status:  "pending",

@@ -1,6 +1,6 @@
 # Search Result Storage
 
-This document describes the steady-state design for storing capture results, uploading them to Feishu, and feeding piracy detection.
+This document describes the steady-state design for storing capture results, uploading them to Feishu, and feeding downstream detection/reporting workflows.
 
 ## Architecture
 
@@ -31,7 +31,7 @@ Tracking runner → storage.Manager → [JSONL sink]* + SQLite sink
 - Always enables SQLite sink. Feishu uploads are now offloaded to the reporter and no longer run inline with the capture loop.
 - `ResultRecord.DBRecord` carries the rich set of columns so SQLite rows match Feishu payloads one-to-one.
 
-## Async Feishu Reporter (`pkg/storage/sqlite_reporter.go`)
+## Async Feishu Reporter (`internal/storage/sqlite_reporter.go`)
 
 - Starts automatically when Feishu reporting is enabled (`RESULT_STORAGE_ENABLE_FEISHU=1` or `tracking.WithBitableStorage(true)`).
 - Scans `reported IN (0, -1)` on each tick and uploads up to `RESULT_REPORT_BATCH` rows (default 30).
@@ -60,11 +60,11 @@ UPDATE capture_results SET reported = 0 WHERE reported = -1;
 ```
 调整 `RESULT_REPORT_BATCH`/`RESULT_REPORT_POLL_INTERVAL` 前，先观察 `report_error` 中的错误码，频控异常通常为 `99991400`。
 
-## Piracy Detection
+## Webhook Helpers & Downstream Workflows
 
-- `pkg/piracy/sqlite_source.go` fetches result rows for the requested Params directly from SQLite.
-- `Reporter.detectWithFiltersInternal` prefers the SQLite source; if no rows are available it falls back to `feishu.FetchBitableRows`.
-- Drama metadata still comes from Feishu (and is mirrored by `storage.MirrorDramaRowsIfNeeded`), so ratio calculations remain consistent.
+- 下游业务（例如 fox search agent）可以基于本仓库提供的结果表 / SQLite 数据实现各类检测与统计工作流。
+- `pkg/webhook/source_sqlite.go` / `source_feishu.go` 复用相同的数据源构造 summary webhook payload。
+- 剧单元数据仍然来自 Feishu（并可通过 `storage.MirrorDramaRowsIfNeeded` 镜像到本地 SQLite），以保证比值统计和 webhook payload 一致性。
 
 ## Configuration Summary
 
@@ -76,7 +76,7 @@ UPDATE capture_results SET reported = 0 WHERE reported = -1;
 | `RESULT_REPORT_POLL_INTERVAL` | `5s` | Reporter scan interval (`time.ParseDuration` format). |
 | `RESULT_REPORT_BATCH` | `30` | Maximum rows processed per tick. |
 | `RESULT_REPORT_HTTP_TIMEOUT` | `30s` | Per-row Feishu upload timeout. |
-| `FEISHU_REPORT_RPS` | `1` | Global Feishu limiter inside `pkg/feishu/storage.go`. |
+| `FEISHU_REPORT_RPS` | `1` | Global Feishu limiter inside `internal/feishusdk/storage.go`. |
 
 ## Operational Tips
 
@@ -84,4 +84,4 @@ UPDATE capture_results SET reported = 0 WHERE reported = -1;
 2. 扩容时同步调整 `RESULT_REPORT_*` 与 `FEISHU_REPORT_RPS`，否则 reporter 可能在速率限制器前排队。
 3. 当 result 表暂不可用时，可仅依赖 SQLite（不要设置 `RESULT_STORAGE_ENABLE_FEISHU`），稍后再批量重投。
 4. Piracy 工作流（Group/Webhook）优先查询 SQLite，因此保持 `TRACKING_STORAGE_DB_PATH` 持久化，必要时用 `sqlite3` 导出 CSV 供调试。
-5. Tests: `go test ./pkg/storage` 验证 pipeline，`go test ./pkg/piracy` 覆盖检测/读取逻辑（Feishu Live 测试需要 `FEISHU_LIVE_TEST=1`）。
+5. Tests: `go test ./internal/storage` 验证 pipeline；Webhooks 相关逻辑由 `go test ./pkg/webhook` 覆盖（Feishu Live 测试需要 `FEISHU_LIVE_TEST=1`）。

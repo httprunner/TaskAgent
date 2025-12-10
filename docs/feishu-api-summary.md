@@ -3,15 +3,15 @@
 本文档总结了 TaskAgent 中使用的飞书多维表格（Bitable）API，并解释了对应的代码入口、鉴权方式、分页策略以及频控/错误处理技巧。
 
 ## 鉴权与基础配置
-- TaskAgent 通过 `pkg/feishu.Client` 统一封装鉴权，所有请求都会使用 `.env` 中的 `FEISHU_APP_ID` / `FEISHU_APP_SECRET` 获取 tenant access token，可选 `FEISHU_TENANT_KEY` / `FEISHU_BASE_URL`。
-- `internal/envload.Ensure` 会自动加载 `.env`，无需在命令行手动 `export`。
-- 结果表写入存在全局限速器（`FEISHU_REPORT_RPS`，默认 1 RPS），位于 `pkg/feishu/storage.go`，用来避免频繁触发 99991400 频控错误。
+- TaskAgent 通过 `internal/feishusdk.Client` 统一封装鉴权，所有请求都会使用 `.env` 中的 `FEISHU_APP_ID` / `FEISHU_APP_SECRET` 获取 tenant access token，可选 `FEISHU_TENANT_KEY` / `FEISHU_BASE_URL`。
+- `internal/env.Ensure` 会自动加载 `.env`，无需在命令行手动 `export`。
+- 结果表写入存在全局限速器（`FEISHU_REPORT_RPS`，默认 1 RPS），位于 `internal/feishusdk/storage.go`，用来避免频繁触发 99991400 频控错误。
 
 ## 分页、筛选与重试策略
 - `Client.listBitableRecords` 封装了分页逻辑：传入 `page_size`（TaskAgent 默认 200）、`page_token`，并在 `has_more` 为真时继续抓取。
-- 查询接口统一支持 filter/sort/view 参数，`pkg/feishu/filters.go` 提供了构建过滤表达式的 helpers。
+- 查询接口统一支持 filter/sort/view 参数，`internal/feishusdk/filters.go` 提供了构建过滤表达式的 helpers。
 - 所有请求都会带上 `context.Context`，设备离线或 CLI 退出时可立即取消未完成的 HTTP 调用。
-- 网络抖动或 5xx 会由上层调用（如 `pkg/storage/sqlite_reporter.go`）捕获并记录，失败记录设置 `reported=-1`，下次重试。
+- 网络抖动或 5xx 会由上层调用（如 `internal/storage/sqlite_reporter.go`）捕获并记录，失败记录设置 `reported=-1`，下次重试。
 
 ## 1. 新增记录 (Create Record)
 
@@ -106,17 +106,17 @@
 ## 错误处理与排查
 - **鉴权失败**：确认 `.env` 中 `FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_TENANT_KEY` 是否正确，或刷新凭证。
 - **频控 (99991400)**：调低 `FEISHU_REPORT_RPS`、增加 `RESULT_REPORT_POLL_INTERVAL`、或减小 `RESULT_REPORT_BATCH`。
-- **字段不匹配**：检查 `TASK_FIELD_* / RESULT_FIELD_* / DEVICE_FIELD_*` 是否覆盖为自定义列名，并调用 `feishu.RefreshFieldMappings()` 重新加载。
+- **字段不匹配**：检查 `TASK_FIELD_* / RESULT_FIELD_* / DEVICE_FIELD_*` 是否覆盖为自定义列名，并调用 `feishusdk.RefreshFieldMappings()` 重新加载。
 - **分页缺失**：确保消费 `has_more` 和 `page_token`，TaskAgent 的 helper 已自动完成，但自定义脚本需自行循环。
 
 ## 代码入口速查表
 
 | 功能 | 文件 | 函数 |
 | --- | --- | --- |
-| 获取 Client | `pkg/feishu/client.go` | `NewClientFromEnv` |
-| 任务表 CRUD | `pkg/feishu/bitable.go` | `CreateTaskRecord(s)`, `UpdateTaskStatus`, `FetchTaskTable` |
-| 结果表写入 | `pkg/feishu/storage.go` | `NewResultStorage`, `CreateResultRecord`, RPS 限速器 |
-| 设备表写入 | `pkg/feishu/device_info.go` | `UpsertDevice`, `DeviceFieldsFromEnv` |
-| 设备任务表 | `pkg/devrecorder/feishu_recorder.go` / `pkg/storage/storage.go` | 通过 `DEVICE_TASK_BITABLE_URL` 记录派发历史 |
+| 获取 Client | `internal/feishusdk/client.go` | `NewClientFromEnv` |
+| 任务表 CRUD | `internal/feishusdk/bitable.go` | `CreateTaskRecord(s)`, `UpdateTaskStatus`, `FetchTaskTable`, `FetchBitableRows` |
+| 结果表写入 | `internal/feishusdk/storage.go` | `NewResultStorage`, `CreateResultRecord`, RPS 限速器 |
+| 设备表写入 | `internal/feishusdk/device_info.go` | `UpsertDevice`, `DeviceFieldsFromEnv` |
+| 设备任务表 | `internal/devrecorder/recorder.go` / `internal/storage/storage.go` | 通过 `DEVICE_TASK_BITABLE_URL` 记录派发历史 |
 
 更多字段/环境变量说明见 [`ENVIRONMENT.md`](ENVIRONMENT.md)。

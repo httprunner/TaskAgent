@@ -1,6 +1,6 @@
-# Local environment configuration
 .env
-
 *.csv
-
+.DS_Store
+*.out
 output/
+*.html

@@ -3,7 +3,7 @@
 CLI 入口：
 
 ```bash
-go run ./cmd/piracy webhook-worker \
+go run ./cmd webhook-worker \
   --task-url "$TASK_BITABLE_URL" \
   --result-url "$RESULT_BITABLE_URL" \
   --app kwai \
@@ -39,7 +39,7 @@ sendSummary / sendGroupWebhook → Feishu 群机器人 or 内部 API
 Update Webhook 字段 (success/failed/error)
 ```
 
-Webhook worker (`pkg/piracy/webhook_worker.go`) 以固定优先级轮询任务表，只处理以下场景（按顺序填满 `BatchLimit` 即停）：
+Webhook worker（实现见 `pkg/webhook/webhook_worker.go`，CLI 入口见 `cmd/webhook.go`）以固定优先级轮询任务表，只处理以下场景（按顺序填满 `BatchLimit` 即停）：
 
 1. `视频录屏采集` + Webhook=pending
 2. `视频录屏采集` + Webhook=failed
@@ -116,4 +116,4 @@ WebhookWorker.processOnce()
 
 ## 日志与测试
 - 日志统一带上 `app`、`scene`、`group_id`、`task_id`、`webhook_status`，方便在 `zerolog` 输出中追踪一整个链路。
-- 相关测试：`go test ./pkg/piracy/...`（覆盖 webhook worker、Feishu/SQLite 数据源等）。修改 worker 逻辑时务必扩充这些测试用例。
+- 相关测试：`go test ./pkg/webhook/...`（覆盖 webhook worker、Feishu/SQLite 数据源等）。修改 worker 逻辑时务必扩充这些测试用例。
