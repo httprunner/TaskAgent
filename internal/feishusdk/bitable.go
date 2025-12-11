@@ -44,6 +44,7 @@ type TaskFields struct {
 	Status           string
 	Webhook          string
 	Extra            string
+	Logs             string
 	GroupID          string
 	DeviceSerial     string
 	DispatchedDevice string
@@ -77,6 +78,7 @@ type TaskRow struct {
 	UserID           string
 	UserName         string
 	Extra            string
+	Logs             string
 	GroupID          string
 	Datetime         *time.Time
 	DatetimeRaw      string
@@ -119,6 +121,7 @@ type TaskRecordInput struct {
 	UserID           string
 	UserName         string
 	Extra            string
+	Logs             string
 	GroupID          string
 	DeviceSerial     string
 	DispatchedDevice string
@@ -1130,6 +1133,7 @@ func buildTaskRecordPayloads(records []TaskRecordInput, fields TaskFields) ([]ma
 		if strings.TrimSpace(fields.Webhook) != "" && rec.Webhook != "" {
 			row[fields.Webhook] = rec.Webhook
 		}
+		addOptionalField(row, fields.Logs, rec.Logs)
 		addOptionalField(row, fields.UserID, rec.UserID)
 		addOptionalField(row, fields.UserName, rec.UserName)
 		addOptionalField(row, fields.Extra, rec.Extra)
@@ -1463,6 +1467,7 @@ func decodeTaskRow(rec bitableRecord, fields TaskFields) (TaskRow, error) {
 		UserID:           bitableOptionalString(rec.Fields, fields.UserID),
 		UserName:         bitableOptionalString(rec.Fields, fields.UserName),
 		Extra:            bitableOptionalString(rec.Fields, fields.Extra),
+		Logs:             bitableOptionalString(rec.Fields, fields.Logs),
 		GroupID:          bitableOptionalString(rec.Fields, fields.GroupID),
 		DeviceSerial:     targetDevice,
 		DispatchedDevice: dispatchedDevice,

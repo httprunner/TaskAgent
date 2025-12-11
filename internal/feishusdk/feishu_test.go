@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	liveReadableBitableURL = "https://bytedance.larkoffice.com/wiki/DKKwwF9XRincITkd0g1c6udUnHe?table=tblLUmsGgp5SECWF&view=vew9Kwl9uR"
-	liveWritableBitableURL = "https://bytedance.larkoffice.com/wiki/DKKwwF9XRincITkd0g1c6udUnHe?table=tblLUmsGgp5SECWF"
+	liveReadableBitableURL = "https://bytedance.larkoffice.com/wiki/DKKwwF9XRincITkd0g1c6udUnHe?table=tblPvDwGcQ9UEzzi&view=vew9Kwl9uR"
+	liveWritableBitableURL = "https://bytedance.larkoffice.com/wiki/DKKwwF9XRincITkd0g1c6udUnHe?table=tblPvDwGcQ9UEzzi"
 	liveResultBitableURL   = "https://bytedance.larkoffice.com/wiki/DKKwwF9XRincITkd0g1c6udUnHe?table=tblNwTe8mUxiHUqd&view=vewTF27mJQ"
 	liveTargetApp          = "com.smile.gifmaker"
 )
@@ -113,9 +113,9 @@ func TestParseBitableURL(t *testing.T) {
 		},
 		{
 			name:     "wiki link",
-			url:      "https://bytedance.larkoffice.com/wiki/DKKwwF9XRincITkd0g1c6udUnHe?table=tblLUmsGgp5SECWF",
+			url:      "https://bytedance.larkoffice.com/wiki/DKKwwF9XRincITkd0g1c6udUnHe?table=tblPvDwGcQ9UEzzi",
 			wantWiki: "DKKwwF9XRincITkd0g1c6udUnHe",
-			wantTbl:  "tblLUmsGgp5SECWF",
+			wantTbl:  "tblPvDwGcQ9UEzzi",
 		},
 		{
 			name:    "missing table",
@@ -341,7 +341,7 @@ func TestFetchTaskTableExampleMock(t *testing.T) {
 			case method == http.MethodGet && strings.Contains(path, "/wiki/v2/spaces/get_node"):
 				wikiCalled = true
 				return nil, []byte(wikiResponse), nil
-			case method == http.MethodPost && strings.Contains(path, "/bitable/v1/apps/") && strings.Contains(path, "tables/tblLUmsGgp5SECWF/records/search"):
+			case method == http.MethodPost && strings.Contains(path, "/bitable/v1/apps/") && strings.Contains(path, "tables/tblPvDwGcQ9UEzzi/records/search"):
 				if !strings.Contains(path, "bascnMockToken") {
 					t.Fatalf("expected resolved app token, got %s", path)
 				}
@@ -370,7 +370,7 @@ func TestFetchTaskTableExampleMock(t *testing.T) {
 	if table == nil || len(table.Rows) != 2 {
 		t.Fatalf("expected 2 rows, got %+v", table)
 	}
-	if table.Ref.TableID != "tblLUmsGgp5SECWF" {
+	if table.Ref.TableID != "tblPvDwGcQ9UEzzi" {
 		t.Fatalf("unexpected ref: %+v", table.Ref)
 	}
 	if id, ok := table.RecordIDByTaskID(101); !ok || id != "recYUOQd9" {

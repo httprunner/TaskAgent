@@ -11,6 +11,7 @@ type Task struct {
 	Payload      any
 	DeviceSerial string
 	ResultStatus string
+	Logs         string
 }
 
 // TaskLifecycle 暴露任务生命周期回调。

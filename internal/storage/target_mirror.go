@@ -35,6 +35,7 @@ type TaskStatus struct {
 	UserID           string
 	UserName         string
 	Extra            string
+	Logs             string
 	DeviceSerial     string
 	DispatchedDevice string
 	DispatchedAt     *time.Time
@@ -112,6 +113,7 @@ func buildTaskColumnOrder(fields feishusdk.TaskFields) []string {
 		fields.UserID,
 		fields.UserName,
 		fields.Extra,
+		fields.Logs,
 		fields.DeviceSerial,
 		fields.DispatchedDevice,
 		fields.DispatchedAt,
@@ -136,6 +138,7 @@ func ensureTaskSchema(db *sql.DB, table string, fields feishusdk.TaskFields, col
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.UserID)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.UserName)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.Extra)),
+		fmt.Sprintf("%s TEXT", quoteIdent(fields.Logs)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.DeviceSerial)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.DispatchedDevice)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.DispatchedAt)),
@@ -161,6 +164,9 @@ func ensureTaskSchema(db *sql.DB, table string, fields feishusdk.TaskFields, col
 		return err
 	}
 	if err := ensureColumnExists(db, table, fields.EndAt, "TEXT"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(db, table, fields.Logs, "TEXT"); err != nil {
 		return err
 	}
 	if err := ensureColumnExists(db, table, fields.Webhook, "TEXT"); err != nil {
@@ -260,6 +266,7 @@ func (m *TaskMirror) upsert(task *TaskStatus) error {
 		nullableString(task.UserID),
 		nullableString(task.UserName),
 		nullableString(task.Extra),
+		nullableString(task.Logs),
 		nullableString(task.DeviceSerial),
 		nullableString(task.DispatchedDevice),
 		formatDatetime(task.DispatchedAtRaw, task.DispatchedAt),

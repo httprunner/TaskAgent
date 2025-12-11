@@ -99,10 +99,15 @@ func (c *FeishuTaskClient) FetchAvailableTasks(ctx context.Context, app string, 
 }
 
 func (c *FeishuTaskClient) UpdateTaskStatuses(ctx context.Context, tasks []*FeishuTask, status string) error {
+	return c.updateTaskStatuses(ctx, tasks, status, nil)
+}
+
+func (c *FeishuTaskClient) updateTaskStatuses(ctx context.Context, tasks []*FeishuTask, status string, extraMeta *TaskStatusMeta) error {
 	if c == nil {
 		return errors.New("feishusdk: task client is nil")
 	}
-	if err := UpdateFeishuTaskStatuses(ctx, tasks, status, "", c.statusUpdateMeta(status)); err != nil {
+	meta := mergeTaskStatusMeta(extraMeta, c.statusUpdateMeta(status))
+	if err := UpdateFeishuTaskStatuses(ctx, tasks, status, "", meta); err != nil {
 		return err
 	}
 	trimmedStatus := strings.TrimSpace(status)
@@ -111,6 +116,9 @@ func (c *FeishuTaskClient) UpdateTaskStatuses(ctx context.Context, tasks []*Feis
 			continue
 		}
 		task.Status = trimmedStatus
+		if meta != nil && strings.TrimSpace(meta.Logs) != "" && strings.TrimSpace(task.Logs) == "" {
+			task.Logs = strings.TrimSpace(meta.Logs)
+		}
 	}
 	return c.syncTaskMirror(tasks)
 }
@@ -168,7 +176,31 @@ func (c *FeishuTaskClient) OnTaskStarted(ctx context.Context, deviceSerial strin
 	if len(feishuTasks) == 0 {
 		return nil
 	}
-	return c.UpdateTaskStatuses(ctx, feishuTasks, feishusdk.StatusRunning)
+	logsPath := strings.TrimSpace(task.Logs)
+	if logsPath == "" {
+		for _, ft := range feishuTasks {
+			if ft == nil {
+				continue
+			}
+			if trimmed := strings.TrimSpace(ft.Logs); trimmed != "" {
+				logsPath = trimmed
+				break
+			}
+		}
+	}
+	var meta *TaskStatusMeta
+	if logsPath != "" {
+		meta = &TaskStatusMeta{Logs: logsPath}
+		for _, ft := range feishuTasks {
+			if ft == nil {
+				continue
+			}
+			if strings.TrimSpace(ft.Logs) == "" {
+				ft.Logs = logsPath
+			}
+		}
+	}
+	return c.updateTaskStatuses(ctx, feishuTasks, feishusdk.StatusRunning, meta)
 }
 
 // OnTaskResult updates task status immediately when a task finishes.
@@ -187,7 +219,7 @@ func (c *FeishuTaskClient) OnTaskResult(ctx context.Context, deviceSerial string
 	if len(feishuTasks) == 0 {
 		return nil
 	}
-	return c.UpdateTaskStatuses(ctx, feishuTasks, status)
+	return c.updateTaskStatuses(ctx, feishuTasks, status, nil)
 }
 
 func (c *FeishuTaskClient) updateStatuses(ctx context.Context, tasks []*Task, status, deviceSerial string) ([]*FeishuTask, error) {
@@ -302,6 +334,26 @@ func (c *FeishuTaskClient) statusUpdateMeta(status string) *TaskStatusMeta {
 	return nil
 }
 
+func mergeTaskStatusMeta(primary, fallback *TaskStatusMeta) *TaskStatusMeta {
+	if primary == nil {
+		return fallback
+	}
+	if fallback == nil {
+		return primary
+	}
+	result := *primary
+	if result.DispatchedAt == nil {
+		result.DispatchedAt = fallback.DispatchedAt
+	}
+	if result.CompletedAt == nil {
+		result.CompletedAt = fallback.CompletedAt
+	}
+	if strings.TrimSpace(result.Logs) == "" {
+		result.Logs = fallback.Logs
+	}
+	return &result
+}
+
 func (c *FeishuTaskClient) syncTaskMirror(tasks []*FeishuTask) error {
 	if c == nil || c.mirror == nil || len(tasks) == 0 {
 		return nil
@@ -340,6 +392,7 @@ type FeishuTask struct {
 	UserID           string
 	UserName         string
 	Extra            string
+	Logs             string
 	GroupID          string
 	DeviceSerial     string
 	DispatchedDevice string
@@ -381,6 +434,7 @@ func toStorageTaskStatus(task *FeishuTask) *storage.TaskStatus {
 		UserID:           task.UserID,
 		UserName:         task.UserName,
 		Extra:            task.Extra,
+		Logs:             task.Logs,
 		DeviceSerial:     task.DeviceSerial,
 		DispatchedDevice: task.DispatchedDevice,
 		DispatchedAt:     task.DispatchedAt,
@@ -748,6 +802,7 @@ func summarizeFeishuTasks(tasks []*FeishuTask) []map[string]any {
 type TaskStatusMeta struct {
 	DispatchedAt *time.Time
 	CompletedAt  *time.Time
+	Logs         string
 }
 
 func UpdateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status string, deviceSerial string, meta *TaskStatusMeta) error {
@@ -803,6 +858,11 @@ func UpdateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 		elapsedField := strings.TrimSpace(source.table.Fields.ElapsedSeconds)
 		startField := strings.TrimSpace(source.table.Fields.StartAt)
 		endField := strings.TrimSpace(source.table.Fields.EndAt)
+		logsField := strings.TrimSpace(source.table.Fields.Logs)
+		var logsValue string
+		if meta != nil {
+			logsValue = strings.TrimSpace(meta.Logs)
+		}
 
 		for _, task := range subset {
 			fields := map[string]any{
@@ -831,6 +891,10 @@ func UpdateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 					fields[elapsedField] = secs
 					task.ElapsedSeconds = secs
 				}
+			}
+			if logsField != "" && logsValue != "" {
+				fields[logsField] = logsValue
+				task.Logs = logsValue
 			}
 			if err := source.client.UpdateTaskFields(ctx, source.table, task.TaskID, fields); err != nil {
 				errs = append(errs, fmt.Sprintf("task %d: %v", task.TaskID, err))
@@ -934,6 +998,9 @@ func extractFeishuTasks(tasks []*Task) ([]*FeishuTask, error) {
 			return nil, errors.New("invalid feishusdk target task payload")
 		}
 		ft.TaskRef = task
+		if logs := strings.TrimSpace(task.Logs); logs != "" {
+			ft.Logs = logs
+		}
 		result = append(result, ft)
 	}
 	return result, nil

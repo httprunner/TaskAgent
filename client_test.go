@@ -516,6 +516,36 @@ func TestUpdateFeishuTaskStatusesAssignsElapsedSeconds(t *testing.T) {
 	}
 }
 
+func TestUpdateFeishuTaskStatusesAssignsLogs(t *testing.T) {
+	client := &recordingTargetClient{}
+	table := &feishusdk.TaskTable{
+		Ref:    feishusdk.BitableRef{AppToken: "app", TableID: "tbl"},
+		Fields: feishusdk.DefaultTaskFields,
+	}
+	task := &FeishuTask{
+		TaskID: 3,
+		source: &feishuTaskSource{
+			client: client,
+			table:  table,
+		},
+	}
+	logsPath := "/tmp/search/logs"
+	if err := UpdateFeishuTaskStatuses(context.Background(), []*FeishuTask{task}, feishusdk.StatusRunning, "", &TaskStatusMeta{Logs: logsPath}); err != nil {
+		t.Fatalf("updateFeishuTaskStatuses returned error: %v", err)
+	}
+	if len(client.updates) != 1 {
+		t.Fatalf("expected 1 update, got %d", len(client.updates))
+	}
+	logsField := feishusdk.DefaultTaskFields.Logs
+	update := client.updates[0]
+	if got := update[logsField]; got != logsPath {
+		t.Fatalf("expected logs field=%s got=%v", logsField, got)
+	}
+	if strings.TrimSpace(task.Logs) != logsPath {
+		t.Fatalf("expected task logs to be %q, got %q", logsPath, task.Logs)
+	}
+}
+
 func TestUpdateStatusesSkipsDuplicateStatusWrites(t *testing.T) {
 	client := &FeishuTaskClient{}
 	recorder := &recordingTargetClient{}
