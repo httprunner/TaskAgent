@@ -495,14 +495,16 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client TargetTableClient,
 		{scene: SceneVideoScreenCapture, status: feishusdk.StatusFailed},
 		{scene: SceneSingleURLCapture, status: feishusdk.StatusPending},
 		{scene: SceneSingleURLCapture, status: feishusdk.StatusFailed},
-		{scene: SceneGeneralSearch, status: feishusdk.StatusPending},
+		// pending
 		{scene: SceneProfileSearch, status: feishusdk.StatusPending},
 		{scene: SceneCollection, status: feishusdk.StatusPending},
 		{scene: SceneAnchorCapture, status: feishusdk.StatusPending},
-		{scene: SceneGeneralSearch, status: feishusdk.StatusFailed},
+		{scene: SceneGeneralSearch, status: feishusdk.StatusPending},
+		// failed
 		{scene: SceneProfileSearch, status: feishusdk.StatusFailed},
 		{scene: SceneCollection, status: feishusdk.StatusFailed},
 		{scene: SceneAnchorCapture, status: feishusdk.StatusFailed},
+		{scene: SceneGeneralSearch, status: feishusdk.StatusFailed},
 	}
 
 	appendAndMaybeReturn := func(batch []*FeishuTask) {
