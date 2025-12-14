@@ -721,6 +721,31 @@ func (c *Client) FetchBitableRows(ctx context.Context, rawURL string, opts *Task
 	return rows, nil
 }
 
+// CreateBitableRecord creates a single record in an arbitrary bitable table.
+// It is intended for advanced integrations such as dedicated webhook result tables.
+func (c *Client) CreateBitableRecord(ctx context.Context, rawURL string, fields map[string]any) (string, error) {
+	ref, err := ParseBitableURL(rawURL)
+	if err != nil {
+		return "", err
+	}
+	if err := c.ensureBitableAppToken(ctx, &ref); err != nil {
+		return "", err
+	}
+	return c.createBitableRecord(ctx, ref, fields)
+}
+
+// UpdateBitableRecord updates a single record in an arbitrary bitable table.
+func (c *Client) UpdateBitableRecord(ctx context.Context, rawURL, recordID string, fields map[string]any) error {
+	ref, err := ParseBitableURL(rawURL)
+	if err != nil {
+		return err
+	}
+	if err := c.ensureBitableAppToken(ctx, &ref); err != nil {
+		return err
+	}
+	return c.updateBitableRecord(ctx, ref, recordID, fields)
+}
+
 // UpdateTaskStatus updates the status field for a given TaskID using a previously fetched table.
 func (c *Client) UpdateTaskStatus(ctx context.Context, table *TaskTable, taskID int64, newStatus string) error {
 	if strings.TrimSpace(newStatus) == "" {

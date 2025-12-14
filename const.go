@@ -11,6 +11,9 @@ const (
 	EnvTaskBitableURL = feishusdk.EnvTaskBitableURL
 	// EnvResultBitableURL indicates where to push Feishu result rows.
 	EnvResultBitableURL = feishusdk.EnvResultBitableURL
+	// EnvWebhookBitableURL points to the dedicated webhook result table used by the
+	// group-based webhook flow.
+	EnvWebhookBitableURL = feishusdk.EnvWebhookBitableURL
 	// EnvDeviceBitableURL indicates where to pull/push Feishu device status rows.
 	EnvDeviceBitableURL = feishusdk.EnvDeviceBitableURL
 	// EnvCookieBitableURL points to the dedicated cookies table for SingleURLWorker.

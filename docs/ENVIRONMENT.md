@@ -19,6 +19,7 @@
 | `TASK_BITABLE_URL` | Yes for Feishu-backed schedulers | – | `taskagent.Config`, `cmd` | Source of pending tasks (个人页搜索 / 综合页搜索等). |
 | `RESULT_BITABLE_URL` | Yes when uploading captures to Feishu | – | `internal/storage`, `cmd` | Result table receiving capture rows + webhook summaries. |
 | `DRAMA_BITABLE_URL` | Required when fetching drama metadata from Feishu | – | `pkg/webhook`, `cmd` | Drama catalog table for ratio/metadata lookups. |
+| `WEBHOOK_BITABLE_URL` | Optional | empty | `pkg/webhook` | Dedicated webhook result table for group-based flows (aggregates TaskIDs + delivery status). |
 | `DEVICE_BITABLE_URL` | Optional | empty | `internal/devrecorder` | Device heartbeat table; leave blank to disable recorder writes. |
 | `DEVICE_TASK_BITABLE_URL` | Optional | empty | `internal/devrecorder`, `internal/storage` | Device-dispatch history table (one row per job). |
 
@@ -58,6 +59,22 @@ TaskAgent exposes per-table override knobs so you can align with custom schemas 
 | `TASK_FIELD_DEVICE_SERIAL` | `DeviceSerial` | Target device serial (optional pre-allocation). |
 | `TASK_FIELD_DISPATCHED_DEVICE` | `DispatchedDevice` | Actual device used. |
 | `TASK_FIELD_DISPATCHED_AT` | `DispatchedAt` | Dispatch timestamp. |
+
+### Webhook result table (`WEBHOOK_FIELD_*`)
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `WEBHOOK_FIELD_PARENT_TASK_ID` | `ParentTaskID` | Parent task ID (综合页搜索 TaskID). |
+| `WEBHOOK_FIELD_GROUPID` | `GroupID` | Group identifier (`{App}_{BookID}_{UserID}`). |
+| `WEBHOOK_FIELD_STATUS` | `Status` | Webhook delivery state (pending/success/failed/error). |
+| `WEBHOOK_FIELD_TASKIDS` | `TaskIDs` | Multi-select TaskID list (text options like `123,456`). |
+| `WEBHOOK_FIELD_DRAMAINFO` | `DramaInfo` | Raw drama row fields JSON (text). |
+| `WEBHOOK_FIELD_USERINFO` | `UserInfo` | Reserved user info JSON (text). |
+| `WEBHOOK_FIELD_RECORDS` | `Records` | Flattened capture records JSON (text). |
+| `WEBHOOK_FIELD_CREATEAT` | `CreateAt` | Creation time (date). |
+| `WEBHOOK_FIELD_STARTAT` | `StartAt` | First processing time (date). |
+| `WEBHOOK_FIELD_ENDAT` | `EndAt` | Last processing time (date). |
+| `WEBHOOK_FIELD_RETRYCOUNT` | `RetryCount` | Retry counter (number). |
+| `WEBHOOK_FIELD_LASTERROR` | `LastError` | Last error message (text). |
 | `TASK_FIELD_START_AT` | `StartAt` | Execution start timestamp. |
 | `TASK_FIELD_END_AT` | `EndAt` | Execution end timestamp. |
 | `TASK_FIELD_ELAPSED_SECONDS` | `ElapsedSeconds` | Duration of the run in seconds. |

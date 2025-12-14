@@ -1,0 +1,353 @@
+package webhook
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
+	taskagent "github.com/httprunner/TaskAgent"
+	"github.com/pkg/errors"
+)
+
+const legacyPushResultBitableURL = "PUSH_RESULT_BITABLE_URL"
+
+type webhookResultRow struct {
+	RecordID     string
+	ParentTaskID int64
+	GroupID      string
+	Status       string
+	TaskIDs      []int64
+	DramaInfo    string
+	UserInfo     string
+	Records      string
+	CreateAtMs   int64
+	StartAtMs    int64
+	EndAtMs      int64
+	RetryCount   int
+	LastError    string
+}
+
+type webhookResultStore struct {
+	client   *taskagent.FeishuClient
+	tableURL string
+	fields   webhookResultFields
+}
+
+func newWebhookResultStoreFromEnv() (*webhookResultStore, error) {
+	url := strings.TrimSpace(taskagent.EnvString(taskagent.EnvWebhookBitableURL, ""))
+	if url == "" {
+		// Backward compatible alias.
+		url = strings.TrimSpace(taskagent.EnvString(legacyPushResultBitableURL, ""))
+	}
+	return newWebhookResultStore(url)
+}
+
+func newWebhookResultStore(tableURL string) (*webhookResultStore, error) {
+	trimmed := strings.TrimSpace(tableURL)
+	if trimmed == "" {
+		return nil, nil
+	}
+	client, err := taskagent.NewFeishuClientFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	return &webhookResultStore{
+		client:   client,
+		tableURL: trimmed,
+		fields:   defaultWebhookResultFields(),
+	}, nil
+}
+
+func (s *webhookResultStore) table() string {
+	if s == nil {
+		return ""
+	}
+	return s.tableURL
+}
+
+func (s *webhookResultStore) getExistingByParentAndGroup(ctx context.Context, parentTaskID int64, groupID string) (*webhookResultRow, error) {
+	if s == nil || s.client == nil || strings.TrimSpace(s.tableURL) == "" {
+		return nil, nil
+	}
+	gid := strings.TrimSpace(groupID)
+	if parentTaskID <= 0 || gid == "" {
+		return nil, nil
+	}
+	filter := taskagent.NewFeishuFilterInfo("and")
+	if field := strings.TrimSpace(s.fields.ParentTaskID); field != "" {
+		filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(field, "is", fmt.Sprintf("%d", parentTaskID)))
+	}
+	if field := strings.TrimSpace(s.fields.GroupID); field != "" {
+		filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(field, "is", gid))
+	}
+	rows, err := s.client.FetchBitableRows(ctx, s.tableURL, &taskagent.FeishuTaskQueryOptions{Filter: filter, Limit: 1})
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	decoded := decodeWebhookResultRow(rows[0], s.fields)
+	return &decoded, nil
+}
+
+func (s *webhookResultStore) createPending(ctx context.Context, parentTaskID int64, groupID string, taskIDs []int64, dramaInfoJSON string) (string, error) {
+	if s == nil || s.client == nil {
+		return "", errors.New("webhook result store is nil")
+	}
+	if parentTaskID <= 0 {
+		return "", errors.New("parent task id is required")
+	}
+	gid := strings.TrimSpace(groupID)
+	if gid == "" {
+		return "", errors.New("group id is required")
+	}
+	now := time.Now().UTC().UnixMilli()
+	fields := map[string]any{
+		s.fields.ParentTaskID: fmt.Sprintf("%d", parentTaskID),
+		s.fields.GroupID:      gid,
+		s.fields.Status:       WebhookResultPending,
+		s.fields.DramaInfo:    strings.TrimSpace(dramaInfoJSON),
+		s.fields.UserInfo:     "{}",
+		s.fields.Records:      "[]",
+		s.fields.CreateAt:     now,
+		s.fields.RetryCount:   0,
+		s.fields.LastError:    "",
+	}
+	if trimmed := strings.TrimSpace(s.fields.TaskIDs); trimmed != "" {
+		fields[trimmed] = encodeTaskIDsForFeishu(taskIDs)
+	}
+	return s.client.CreateBitableRecord(ctx, s.tableURL, fields)
+}
+
+func (s *webhookResultStore) listCandidates(ctx context.Context, batchLimit int) ([]webhookResultRow, error) {
+	if s == nil || s.client == nil {
+		return nil, errors.New("webhook result store is nil")
+	}
+	if batchLimit <= 0 {
+		batchLimit = 20
+	}
+	statusField := strings.TrimSpace(s.fields.Status)
+	if statusField == "" {
+		return nil, errors.New("webhook result table status field is not configured")
+	}
+	filter := taskagent.NewFeishuFilterInfo("or")
+	filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(statusField, "is", WebhookResultPending))
+	filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(statusField, "is", WebhookResultFailed))
+	rows, err := s.client.FetchBitableRows(ctx, s.tableURL, &taskagent.FeishuTaskQueryOptions{Filter: filter, Limit: batchLimit})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]webhookResultRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, decodeWebhookResultRow(row, s.fields))
+	}
+	return out, nil
+}
+
+type webhookResultUpdate struct {
+	Status     *string
+	StartAtMs  *int64
+	EndAtMs    *int64
+	RetryCount *int
+	LastError  *string
+	UserInfo   *string
+	Records    *string
+}
+
+func (s *webhookResultStore) update(ctx context.Context, recordID string, upd webhookResultUpdate) error {
+	if s == nil || s.client == nil {
+		return errors.New("webhook result store is nil")
+	}
+	if strings.TrimSpace(recordID) == "" {
+		return errors.New("webhook result record id is empty")
+	}
+	fields := map[string]any{}
+	if upd.Status != nil && strings.TrimSpace(s.fields.Status) != "" {
+		fields[s.fields.Status] = strings.TrimSpace(*upd.Status)
+	}
+	if upd.StartAtMs != nil && strings.TrimSpace(s.fields.StartAt) != "" {
+		fields[s.fields.StartAt] = *upd.StartAtMs
+	}
+	if upd.EndAtMs != nil && strings.TrimSpace(s.fields.EndAt) != "" {
+		fields[s.fields.EndAt] = *upd.EndAtMs
+	}
+	if upd.RetryCount != nil && strings.TrimSpace(s.fields.RetryCount) != "" {
+		fields[s.fields.RetryCount] = *upd.RetryCount
+	}
+	if upd.LastError != nil && strings.TrimSpace(s.fields.LastError) != "" {
+		fields[s.fields.LastError] = strings.TrimSpace(*upd.LastError)
+	}
+	if upd.UserInfo != nil && strings.TrimSpace(s.fields.UserInfo) != "" {
+		fields[s.fields.UserInfo] = strings.TrimSpace(*upd.UserInfo)
+	}
+	if upd.Records != nil && strings.TrimSpace(s.fields.Records) != "" {
+		fields[s.fields.Records] = strings.TrimSpace(*upd.Records)
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	return s.client.UpdateBitableRecord(ctx, s.tableURL, strings.TrimSpace(recordID), fields)
+}
+
+func decodeWebhookResultRow(row taskagent.BitableRow, fields webhookResultFields) webhookResultRow {
+	out := webhookResultRow{RecordID: strings.TrimSpace(row.RecordID)}
+	if row.Fields == nil {
+		return out
+	}
+	out.ParentTaskID = toInt64(row.Fields[fields.ParentTaskID])
+	out.GroupID = strings.TrimSpace(toString(row.Fields[fields.GroupID]))
+	out.Status = strings.ToLower(strings.TrimSpace(toString(row.Fields[fields.Status])))
+	out.TaskIDs = parseTaskIDs(row.Fields[fields.TaskIDs])
+	out.DramaInfo = strings.TrimSpace(toString(row.Fields[fields.DramaInfo]))
+	out.UserInfo = strings.TrimSpace(toString(row.Fields[fields.UserInfo]))
+	out.Records = strings.TrimSpace(toString(row.Fields[fields.Records]))
+	out.CreateAtMs = toInt64(row.Fields[fields.CreateAt])
+	out.StartAtMs = toInt64(row.Fields[fields.StartAt])
+	out.EndAtMs = toInt64(row.Fields[fields.EndAt])
+	out.RetryCount = int(toInt64(row.Fields[fields.RetryCount]))
+	out.LastError = strings.TrimSpace(toString(row.Fields[fields.LastError]))
+	return out
+}
+
+func parseTaskIDs(raw any) []int64 {
+	switch v := raw.(type) {
+	case nil:
+		return nil
+	case string:
+		return parseTaskIDsFromString(v)
+	case []any:
+		ids := make([]int64, 0, len(v))
+		for _, item := range v {
+			ids = append(ids, parseTaskIDsFromString(toString(item))...)
+		}
+		return uniqueInt64(ids)
+	case []string:
+		ids := make([]int64, 0, len(v))
+		for _, item := range v {
+			ids = append(ids, parseTaskIDsFromString(item)...)
+		}
+		return uniqueInt64(ids)
+	default:
+		return parseTaskIDsFromString(toString(v))
+	}
+}
+
+func parseTaskIDsFromString(v string) []int64 {
+	trimmed := strings.TrimSpace(v)
+	if trimmed == "" {
+		return nil
+	}
+	parts := strings.FieldsFunc(trimmed, func(r rune) bool {
+		return r == ',' || r == '|' || r == ' ' || r == '\n' || r == '\t'
+	})
+	ids := make([]int64, 0, len(parts))
+	for _, part := range parts {
+		p := strings.TrimSpace(part)
+		if p == "" {
+			continue
+		}
+		if n, err := strconv.ParseInt(p, 10, 64); err == nil && n > 0 {
+			ids = append(ids, n)
+		}
+	}
+	return uniqueInt64(ids)
+}
+
+func uniqueInt64(v []int64) []int64 {
+	if len(v) == 0 {
+		return nil
+	}
+	seen := make(map[int64]struct{}, len(v))
+	out := make([]int64, 0, len(v))
+	for _, n := range v {
+		if n <= 0 {
+			continue
+		}
+		if _, ok := seen[n]; ok {
+			continue
+		}
+		seen[n] = struct{}{}
+		out = append(out, n)
+	}
+	return out
+}
+
+func encodeTaskIDsForFeishu(taskIDs []int64) []string {
+	if len(taskIDs) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(taskIDs))
+	seen := make(map[int64]struct{}, len(taskIDs))
+	for _, id := range taskIDs {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, fmt.Sprintf("%d", id))
+	}
+	return out
+}
+
+func toString(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return x
+	case []byte:
+		return string(x)
+	case json.Number:
+		return x.String()
+	default:
+		return fmt.Sprint(x)
+	}
+}
+
+func toInt64(v any) int64 {
+	switch x := v.(type) {
+	case nil:
+		return 0
+	case int64:
+		return x
+	case int:
+		return int64(x)
+	case float64:
+		return int64(x)
+	case json.Number:
+		if n, err := x.Int64(); err == nil {
+			return n
+		}
+		if f, err := x.Float64(); err == nil {
+			return int64(f)
+		}
+		return 0
+	case string:
+		trimmed := strings.TrimSpace(x)
+		if trimmed == "" {
+			return 0
+		}
+		if n, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+			return n
+		}
+		if f, err := strconv.ParseFloat(trimmed, 64); err == nil {
+			return int64(f)
+		}
+		return 0
+	default:
+		trimmed := strings.TrimSpace(fmt.Sprint(x))
+		if trimmed == "" {
+			return 0
+		}
+		if n, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+			return n
+		}
+		return 0
+	}
+}

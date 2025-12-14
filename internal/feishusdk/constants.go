@@ -15,6 +15,9 @@ const (
 	EnvTaskBitableURL = "TASK_BITABLE_URL"
 	// EnvResultBitableURL indicates where to push Feishu result rows.
 	EnvResultBitableURL = "RESULT_BITABLE_URL"
+	// EnvWebhookBitableURL points to the dedicated webhook result table that
+	// aggregates group/task webhook delivery status.
+	EnvWebhookBitableURL = "WEBHOOK_BITABLE_URL"
 	// EnvDeviceBitableURL indicates where to pull/push Feishu device status rows.
 	// StatusError marks a task row as permanently errored and skipped.
 	StatusError         = "error"

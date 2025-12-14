@@ -519,4 +519,3 @@ func TestPickLatestRecordsFallback(t *testing.T) {
 		t.Fatalf("expected last record fallback, got %s", latest[0].RecordID)
 	}
 }
-

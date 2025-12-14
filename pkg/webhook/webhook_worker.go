@@ -2,7 +2,6 @@ package webhook
 
 import (
 	"context"
-	stdErrors "errors"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -416,7 +415,7 @@ func (w *WebhookWorker) handleVideoCaptureRow(ctx context.Context, table *taskag
 			Msg("webhook delivered")
 		outcome.successIDs = append(outcome.successIDs, row.TaskID)
 		return outcome, w.updateWebhookState(ctx, table, []int64{row.TaskID}, taskagent.WebhookSuccess)
-	case stdErrors.Is(sendErr, ErrNoCaptureRecords):
+	case errors.Is(sendErr, ErrNoCaptureRecords):
 		log.Warn().
 			Err(sendErr).
 			Str("scene", row.Scene).
@@ -465,7 +464,7 @@ func (w *WebhookWorker) handleSingleRow(ctx context.Context, table *taskagent.Fe
 			Msg("webhook delivered")
 		outcome.successIDs = append(outcome.successIDs, row.TaskID)
 		return outcome, w.updateWebhookState(ctx, table, []int64{row.TaskID}, taskagent.WebhookSuccess)
-	case stdErrors.Is(sendErr, ErrNoCaptureRecords):
+	case errors.Is(sendErr, ErrNoCaptureRecords):
 		log.Warn().
 			Err(sendErr).
 			Str("scene", row.Scene).
@@ -687,7 +686,7 @@ func (w *WebhookWorker) sendGroupWebhook(ctx context.Context, app, groupID strin
 		RecordLimit: -1,
 	}
 	err := w.sendSummary(ctx, opts)
-	if err != nil && !stdErrors.Is(err, ErrNoCaptureRecords) {
+	if err != nil && !errors.Is(err, ErrNoCaptureRecords) {
 		return err
 	}
 	return nil
@@ -915,7 +914,7 @@ func isContextError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return stdErrors.Is(err, context.Canceled) || stdErrors.Is(err, context.DeadlineExceeded)
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func (w *WebhookWorker) updateWebhookState(ctx context.Context, table *taskagent.FeishuTaskTable, taskIDs []int64, state string) error {
