@@ -159,6 +159,10 @@ Feishu Task Table ──> FeishuTaskClient (task)
 3. Optionally wire a `task.TaskManager` alternative if tasks are not Feishu-backed.
 4. Configure device & task recorders (`DEVICE_BITABLE_URL`, `DEVICE_TASK_BITABLE_URL`) to observe fleet health and dispatch history.
 
+### Examples
+- **Create a `pending` task via SDK**: `go run ./examples/create_task_with_sdk -bid <bid> -uid <uid> -eid <eid>` (see `examples/create_task_with_sdk/README.md`)
+- **Create a `pending` task via pure HTTP**: `go run ./examples/create_task_with_http -bid <bid> -uid <uid> -eid <eid>` (see `examples/create_task_with_http/README.md`)
+
 ### Infra CLI (`cmd`)
 - **Webhook worker**: `go run ./cmd webhook-worker --task-url "$TASK_BITABLE_URL" --webhook-bitable-url "$WEBHOOK_BITABLE_URL" --webhook-url "$SUMMARY_WEBHOOK_URL"`
 - **Webhook creator (video screen capture)**: `go run ./cmd webhook-creator --task-url "$TASK_BITABLE_URL" --webhook-bitable-url "$WEBHOOK_BITABLE_URL" --app kwai`

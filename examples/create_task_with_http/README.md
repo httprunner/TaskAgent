@@ -5,9 +5,9 @@
 ## 功能亮点
 
 - **轻量客户端**：只依赖 Go 标准库即可完成鉴权、请求发送与错误处理。
-- **Token 缓存**：自动复用 2 小时有效期的 Tenant Access Token，减少重复鉴权。
+- **Token 缓存**：自动复用约 2 小时有效期的 Tenant Access Token，减少重复鉴权。
 - **URL 解析**：兼容 base 与 wiki 两种格式的 Bitable 链接，并支持 wiki→bitable token 自动转换。
-- **字段白名单**：默认写入 `App / Scene / Params / Status`，可按需追加 `UserID / UserName / Extra / DeviceSerial` 等字段。
+- **字段白名单**：默认写入 `App / Scene / BookID / UserID / ItemID / GroupID / Extra / Status`，可按需追加 `UserName / DeviceSerial` 等字段。
 
 ## 运行前准备
 
@@ -25,8 +25,10 @@
 
 | 参数 | 必填 |
 | --- | --- |
-| `-aid` | 是 |
+| `-bid` | 是 |
+| `-uid` | 是 |
 | `-eid` | 是 |
+| `-table` | 否（默认读取 `TASK_BITABLE_URL`） |
 
 ## 快速开始
 
@@ -35,22 +37,26 @@ export FEISHU_APP_ID="your_app_id"
 export FEISHU_APP_SECRET="your_app_secret"
 export TASK_BITABLE_URL="https://bytedance.larkoffice.com/wiki/xxx?table=tblxxx"
 
-go run ./examples/create_task_with_http/main.go -aid your_aid -eid your_eid
+go run ./examples/create_task_with_http/main.go -bid your_bid -uid your_uid -eid your_eid
 # 输出: Created task record rectxxxxxxxxxxxxxxx
 ```
 
 默认会创建如下字段：
 
 - `App`: `com.smile.gifmaker`
-- `Scene`: `单个视频录屏采集`
+- `Scene`: `视频录屏采集`
 - `Status`: `pending`
-- `Params`: `{"type":"auto_additional_crawl","aid":"your_aid","eid":"your_eid"}`
+- `BookID`: `your_bid`
+- `UserID`: `your_uid`
+- `ItemID`: `your_eid`
+- `GroupID`: `快手_{BookID}_{UserID}`
+- `Extra`: `auto_additional_crawl`
 
 ## 请求流程摘要
 
 1. **获取 Tenant Access Token**：`POST /open-apis/auth/v3/tenant_access_token/internal`，请求体包含 `app_id` 与 `app_secret`。
 2. **解析 Bitable URL**：对 base 链接直接提取 `app_token`，对 wiki 链接先调用 `GET /open-apis/wiki/v2/spaces/get_node?token=...` 再取 `obj_token`。
-3. **创建记录**：`POST /open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/records`，`fields` 中至少包含 `App`、`Scene`、`Params`、`Status(pending)`。
+3. **创建记录**：`POST /open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/records`，`fields` 中至少包含 `App`、`Scene`、`Status(pending)`（并建议写入 `BookID/UserID/ItemID` 方便后续链路消费）。
 
 示例请求体：
 
@@ -58,8 +64,12 @@ go run ./examples/create_task_with_http/main.go -aid your_aid -eid your_eid
 {
   "fields": {
     "App": "com.smile.gifmaker",
-    "Scene": "单个视频录屏采集",
-    "Params": "{\"type\":\"auto_additional_crawl\",\"aid\":\"xxx\",\"eid\":\"xxx\"}",
+    "Scene": "视频录屏采集",
+    "BookID": "xxx",
+    "UserID": "xxx",
+    "ItemID": "xxx",
+    "GroupID": "快手_xxx_xxx",
+    "Extra": "auto_additional_crawl",
     "Status": "pending"
   }
 }
@@ -70,14 +80,18 @@ go run ./examples/create_task_with_http/main.go -aid your_aid -eid your_eid
 | 字段 | 是否必填 | 说明 |
 | --- | --- | --- |
 | `App` | 是 | 任务目标应用，示例固定为 `com.smile.gifmaker` |
-| `Scene` | 是 | 采集场景描述 |
-| `Params` | 是 | JSON 字符串，TaskAgent 会解析并执行业务逻辑 |
+| `Scene` | 是 | 采集场景描述（示例为 `视频录屏采集`） |
 | `Status` | 是 | 初始状态必须为 `pending` |
-| `UserID` / `UserName` / `Extra` / `DeviceSerial` | 否 | 视业务需要在 `TaskRecordInput` 中赋值即可写入 |
+| `BookID` | 建议 | 业务主键（短剧/Book ID），用于 webhook/drama 关联等能力 |
+| `UserID` | 建议 | 业务主键之一（示例为维权账号/统筹 ID） |
+| `ItemID` | 建议 | 业务主键之一（示例为待录屏的资源 ID） |
+| `GroupID` | 可选 | 业务聚合键（示例为 `快手_{BookID}_{UserID}`） |
+| `Extra` | 可选 | 额外标记（示例为 `auto_additional_crawl`） |
+| `UserName` / `DeviceSerial` | 否 | 视业务需要在请求体中写入即可 |
 
 ## 批量写入（可选）
 
-若需要一次提交多条记录，可调用 `POST /records/batch_create`，请求体中提供 `records: [{"fields": ...}]`。官方建议每批不超过 50 条并加上限频控制。
+若需要一次提交多条记录，可调用 `POST /records/batch_create`，请求体中提供 `records: [{"fields": ...}]`。官方建议每批不超过 50 条并加上限频控。
 
 ## 常见错误与排查
 
@@ -91,5 +105,4 @@ go run ./examples/create_task_with_http/main.go -aid your_aid -eid your_eid
 ## 注意事项
 
 - Tenant Access Token 有效期约 7200 秒，示例已在客户端内缓存，避免频繁请求。
-- `Params` 必须是合法的 JSON 字符串，否则 TaskAgent 在消费记录时会报错。
 - 创建任务时务必保持 `Status = pending`，后续由 TaskAgent 流程自动更新为 `dispatched → running → success/failed`。

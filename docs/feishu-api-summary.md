@@ -15,8 +15,6 @@
 
 ## 1. 新增记录 (Create Record)
 
-## 1. 新增记录 (Create Record)
-
 - **功能**: 向指定数据表中添加单条记录。
 - **官方文档**: [新增记录](https://open.larkoffice.com/document/server-docs/docs/bitable-v1/app-table-record/create)
 - **HTTP 方法**: `POST`
@@ -27,6 +25,9 @@
     - `record`: (Object) 创建成功的记录信息，包含 `record_id` 和 `fields`。
 - **接口频率限制**: 50 次/秒（受全局 RPS 限制器保护）
 - **代码实现**: `Client.CreateBitableRecord` (内部方法), `Client.CreateTaskRecord`, `Client.CreateResultRecord`
+- **示例**:
+  - SDK（推荐，带 `.env` 自动加载与 schema 映射）：`examples/create_task_with_sdk`
+  - 纯 HTTP（标准库，无 SDK 依赖）：`examples/create_task_with_http`（注意该示例通过 `os.Getenv` 读取环境变量，不会自动加载 `.env`）
 
 ## 2. 更新记录 (Update Record)
 

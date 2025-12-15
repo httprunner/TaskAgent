@@ -179,10 +179,17 @@ func (c *HTTPClient) CreateTaskRecord(ctx context.Context, tableURL string, reco
 	fields := map[string]interface{}{
 		"App":    record.App,
 		"Scene":  record.Scene,
-		"Params": record.Params,
 		"Status": record.Status,
 	}
-	// 使用结构体初始化避免map操作
+	if strings.TrimSpace(record.BookID) != "" {
+		fields["BookID"] = record.BookID
+	}
+	if strings.TrimSpace(record.ItemID) != "" {
+		fields["ItemID"] = record.ItemID
+	}
+	if strings.TrimSpace(record.GroupID) != "" {
+		fields["GroupID"] = record.GroupID
+	}
 	if record.UserID != "" {
 		fields["UserID"] = record.UserID
 	}
@@ -233,7 +240,7 @@ func (c *HTTPClient) CreateTaskRecord(ctx context.Context, tableURL string, reco
 
 // TaskRecordInput 简化的任务记录结构
 type TaskRecordInput struct {
-	App, Scene, Params      string
+	App, Scene              string
 	Status                  string
 	UserID, UserName, Extra string
 	DeviceSerial            string
@@ -243,17 +250,17 @@ type TaskRecordInput struct {
 }
 
 func main() {
+	tableURL := flag.String("table", os.Getenv("TASK_BITABLE_URL"), "Feishu task table URL")
 	bID := flag.String("bid", "", "bid value")
 	uID := flag.String("uid", "", "uid value")
 	eID := flag.String("eid", "", "eid value")
 	flag.Parse()
 
-	tableURL := os.Getenv("TASK_BITABLE_URL")
 	// 参数验证
-	if tableURL == "" || *bID == "" || *uID == "" || *eID == "" {
-		log.Fatal("missing required parameters: -table, -bid, -uid, -eid")
+	if strings.TrimSpace(*tableURL) == "" || strings.TrimSpace(*bID) == "" || strings.TrimSpace(*uID) == "" || strings.TrimSpace(*eID) == "" {
+		log.Fatal("missing required parameters: -table (or TASK_BITABLE_URL), -bid, -uid, -eid")
 	}
-	aID := fmt.Sprintf("快手_%s_%s", *bID, *uID)
+	aID := fmt.Sprintf("快手_%s_%s", strings.TrimSpace(*bID), strings.TrimSpace(*uID))
 
 	client, err := NewHTTPClient()
 	if err != nil {
@@ -275,7 +282,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	id, err := client.CreateTaskRecord(ctx, tableURL, record)
+	id, err := client.CreateTaskRecord(ctx, strings.TrimSpace(*tableURL), record)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -14,9 +14,9 @@ import (
 
 func main() {
 	tableURL := flag.String("table", os.Getenv("TASK_BITABLE_URL"), "Feishu task table URL")
-	bookID := flag.String("bid", "", "book id that will be nested inside Params JSON")
-	userID := flag.String("uid", "", "user id that will be nested inside Params JSON")
-	eID := flag.String("eid", "", "eid that will be nested inside Params JSON")
+	bookID := flag.String("bid", "", "book id")
+	userID := flag.String("uid", "", "user id")
+	eID := flag.String("eid", "", "eid")
 	timeout := flag.Duration("timeout", 30*time.Second, "Request timeout")
 	flag.Parse()
 

@@ -6,7 +6,7 @@
 
 | Variable | Required | Default | Used by | Notes |
 | --- | --- | --- | --- | --- |
-| `FEISHU_APP_ID` | Yes | – | `internal/feishusdk`, `cmd`, `internal/storage`, `internal/devrecorder` | App ID for the Feishu Open Platform. |
+| `FEISHU_APP_ID` | Yes | – | `internal/feishusdk`, `cmd`, `internal/storage`, `internal/devrecorder`, `examples/create_task_with_http` | App ID for the Feishu Open Platform. |
 | `FEISHU_APP_SECRET` | Yes | – | Same as above | App secret paired with the App ID. |
 | `FEISHU_TENANT_KEY` | Optional | empty | `internal/feishusdk` | Needed only for tenant-scoped self-built apps. |
 | `FEISHU_BASE_URL` | Optional | `https://open.feishu.cn` | `internal/feishusdk`, `examples/create_task_with_http` | Override for sandbox domains. |
@@ -16,7 +16,7 @@
 
 | Variable | Required | Default | Used by | Description |
 | --- | --- | --- | --- | --- |
-| `TASK_BITABLE_URL` | Yes for Feishu-backed schedulers | – | `taskagent.Config`, `cmd` | Source of pending tasks (个人页搜索 / 综合页搜索等). |
+| `TASK_BITABLE_URL` | Yes for Feishu-backed schedulers | – | `taskagent.Config`, `cmd`, `examples/create_task_with_http`, `examples/create_task_with_sdk` | Source of pending tasks (个人页搜索 / 综合页搜索等). |
 | `RESULT_BITABLE_URL` | Yes when uploading captures to Feishu | – | `internal/storage`, `cmd` | Result table receiving capture rows + webhook summaries. |
 | `DRAMA_BITABLE_URL` | Required when fetching drama metadata from Feishu | – | `pkg/webhook`, `cmd` | Drama catalog table for ratio/metadata lookups. |
 | `WEBHOOK_BITABLE_URL` | Optional | empty | `pkg/webhook` | Dedicated webhook result table for group-based flows (aggregates TaskIDs + delivery status). |

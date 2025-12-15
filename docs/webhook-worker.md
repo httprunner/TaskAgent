@@ -65,11 +65,13 @@ Webhook 结果表用于存储 webhook 的关联信息和推送结果，核心字
   - `BizType=video_screen_capture`
   - `Status=pending`
   - `TaskIDs=[TaskID]`（单元素多选文本）
-  - `DramaInfo`：当前 `BookID` 为空可先写 `{}`（待后续修复 BookID 后再补齐）
+  - `DramaInfo`：若任务表已填 `BookID`，可按 `BookID` 查询剧单表并序列化写入；若缺失 `BookID` 则先写 `{}`，worker 仍可继续推送（仅 drama 维度信息为空）
   - `CreateAt`：创建时间
 - 建议的扫描条件（可按实际落地调整）：
   - 只处理 `Status=success` 的任务（避免对未完成任务提前创建/重复创建）
   - 要求 `ItemID` 非空（否则即使创建也无法查询结果记录，最终会走失败/错误）
+
+> 建议外部系统创建 `Scene=视频录屏采集` 任务时尽量补齐 `BookID`/`UserID`/`ItemID`，以提升 webhook payload 完整性与排查效率。
 
 ### 轮询/处理逻辑（WebhookResultWorker）
 
