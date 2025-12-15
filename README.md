@@ -32,7 +32,7 @@ Feishu Task Table ──> FeishuTaskClient (task)
     - Task source: `NewFeishuTaskClient`, `FeishuTaskClientOptions`.
     - Result storage: `ResultStorageConfig`, `ResultStorageManager`, `NewResultStorageManager`, `EnsureResultReporter`, `OpenCaptureResultsDB`, `ResolveResultDBPath`.
     - Feishu SDK aliases: `FeishuClient`, `TaskRecordInput`, `BitableRow`, field mappings (`DefaultTaskFields`, `DefaultResultFields`, `DefaultDramaFields`), filter helpers (`FeishuFilterInfo`, `NewFeishuFilterInfo`, `NewFeishuCondition`, etc.).
-    - Env + constants: `EnvString` and env/status constants (`EnvTaskBitableURL`, `EnvResultBitableURL`, `EnvDeviceBitableURL`, `EnvCookieBitableURL`, `StatusPending/Success/...`, `WebhookPending/Success/...`).
+    - Env + constants: `EnvString` and env/status constants (`EnvTaskBitableURL`, `EnvResultBitableURL`, `EnvDeviceBitableURL`, `EnvCookieBitableURL`, `StatusPending/Success/...`).
 
 - **`internal/feishusdk`**
   - Low-level Feishu Bitable SDK: HTTP client, auth, schema structs (`TaskFields`, `ResultFields`, `DramaFields`, `DeviceFields`), filter builders, and rate-limited Feishu result writer.
@@ -64,11 +64,13 @@ Feishu Task Table ──> FeishuTaskClient (task)
   - Summary webhook module used by multiple scenarios:
     - `webhook.go`: builds and sends summary webhooks by aggregating drama metadata + capture records from Feishu or SQLite.
     - `source_feishu.go` / `source_sqlite.go`: Feishu/SQLite data sources for summary payloads.
-    - `webhook_worker.go`: standalone webhook worker that scans task tables and retries failed/pending webhooks.
+    - `webhook_worker.go`: processes webhook result rows (WEBHOOK_BITABLE_URL) and delivers summary payloads.
+    - `webhook_create.go`: creates webhook result rows (group creation + external-task backfill).
 
 - **`cmd`**
   - CLI entrypoints built on `pkg/webhook` and `pkg/singleurl`:
-    - `webhook-worker`: standalone summary webhook worker using `webhook.NewWebhookWorker`.
+    - `webhook-worker`: process webhook result rows using `webhook.NewWebhookResultWorker`.
+    - `webhook-creator`: create webhook result rows for external tasks (video screen capture).
     - `singleurl`: single-URL capture helper built on TaskAgent.
     - `drama-tasks`: generate 综合页搜索 tasks from a drama catalog table.
 
@@ -83,7 +85,7 @@ Feishu Task Table ──> FeishuTaskClient (task)
 | `internal/feishusdk` | 封装 Feishu Bitable HTTP API、字段映射与速率限制，为根包提供底层 SDK 能力。 | 仅被 `taskagent`、`internal/storage`、`pkg/webhook` 等内部模块调用 |
 | `internal/storage` | 负责 SQLite `capture_results`/任务镜像表以及异步 Feishu 结果上报与短剧元数据镜像。 | 通过 `taskagent.NewResultStorageManager`、`EnsureResultReporter` 间接使用 |
 | `pkg/singleurl` | 基于 TaskAgent 的“单个链接采集” worker，不依赖设备池，直接调用下载服务完成采集。 | fox search agent、`cmd` 单链采集子命令 |
-| `pkg/webhook` | Summary webhook 能力：从 Feishu/SQLite 汇总数据构造 payload，并通过 worker 扫描任务表重试 Webhook。 | fox search agent Webhook 下游、`cmd webhook-worker` |
+| `pkg/webhook` | Summary webhook 能力：从 Feishu/SQLite 汇总数据构造 payload，并通过 webhook 结果表驱动重试与状态机。 | fox search agent Webhook 下游、`cmd webhook-*` |
 
 ## Getting Started
 1. **Clone & download modules**
@@ -158,7 +160,8 @@ Feishu Task Table ──> FeishuTaskClient (task)
 4. Configure device & task recorders (`DEVICE_BITABLE_URL`, `DEVICE_TASK_BITABLE_URL`) to observe fleet health and dispatch history.
 
 ### Infra CLI (`cmd`)
-- **Webhook worker**: `go run ./cmd webhook-worker --app kwai --task-url "$TASK_BITABLE_URL"`
+- **Webhook worker**: `go run ./cmd webhook-worker --task-url "$TASK_BITABLE_URL" --webhook-bitable-url "$WEBHOOK_BITABLE_URL" --webhook-url "$SUMMARY_WEBHOOK_URL"`
+- **Webhook creator (video screen capture)**: `go run ./cmd webhook-creator --task-url "$TASK_BITABLE_URL" --webhook-bitable-url "$WEBHOOK_BITABLE_URL" --app kwai`
 - **Single URL worker**: `go run ./cmd singleurl --task-url "$TASK_BITABLE_URL" --crawler-base-url "$CRAWLER_SERVICE_BASE_URL"`
 - **Drama tasks generator**: `go run ./cmd drama-tasks --date 2025-12-01 --drama-url "$DRAMA_BITABLE_URL" --task-url "$TASK_BITABLE_URL"`
 
@@ -199,11 +202,11 @@ OnTasksCompleted → Feishu updates + recorder cleanup
 - **Missing tasks** – verify `TASK_BITABLE_URL` points to a view with Status=`pending/failed`, App matches the `Start` argument, and the service account has permission to read.
 - **Recorder errors** – leave `DEVICE_BITABLE_URL`/`DEVICE_TASK_BITABLE_URL` empty to disable, or double-check field overrides align with your schema.
 - **Result uploads throttled** – increase `RESULT_REPORT_BATCH`, relax `RESULT_REPORT_POLL_INTERVAL`, or scale `FEISHU_REPORT_RPS` to avoid 99991400 responses.
-- **Webhook retries** – inspect `Webhook` column (pending/failed/error) and run `go run ./cmd webhook-worker` with the same App filter; see [`docs/webhook-worker.md`](docs/webhook-worker.md) for retry semantics.
+- **Webhook retries** – inspect `WEBHOOK_BITABLE_URL` rows (pending/failed/error) and run `go run ./cmd webhook-worker`; see [`docs/webhook-worker.md`](docs/webhook-worker.md).
 
 ## Further reading
 - [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) – comprehensive list of configuration keys.
 - [`docs/result-storage.md`](docs/result-storage.md) – SQLite + async reporter internals.
-- [`docs/webhook-worker.md`](docs/webhook-worker.md) – webhook lifecycle and CLI usage.
+- [`docs/webhook-worker.md`](docs/webhook-worker.md) – webhook lifecycle, creator/worker responsibilities.
 - [`docs/feishu-api-summary.md`](docs/feishu-api-summary.md) – Bitable API reference for this repo.
 - [`AGENTS.md`](AGENTS.md) – contributor workflow and coding standards.

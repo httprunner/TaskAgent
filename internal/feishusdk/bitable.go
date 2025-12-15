@@ -117,7 +117,6 @@ type TaskRecordInput struct {
 	Datetime         *time.Time
 	DatetimeRaw      string
 	Status           string
-	Webhook          string
 	UserID           string
 	UserName         string
 	Extra            string
@@ -1154,9 +1153,6 @@ func buildTaskRecordPayloads(records []TaskRecordInput, fields TaskFields) ([]ma
 		}
 		if strings.TrimSpace(fields.Status) != "" && rec.Status != "" {
 			row[fields.Status] = rec.Status
-		}
-		if strings.TrimSpace(fields.Webhook) != "" && rec.Webhook != "" {
-			row[fields.Webhook] = rec.Webhook
 		}
 		addOptionalField(row, fields.Logs, rec.Logs)
 		addOptionalField(row, fields.UserID, rec.UserID)

@@ -28,6 +28,43 @@ func fetchCaptureRecordsByTaskIDs(ctx context.Context, taskIDs []int64) ([]Captu
 	return fetchFeishuCaptureRecordsByTaskIDs(ctx, taskIDs)
 }
 
+func fetchCaptureRecordsByQuery(ctx context.Context, query recordQuery) ([]CaptureRecordPayload, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	fields := loadSummaryFieldConfig()
+
+	var sqliteErr error
+	sqliteDS, err := newSummaryDataSource(SourceSQLite, fields, Options{})
+	if err == nil && sqliteDS != nil {
+		defer sqliteDS.Close()
+		recs, err := sqliteDS.FetchRecords(ctx, query)
+		if err == nil && len(recs) > 0 {
+			return recs, nil
+		}
+		if err != nil {
+			sqliteErr = err
+		}
+	}
+
+	feishuDS, ferr := newSummaryDataSource(SourceFeishu, fields, Options{})
+	if ferr != nil {
+		if sqliteErr != nil {
+			return nil, errors.Wrapf(ferr, "sqlite error: %v", sqliteErr)
+		}
+		return nil, ferr
+	}
+	defer feishuDS.Close()
+	recs, ferr2 := feishuDS.FetchRecords(ctx, query)
+	if ferr2 != nil {
+		if sqliteErr != nil {
+			return nil, errors.Wrapf(ferr2, "sqlite error: %v", sqliteErr)
+		}
+		return nil, ferr2
+	}
+	return recs, nil
+}
+
 func fetchSQLiteCaptureRecordsByTaskIDs(ctx context.Context, taskIDs []int64) ([]CaptureRecordPayload, error) {
 	db, err := taskagent.OpenCaptureResultsDB()
 	if err != nil {

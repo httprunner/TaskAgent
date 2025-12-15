@@ -174,4 +174,3 @@ func TestBuildAliasParamsSupportsFullWidthSeparator(t *testing.T) {
 		})
 	}
 }
-

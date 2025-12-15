@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -15,7 +14,8 @@ import (
 
 func main() {
 	tableURL := flag.String("table", os.Getenv("TASK_BITABLE_URL"), "Feishu task table URL")
-	aID := flag.String("aid", "", "aid that will be nested inside Params JSON")
+	bookID := flag.String("bid", "", "book id that will be nested inside Params JSON")
+	userID := flag.String("uid", "", "user id that will be nested inside Params JSON")
 	eID := flag.String("eid", "", "eid that will be nested inside Params JSON")
 	timeout := flag.Duration("timeout", 30*time.Second, "Request timeout")
 	flag.Parse()
@@ -23,8 +23,11 @@ func main() {
 	if strings.TrimSpace(*tableURL) == "" {
 		log.Fatal("missing task table url (pass -table or export TASK_BITABLE_URL)")
 	}
-	if strings.TrimSpace(*aID) == "" {
-		log.Fatal("missing -aid value")
+	if strings.TrimSpace(*bookID) == "" {
+		log.Fatal("missing -bid value")
+	}
+	if strings.TrimSpace(*userID) == "" {
+		log.Fatal("missing -uid value")
 	}
 	if strings.TrimSpace(*eID) == "" {
 		log.Fatal("missing -eid value")
@@ -35,27 +38,22 @@ func main() {
 		log.Fatalf("init Feishu client: %v", err)
 	}
 
+	aID := fmt.Sprintf("快手_%s_%s", strings.TrimSpace(*bookID), strings.TrimSpace(*userID))
 	itemID := strings.TrimSpace(*eID)
-	payload, err := json.Marshal(map[string]string{
-		"type": "auto_additional_crawl",
-		"aid":  strings.TrimSpace(*aID),
-		"eid":  itemID,
-	})
-	if err != nil {
-		log.Fatalf("encode Params JSON: %v", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
-	defer cancel()
 
 	record := taskagent.TaskRecordInput{
 		App:     "com.smile.gifmaker",
 		Scene:   taskagent.SceneVideoScreenCapture,
+		BookID:  *bookID,
+		UserID:  *userID,
 		ItemID:  itemID,
-		Params:  string(payload),
+		GroupID: aID,
 		Status:  "pending",
-		Webhook: "pending",
+		Extra:   "auto_additional_crawl",
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	defer cancel()
 
 	id, err := client.CreateTaskRecord(ctx, strings.TrimSpace(*tableURL), record, nil)
 	if err != nil {

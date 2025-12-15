@@ -18,6 +18,7 @@ const (
 )
 
 type webhookResultFields struct {
+	BizType      string
 	ParentTaskID string
 	GroupID      string
 	Status       string
@@ -34,6 +35,7 @@ type webhookResultFields struct {
 
 func defaultWebhookResultFields() webhookResultFields {
 	fields := webhookResultFields{
+		BizType:      "BizType",
 		ParentTaskID: "ParentTaskID",
 		GroupID:      "GroupID",
 		Status:       "Status",
@@ -49,6 +51,7 @@ func defaultWebhookResultFields() webhookResultFields {
 	}
 
 	// Prefer WEBHOOK_FIELD_* overrides; keep PUSH_RESULT_FIELD_* as backward compatible aliases.
+	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_BIZTYPE", "PUSH_RESULT_FIELD_BIZTYPE"}, &fields.BizType)
 	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_PARENT_TASK_ID", "PUSH_RESULT_FIELD_PARENT_TASK_ID"}, &fields.ParentTaskID)
 	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_GROUPID", "PUSH_RESULT_FIELD_GROUPID"}, &fields.GroupID)
 	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_STATUS", "PUSH_RESULT_FIELD_STATUS"}, &fields.Status)

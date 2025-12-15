@@ -54,7 +54,6 @@ TaskAgent exposes per-table override knobs so you can align with custom schemas 
 | `TASK_FIELD_USERNAME` | `UserName` | User display name. |
 | `TASK_FIELD_DATETIME` | `Datetime` | Optional scheduling field. |
 | `TASK_FIELD_STATUS` | `Status` | Task lifecycle status (pending/queued/dispatched/running/success/failed). |
-| `TASK_FIELD_WEBHOOK` | `Webhook` | Webhook dispatch state (pending/success/failed/error). |
 | `TASK_FIELD_GROUPID` | `GroupID` | Piracy group-task identifier. |
 | `TASK_FIELD_DEVICE_SERIAL` | `DeviceSerial` | Target device serial (optional pre-allocation). |
 | `TASK_FIELD_DISPATCHED_DEVICE` | `DispatchedDevice` | Actual device used. |
@@ -63,6 +62,7 @@ TaskAgent exposes per-table override knobs so you can align with custom schemas 
 ### Webhook result table (`WEBHOOK_FIELD_*`)
 | Variable | Default | Purpose |
 | --- | --- | --- |
+| `WEBHOOK_FIELD_BIZTYPE` | `BizType` | Business type (e.g. `piracy_general_search`, `video_screen_capture`). |
 | `WEBHOOK_FIELD_PARENT_TASK_ID` | `ParentTaskID` | Parent task ID (综合页搜索 TaskID). |
 | `WEBHOOK_FIELD_GROUPID` | `GroupID` | Group identifier (`{App}_{BookID}_{UserID}`). |
 | `WEBHOOK_FIELD_STATUS` | `Status` | Webhook delivery state (pending/success/failed/error). |

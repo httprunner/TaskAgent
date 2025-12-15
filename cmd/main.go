@@ -26,7 +26,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&rootApp, "app", "", "App 包名覆盖 BUNDLE_ID")
 	rootCmd.PersistentFlags().StringVar(&rootTaskURL, "task-url", "", "任务状态表 URL 覆盖 TASK_BITABLE_URL")
 	rootCmd.AddCommand(
-		newWebhookCmd(),
+		newWebhookWorkerCmd(),
+		newWebhookCreatorCmd(),
 		newSingleURLCmd(),
 		newDramaTasksCmd(),
 	)

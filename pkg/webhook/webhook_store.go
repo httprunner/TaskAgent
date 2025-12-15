@@ -16,6 +16,7 @@ const legacyPushResultBitableURL = "PUSH_RESULT_BITABLE_URL"
 
 type webhookResultRow struct {
 	RecordID     string
+	BizType      string
 	ParentTaskID int64
 	GroupID      string
 	Status       string
@@ -34,6 +35,14 @@ type webhookResultStore struct {
 	client   *taskagent.FeishuClient
 	tableURL string
 	fields   webhookResultFields
+}
+
+type webhookResultCreateInput struct {
+	BizType      string
+	ParentTaskID int64
+	GroupID      string
+	TaskIDs      []int64
+	DramaInfo    string
 }
 
 func newWebhookResultStoreFromEnv() (*webhookResultStore, error) {
@@ -68,7 +77,7 @@ func (s *webhookResultStore) table() string {
 	return s.tableURL
 }
 
-func (s *webhookResultStore) getExistingByParentAndGroup(ctx context.Context, parentTaskID int64, groupID string) (*webhookResultRow, error) {
+func (s *webhookResultStore) getExistingByParentAndGroup(ctx context.Context, bizType string, parentTaskID int64, groupID string) (*webhookResultRow, error) {
 	if s == nil || s.client == nil || strings.TrimSpace(s.tableURL) == "" {
 		return nil, nil
 	}
@@ -77,6 +86,9 @@ func (s *webhookResultStore) getExistingByParentAndGroup(ctx context.Context, pa
 		return nil, nil
 	}
 	filter := taskagent.NewFeishuFilterInfo("and")
+	if field := strings.TrimSpace(s.fields.BizType); field != "" && strings.TrimSpace(bizType) != "" {
+		filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(field, "is", strings.TrimSpace(bizType)))
+	}
 	if field := strings.TrimSpace(s.fields.ParentTaskID); field != "" {
 		filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(field, "is", fmt.Sprintf("%d", parentTaskID)))
 	}
@@ -94,31 +106,51 @@ func (s *webhookResultStore) getExistingByParentAndGroup(ctx context.Context, pa
 	return &decoded, nil
 }
 
-func (s *webhookResultStore) createPending(ctx context.Context, parentTaskID int64, groupID string, taskIDs []int64, dramaInfoJSON string) (string, error) {
+func (s *webhookResultStore) createPending(ctx context.Context, input webhookResultCreateInput) (string, error) {
 	if s == nil || s.client == nil {
 		return "", errors.New("webhook result store is nil")
 	}
-	if parentTaskID <= 0 {
-		return "", errors.New("parent task id is required")
+	biz := strings.TrimSpace(input.BizType)
+	if biz == "" && strings.TrimSpace(s.fields.BizType) != "" {
+		return "", errors.New("biz type is required")
 	}
-	gid := strings.TrimSpace(groupID)
-	if gid == "" {
-		return "", errors.New("group id is required")
+	statusField := strings.TrimSpace(s.fields.Status)
+	if statusField == "" {
+		return "", errors.New("webhook result table status field is not configured")
 	}
 	now := time.Now().UTC().UnixMilli()
-	fields := map[string]any{
-		s.fields.ParentTaskID: fmt.Sprintf("%d", parentTaskID),
-		s.fields.GroupID:      gid,
-		s.fields.Status:       WebhookResultPending,
-		s.fields.DramaInfo:    strings.TrimSpace(dramaInfoJSON),
-		s.fields.UserInfo:     "{}",
-		s.fields.Records:      "[]",
-		s.fields.CreateAt:     now,
-		s.fields.RetryCount:   0,
-		s.fields.LastError:    "",
+	fields := map[string]any{statusField: WebhookResultPending}
+	if field := strings.TrimSpace(s.fields.BizType); field != "" && biz != "" {
+		fields[field] = biz
+	}
+	if field := strings.TrimSpace(s.fields.ParentTaskID); field != "" && input.ParentTaskID > 0 {
+		fields[field] = fmt.Sprintf("%d", input.ParentTaskID)
+	}
+	if field := strings.TrimSpace(s.fields.GroupID); field != "" {
+		if gid := strings.TrimSpace(input.GroupID); gid != "" {
+			fields[field] = gid
+		}
+	}
+	if field := strings.TrimSpace(s.fields.DramaInfo); field != "" {
+		fields[field] = strings.TrimSpace(input.DramaInfo)
+	}
+	if field := strings.TrimSpace(s.fields.UserInfo); field != "" {
+		fields[field] = "{}"
+	}
+	if field := strings.TrimSpace(s.fields.Records); field != "" {
+		fields[field] = "[]"
+	}
+	if field := strings.TrimSpace(s.fields.CreateAt); field != "" {
+		fields[field] = now
+	}
+	if field := strings.TrimSpace(s.fields.RetryCount); field != "" {
+		fields[field] = 0
+	}
+	if field := strings.TrimSpace(s.fields.LastError); field != "" {
+		fields[field] = ""
 	}
 	if trimmed := strings.TrimSpace(s.fields.TaskIDs); trimmed != "" {
-		fields[trimmed] = encodeTaskIDsForFeishu(taskIDs)
+		fields[trimmed] = encodeTaskIDsForFeishu(input.TaskIDs)
 	}
 	return s.client.CreateBitableRecord(ctx, s.tableURL, fields)
 }
@@ -198,6 +230,7 @@ func decodeWebhookResultRow(row taskagent.BitableRow, fields webhookResultFields
 	if row.Fields == nil {
 		return out
 	}
+	out.BizType = strings.TrimSpace(toString(row.Fields[fields.BizType]))
 	out.ParentTaskID = toInt64(row.Fields[fields.ParentTaskID])
 	out.GroupID = strings.TrimSpace(toString(row.Fields[fields.GroupID]))
 	out.Status = strings.ToLower(strings.TrimSpace(toString(row.Fields[fields.Status])))

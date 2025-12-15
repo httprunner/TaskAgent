@@ -25,7 +25,7 @@
 - **New JobRunners**: surface clear errors, respect context cancellation, and avoid blocking the scheduler (long runs should stream progress via the lifecycle hooks).
 - **New device providers**: add them under `providers/<name>`; never modify ADB-specific code to keep platform concerns isolated. Provide unit fakes if the provider shells out.
 - **Storage & recorder**: if you change schema fields, update `internal/feishusdk/constants.go`, `docs/result-storage.md`, and the env matrix. Async reporter tuning knobs (`RESULT_REPORT_*`, `FEISHU_REPORT_RPS`) must be documented whenever defaults shift.
-- **Group/webhook flows**: keep group-task semantics aligned with the expectations in `pkg/webhook`（尤其是 GroupID / Status / Webhook 字段约定），并确保 webhook-worker 变更时在 `pkg/webhook` 中补充表驱动测试。
+- **Group/webhook flows**: keep semantics aligned with `pkg/webhook`（尤其是 GroupID / Status / BizType / TaskIDs 字段约定），并确保 creator/worker 变更时在 `pkg/webhook` 中补充表驱动测试。
 
 ## 5. Testing expectations
 - Table-driven tests for every scheduling or webhook branch (`Test<Component><Scenario>` naming).

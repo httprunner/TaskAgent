@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +26,11 @@ type WebhookResultCreateOptions struct {
 	BookID   string
 	GroupIDs []string
 }
+
+const (
+	WebhookBizTypePiracyGeneralSearch = "piracy_general_search"
+	WebhookBizTypeVideoScreenCapture  = "video_screen_capture"
+)
 
 // CreateWebhookResultsForGroups creates one webhook result row per GroupID under a parent task.
 // It is designed for the "综合页搜索 -> 盗版筛查" flow where child tasks are generated and webhook
@@ -64,7 +70,7 @@ func CreateWebhookResultsForGroups(ctx context.Context, opts WebhookResultCreate
 	day := dayString(opts.ParentDatetime, opts.ParentDatetimeRaw)
 
 	for _, groupID := range groupIDs {
-		existing, err := store.getExistingByParentAndGroup(ctx, opts.ParentTaskID, groupID)
+		existing, err := store.getExistingByParentAndGroup(ctx, WebhookBizTypePiracyGeneralSearch, opts.ParentTaskID, groupID)
 		if err != nil {
 			return err
 		}
@@ -83,7 +89,13 @@ func CreateWebhookResultsForGroups(ctx context.Context, opts WebhookResultCreate
 				Msg("webhook result: group has no child tasks; skip creating row")
 			continue
 		}
-		if _, err := store.createPending(ctx, opts.ParentTaskID, groupID, taskIDs, dramaInfoJSON); err != nil {
+		if _, err := store.createPending(ctx, webhookResultCreateInput{
+			BizType:      WebhookBizTypePiracyGeneralSearch,
+			ParentTaskID: opts.ParentTaskID,
+			GroupID:      groupID,
+			TaskIDs:      taskIDs,
+			DramaInfo:    dramaInfoJSON,
+		}); err != nil {
 			return err
 		}
 	}
@@ -227,4 +239,219 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// WebhookResultCreatorConfig controls how the creator scans the task table
+// and creates webhook result rows for external-task flows (e.g. 视频录屏采集).
+type WebhookResultCreatorConfig struct {
+	TaskBitableURL    string
+	WebhookBitableURL string
+
+	// AppFilter optionally filters tasks by App column.
+	AppFilter string
+
+	// PollInterval controls how often the creator scans the task table.
+	PollInterval time.Duration
+
+	// BatchLimit caps how many tasks are processed per scan.
+	BatchLimit int
+
+	// ScanTodayOnly applies Datetime=Today filter when querying Feishu.
+	ScanTodayOnly bool
+}
+
+// WebhookResultCreator creates pending webhook result rows for tasks that are
+// created outside of the agent workflow (so the agent cannot create result rows
+// at task creation time).
+//
+// Current planned usage:
+// - BizType=video_screen_capture: one task -> one webhook result row.
+type WebhookResultCreator struct {
+	store        *webhookResultStore
+	taskClient   *taskagent.FeishuClient
+	taskTableURL string
+
+	appFilter  string
+	interval   time.Duration
+	batchLimit int
+	todayOnly  bool
+
+	// seen avoids creating duplicate webhook result rows for the same TaskID
+	// within a single long-running creator process.
+	seen map[int64]time.Time
+}
+
+func NewWebhookResultCreator(cfg WebhookResultCreatorConfig) (*WebhookResultCreator, error) {
+	taskURL := strings.TrimSpace(firstNonEmpty(cfg.TaskBitableURL, taskagent.EnvString(taskagent.EnvTaskBitableURL, "")))
+	if taskURL == "" {
+		return nil, errors.New("task bitable url is required")
+	}
+	store, err := newWebhookResultStore(firstNonEmpty(cfg.WebhookBitableURL, taskagent.EnvString(taskagent.EnvWebhookBitableURL, ""), taskagent.EnvString(legacyPushResultBitableURL, "")))
+	if err != nil {
+		return nil, err
+	}
+	if store == nil || strings.TrimSpace(store.table()) == "" {
+		return nil, errors.New("webhook result bitable url is required (WEBHOOK_BITABLE_URL)")
+	}
+	client, err := taskagent.NewFeishuClientFromEnv()
+	if err != nil {
+		return nil, err
+	}
+	interval := cfg.PollInterval
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	batch := cfg.BatchLimit
+	if batch <= 0 {
+		batch = 50
+	}
+	return &WebhookResultCreator{
+		store:        store,
+		taskClient:   client,
+		taskTableURL: taskURL,
+		appFilter:    strings.TrimSpace(cfg.AppFilter),
+		interval:     interval,
+		batchLimit:   batch,
+		todayOnly:    cfg.ScanTodayOnly,
+		seen:         make(map[int64]time.Time),
+	}, nil
+}
+
+func (c *WebhookResultCreator) Run(ctx context.Context) error {
+	if c == nil {
+		return errors.New("webhook result creator is nil")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	log.Info().
+		Str("task_bitable", c.taskTableURL).
+		Str("webhook_bitable", c.store.table()).
+		Str("app_filter", c.appFilter).
+		Dur("poll_interval", c.interval).
+		Int("batch_limit", c.batchLimit).
+		Bool("today_only", c.todayOnly).
+		Msg("webhook result creator started")
+
+	ticker := time.NewTicker(c.interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info().Msg("webhook result creator stopped")
+			return ctx.Err()
+		case <-ticker.C:
+			if err := c.processOnce(ctx); err != nil {
+				log.Error().Err(err).Msg("webhook result creator scan failed")
+			}
+		}
+	}
+}
+
+func (c *WebhookResultCreator) processOnce(ctx context.Context) error {
+	tasks, err := c.fetchVideoScreenCaptureTasks(ctx, c.batchLimit)
+	if err != nil {
+		return err
+	}
+	if len(tasks) == 0 {
+		return nil
+	}
+
+	now := time.Now()
+	c.gcSeen(now)
+
+	var errs []string
+	created := 0
+	skipped := 0
+	for _, t := range tasks {
+		if t.TaskID <= 0 {
+			continue
+		}
+		if _, ok := c.seen[t.TaskID]; ok {
+			skipped++
+			continue
+		}
+		if strings.TrimSpace(t.ItemID) == "" {
+			skipped++
+			continue
+		}
+		groupID := strings.TrimSpace(t.GroupID)
+		if _, err := c.store.createPending(ctx, webhookResultCreateInput{
+			BizType:   WebhookBizTypeVideoScreenCapture,
+			GroupID:   groupID,
+			TaskIDs:   []int64{t.TaskID},
+			DramaInfo: "{}",
+		}); err != nil {
+			errs = append(errs, fmt.Sprintf("task %d: %v", t.TaskID, err))
+			continue
+		}
+		c.seen[t.TaskID] = now
+		created++
+	}
+
+	if created > 0 || skipped > 0 {
+		log.Info().
+			Int("created", created).
+			Int("skipped", skipped).
+			Int("fetched", len(tasks)).
+			Msg("webhook result creator iteration completed")
+	}
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func (c *WebhookResultCreator) fetchVideoScreenCaptureTasks(ctx context.Context, limit int) ([]taskagent.FeishuTaskRow, error) {
+	if c == nil || c.taskClient == nil {
+		return nil, errors.New("task client is nil")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	fields := taskagent.DefaultTaskFields()
+	sceneField := strings.TrimSpace(fields.Scene)
+	statusField := strings.TrimSpace(fields.Status)
+	if sceneField == "" || statusField == "" {
+		return nil, errors.New("task table field mapping is missing (Scene/Status)")
+	}
+	filter := taskagent.NewFeishuFilterInfo("and")
+	filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(sceneField, "is", taskagent.SceneVideoScreenCapture))
+	filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(statusField, "is", taskagent.StatusSuccess))
+	if c.todayOnly {
+		if dtField := strings.TrimSpace(fields.Datetime); dtField != "" {
+			filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(dtField, "is", "Today"))
+		}
+	}
+	if app := strings.TrimSpace(c.appFilter); app != "" {
+		if appField := strings.TrimSpace(fields.App); appField != "" {
+			filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(appField, "is", app))
+		}
+	}
+
+	table, err := c.taskClient.FetchTaskTableWithOptions(ctx, c.taskTableURL, nil, &taskagent.FeishuTaskQueryOptions{
+		Filter:     filter,
+		Limit:      limit,
+		IgnoreView: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if table == nil {
+		return nil, nil
+	}
+	return table.Rows, nil
+}
+
+func (c *WebhookResultCreator) gcSeen(now time.Time) {
+	if c == nil || len(c.seen) == 0 {
+		return
+	}
+	// Keep only recent keys to prevent unbounded growth.
+	ttl := 24 * time.Hour
+	for id, ts := range c.seen {
+		if now.Sub(ts) > ttl {
+			delete(c.seen, id)
+		}
+	}
 }

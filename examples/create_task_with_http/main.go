@@ -234,22 +234,26 @@ func (c *HTTPClient) CreateTaskRecord(ctx context.Context, tableURL string, reco
 // TaskRecordInput 简化的任务记录结构
 type TaskRecordInput struct {
 	App, Scene, Params      string
-	Status, Webhook         string
+	Status                  string
 	UserID, UserName, Extra string
 	DeviceSerial            string
 	ItemID                  string
+	BookID                  string
+	GroupID                 string
 }
 
 func main() {
-	aID := flag.String("aid", "", "aid value")
+	bID := flag.String("bid", "", "bid value")
+	uID := flag.String("uid", "", "uid value")
 	eID := flag.String("eid", "", "eid value")
 	flag.Parse()
 
 	tableURL := os.Getenv("TASK_BITABLE_URL")
 	// 参数验证
-	if tableURL == "" || *aID == "" || *eID == "" {
-		log.Fatal("missing required parameters: -table, -aid, -eid")
+	if tableURL == "" || *bID == "" || *uID == "" || *eID == "" {
+		log.Fatal("missing required parameters: -table, -bid, -uid, -eid")
 	}
+	aID := fmt.Sprintf("快手_%s_%s", *bID, *uID)
 
 	client, err := NewHTTPClient()
 	if err != nil {
@@ -257,19 +261,15 @@ func main() {
 	}
 
 	itemID := strings.TrimSpace(*eID)
-	params, _ := json.Marshal(map[string]string{
-		"type": "auto_additional_crawl",
-		"aid":  strings.TrimSpace(*aID),
-		"eid":  itemID,
-	})
-
 	record := TaskRecordInput{
 		App:     "com.smile.gifmaker",
 		Scene:   "视频录屏采集",
+		BookID:  strings.TrimSpace(*bID),
+		UserID:  strings.TrimSpace(*uID),
 		ItemID:  itemID,
 		Status:  "pending",
-		Webhook: "pending",
-		Params:  string(params),
+		Extra:   "auto_additional_crawl",
+		GroupID: aID,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
