@@ -50,6 +50,7 @@ var captureResultColumns = []string{
 	"ItemDuration",
 	"UserName",
 	"UserID",
+	"UserAlias",
 	"UserAuthEntity",
 	"Tags",
 	"TaskID",
@@ -94,6 +95,7 @@ type Record struct {
 	ItemDuration   *float64
 	UserName       string
 	UserID         string
+	UserAlias      string
 	UserAuthEntity string
 	Tags           string
 	TaskID         int64
@@ -502,6 +504,7 @@ func buildJSONLRow(record ResultRecord) (map[string]any, error) {
 		"ItemDuration":   itemDuration,
 		"UserName":       record.DBRecord.UserName,
 		"UserID":         record.DBRecord.UserID,
+		"UserAlias":      record.DBRecord.UserAlias,
 		"UserAuthEntity": record.DBRecord.UserAuthEntity,
 		"Tags":           record.DBRecord.Tags,
 		"TaskID":         record.DBRecord.TaskID,
@@ -551,6 +554,7 @@ func (s *sqliteWriter) Write(ctx context.Context, record ResultRecord) error {
 		record.DBRecord.ItemDuration,
 		record.DBRecord.UserName,
 		record.DBRecord.UserID,
+		record.DBRecord.UserAlias,
 		record.DBRecord.UserAuthEntity,
 		record.DBRecord.Tags,
 		record.DBRecord.TaskID,
@@ -664,6 +668,7 @@ func prepareSchema(db *sql.DB) error {
 			ItemDuration REAL,
 			UserName TEXT,
 			UserID TEXT,
+			UserAlias TEXT,
 			UserAuthEntity TEXT,
 			Tags TEXT,
 			TaskID INTEGER,
@@ -695,6 +700,7 @@ func prepareSchema(db *sql.DB) error {
 		{"ItemCDNURL", "TEXT"},
 		{"ItemURL", "TEXT"},
 		{"ItemDuration", "REAL"},
+		{"UserAlias", "TEXT"},
 		{"UserAuthEntity", "TEXT"},
 		{"LikeCount", "INTEGER"},
 		{"ViewCount", "INTEGER"},

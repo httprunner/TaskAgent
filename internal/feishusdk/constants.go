@@ -116,6 +116,7 @@ var (
 		ItemDuration:   "ItemDuration",   // 内容时长（秒），仅限视频
 		UserName:       "UserName",       // 用户名称
 		UserID:         "UserID",         // 用户 ID
+		UserAlias:      "UserAlias",      // 用户别名/展示 ID
 		UserAuthEntity: "UserAuthEntity", // 用户认证实体
 		Tags:           "Tags",           // 内容标签
 		LikeCount:      "LikeCount",      // 点赞数
@@ -197,6 +198,7 @@ func applyResultFieldEnvOverrides(fields *ResultFields) {
 	overrideFieldFromEnv("RESULT_FIELD_DURATION", &fields.ItemDuration)
 	overrideFieldFromEnv("RESULT_FIELD_USERNAME", &fields.UserName)
 	overrideFieldFromEnv("RESULT_FIELD_USERID", &fields.UserID)
+	overrideFieldFromEnv("RESULT_FIELD_USERALIAS", &fields.UserAlias)
 	overrideFieldFromEnv("RESULT_FIELD_USERAUTHENTITY", &fields.UserAuthEntity)
 	overrideFieldFromEnv("RESULT_FIELD_TAGS", &fields.Tags)
 	overrideFieldFromEnv("RESULT_FIELD_TASKID", &fields.TaskID)

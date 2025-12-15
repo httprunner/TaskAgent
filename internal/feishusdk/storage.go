@@ -208,6 +208,9 @@ func collectFilledResultFields(record ResultRecordInput, names ResultFields) []s
 	if strings.TrimSpace(record.UserID) != "" {
 		columns = append(columns, names.UserID)
 	}
+	if strings.TrimSpace(record.UserAlias) != "" {
+		columns = append(columns, names.UserAlias)
+	}
 	if strings.TrimSpace(record.UserAuthEntity) != "" {
 		columns = append(columns, names.UserAuthEntity)
 	}

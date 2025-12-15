@@ -143,6 +143,7 @@ type ResultFields struct {
 	ItemDuration   string
 	UserName       string
 	UserID         string
+	UserAlias      string
 	UserAuthEntity string
 	Tags           string
 	TaskID         string
@@ -178,6 +179,7 @@ type ResultRecordInput struct {
 	ItemDurationSeconds *float64
 	UserName            string
 	UserID              string
+	UserAlias           string
 	UserAuthEntity      string
 	Tags                string
 	TaskID              int64
@@ -1087,6 +1089,12 @@ func (fields ResultFields) merge(override ResultFields) ResultFields {
 	if strings.TrimSpace(override.UserID) != "" {
 		result.UserID = override.UserID
 	}
+	if strings.TrimSpace(override.UserAlias) != "" {
+		result.UserAlias = override.UserAlias
+	}
+	if strings.TrimSpace(override.UserAuthEntity) != "" {
+		result.UserAuthEntity = override.UserAuthEntity
+	}
 	if strings.TrimSpace(override.Tags) != "" {
 		result.Tags = override.Tags
 	}
@@ -1200,6 +1208,7 @@ func buildResultRecordPayloads(records []ResultRecordInput, fields ResultFields)
 		addOptionalNumber(row, fields.ItemDuration, rec.ItemDurationSeconds)
 		addOptionalField(row, fields.UserName, rec.UserName)
 		addOptionalField(row, fields.UserID, rec.UserID)
+		addOptionalField(row, fields.UserAlias, rec.UserAlias)
 		addOptionalField(row, fields.UserAuthEntity, rec.UserAuthEntity)
 		addOptionalField(row, fields.Tags, rec.Tags)
 		if strings.TrimSpace(fields.TaskID) != "" && rec.TaskID != 0 {

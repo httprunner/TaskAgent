@@ -215,7 +215,7 @@ func (r *resultReporter) claimPending(ctx context.Context, claimedAt int64) ([]p
 	}
 
 	query := fmt.Sprintf(`SELECT id, Datetime, DeviceSerial, App, Scene, Params, ItemID, ItemCaption,
-		ItemCDNURL, ItemURL, ItemDuration, UserName, UserID, UserAuthEntity, Tags, TaskID,
+		ItemCDNURL, ItemURL, ItemDuration, UserName, UserID, UserAlias, UserAuthEntity, Tags, TaskID,
 		Extra, LikeCount, ViewCount, AnchorPoint, CommentCount, CollectCount, ForwardCount,
 		ShareCount, PayMode, Collection, Episode, PublishTime
 		FROM %s WHERE %s=? AND %s=? ORDER BY id ASC`, quoteIdent(r.table), quoteIdent(reportedColumn), quoteIdent(reportedAtColumn))
@@ -243,6 +243,7 @@ func (r *resultReporter) claimPending(ctx context.Context, claimedAt int64) ([]p
 			&row.ItemDuration,
 			&row.UserName,
 			&row.UserID,
+			&row.UserAlias,
 			&row.UserAuthEntity,
 			&row.Tags,
 			&row.TaskID,
@@ -392,6 +393,7 @@ type pendingResultRow struct {
 	ItemDuration   sql.NullFloat64
 	UserName       sql.NullString
 	UserID         sql.NullString
+	UserAlias      sql.NullString
 	UserAuthEntity sql.NullString
 	Tags           sql.NullString
 	TaskID         sql.NullInt64
@@ -432,6 +434,7 @@ func (r pendingResultRow) toResultRecord() feishusdk.ResultRecordInput {
 		ItemDurationSeconds: durationPtr,
 		UserName:            trimNull(r.UserName),
 		UserID:              trimNull(r.UserID),
+		UserAlias:           trimNull(r.UserAlias),
 		UserAuthEntity:      trimNull(r.UserAuthEntity),
 		Tags:                trimNull(r.Tags),
 		TaskID:              r.TaskID.Int64,
