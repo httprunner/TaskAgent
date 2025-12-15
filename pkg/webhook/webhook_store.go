@@ -12,8 +12,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-const legacyPushResultBitableURL = "PUSH_RESULT_BITABLE_URL"
-
 type webhookResultRow struct {
 	RecordID     string
 	BizType      string
@@ -43,15 +41,6 @@ type webhookResultCreateInput struct {
 	GroupID      string
 	TaskIDs      []int64
 	DramaInfo    string
-}
-
-func newWebhookResultStoreFromEnv() (*webhookResultStore, error) {
-	url := strings.TrimSpace(taskagent.EnvString(taskagent.EnvWebhookBitableURL, ""))
-	if url == "" {
-		// Backward compatible alias.
-		url = strings.TrimSpace(taskagent.EnvString(legacyPushResultBitableURL, ""))
-	}
-	return newWebhookResultStore(url)
 }
 
 func newWebhookResultStore(tableURL string) (*webhookResultStore, error) {

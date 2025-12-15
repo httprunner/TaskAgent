@@ -30,7 +30,7 @@ func newWebhookCreatorCmd() *cobra.Command {
 			if strings.TrimSpace(taskURL) == "" {
 				return fmt.Errorf("--task-url or %s must be provided", feishusdk.EnvTaskBitableURL)
 			}
-			webhookBitable := firstNonEmpty(flagWebhookBitable, env.String(feishusdk.EnvWebhookBitableURL, ""), env.String("PUSH_RESULT_BITABLE_URL", ""))
+			webhookBitable := firstNonEmpty(flagWebhookBitable, env.String(feishusdk.EnvWebhookBitableURL, ""))
 			if strings.TrimSpace(webhookBitable) == "" {
 				return fmt.Errorf("--webhook-bitable-url or %s must be provided", feishusdk.EnvWebhookBitableURL)
 			}

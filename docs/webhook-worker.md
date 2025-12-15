@@ -37,7 +37,7 @@ Webhook 结果表用于存储 webhook 的关联信息和推送结果，核心字
 
 环境变量：
 - `WEBHOOK_BITABLE_URL`：Webhook 结果表链接
-  - 兼容：若未设置 `WEBHOOK_BITABLE_URL`，worker 会尝试读取旧变量 `PUSH_RESULT_BITABLE_URL`（仅用于兼容历史配置，建议尽快迁移）
+  - 需要设置 `WEBHOOK_BITABLE_URL`
 
 字段名覆盖（可选）：`WEBHOOK_FIELD_*`，详见 `docs/ENVIRONMENT.md`。
 

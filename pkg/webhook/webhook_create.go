@@ -36,7 +36,8 @@ const (
 // It is designed for the "综合页搜索 -> 盗版筛查" flow where child tasks are generated and webhook
 // should only fire after all TaskIDs complete (success/error).
 func CreateWebhookResultsForGroups(ctx context.Context, opts WebhookResultCreateOptions) error {
-	store, err := newWebhookResultStore(firstNonEmpty(opts.WebhookBitableURL, taskagent.EnvString(taskagent.EnvWebhookBitableURL, ""), taskagent.EnvString(legacyPushResultBitableURL, "")))
+	log.Info().Msg("creating webhook tasks for groups")
+	store, err := newWebhookResultStore(firstNonEmpty(opts.WebhookBitableURL, taskagent.EnvString(taskagent.EnvWebhookBitableURL, "")))
 	if err != nil {
 		return err
 	}
@@ -286,7 +287,7 @@ func NewWebhookResultCreator(cfg WebhookResultCreatorConfig) (*WebhookResultCrea
 	if taskURL == "" {
 		return nil, errors.New("task bitable url is required")
 	}
-	store, err := newWebhookResultStore(firstNonEmpty(cfg.WebhookBitableURL, taskagent.EnvString(taskagent.EnvWebhookBitableURL, ""), taskagent.EnvString(legacyPushResultBitableURL, "")))
+	store, err := newWebhookResultStore(firstNonEmpty(cfg.WebhookBitableURL, taskagent.EnvString(taskagent.EnvWebhookBitableURL, "")))
 	if err != nil {
 		return nil, err
 	}

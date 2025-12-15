@@ -35,7 +35,8 @@ type WebhookResultWorker struct {
 const maxWebhookResultRetries = 3
 
 func NewWebhookResultWorker(cfg WebhookResultWorkerConfig) (*WebhookResultWorker, error) {
-	taskURL := strings.TrimSpace(firstNonEmpty(cfg.TaskBitableURL, taskagent.EnvString(taskagent.EnvTaskBitableURL, "")))
+	taskURL := strings.TrimSpace(firstNonEmpty(cfg.TaskBitableURL,
+		taskagent.EnvString(taskagent.EnvTaskBitableURL, "")))
 	if taskURL == "" {
 		return nil, errors.New("task bitable url is required")
 	}
@@ -43,7 +44,8 @@ func NewWebhookResultWorker(cfg WebhookResultWorkerConfig) (*WebhookResultWorker
 	if webhookURL == "" {
 		return nil, errors.New("summary webhook url is required")
 	}
-	store, err := newWebhookResultStore(firstNonEmpty(cfg.WebhookBitableURL, taskagent.EnvString(taskagent.EnvWebhookBitableURL, ""), taskagent.EnvString(legacyPushResultBitableURL, "")))
+	store, err := newWebhookResultStore(firstNonEmpty(cfg.WebhookBitableURL,
+		taskagent.EnvString(taskagent.EnvWebhookBitableURL, "")))
 	if err != nil {
 		return nil, err
 	}
