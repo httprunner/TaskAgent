@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/httprunner/TaskAgent/internal/feishusdk"
@@ -52,5 +53,43 @@ func TestNormalizeDramaInfoForStorage(t *testing.T) {
 	}
 	if _, exists := normalized["无关字段"]; exists {
 		t.Fatalf("unexpected raw field present: %#v", normalized)
+	}
+}
+
+func TestDecodeDramaInfo_DoubleEncoded(t *testing.T) {
+	raw := `"{\"DramaID\":\"123\",\"DramaName\":\"abc\"}"`
+	decoded, err := decodeDramaInfo(raw)
+	if err != nil {
+		t.Fatalf("decodeDramaInfo failed: %v", err)
+	}
+	if decoded["DramaID"] != "123" {
+		t.Fatalf("unexpected DramaID: %#v", decoded["DramaID"])
+	}
+	if decoded["DramaName"] != "abc" {
+		t.Fatalf("unexpected DramaName: %#v", decoded["DramaName"])
+	}
+}
+
+func TestDecodeDramaInfo_RichTextArray(t *testing.T) {
+	rich := []any{
+		map[string]any{
+			"text": `{"DramaID":"123","DramaName":"abc"}`,
+			"type": "text",
+		},
+	}
+	b, err := json.Marshal(rich)
+	if err != nil {
+		t.Fatalf("marshal rich text failed: %v", err)
+	}
+	raw := string(b)
+	decoded, err := decodeDramaInfo(raw)
+	if err != nil {
+		t.Fatalf("decodeDramaInfo failed: %v", err)
+	}
+	if decoded["DramaID"] != "123" {
+		t.Fatalf("unexpected DramaID: %#v", decoded["DramaID"])
+	}
+	if decoded["DramaName"] != "abc" {
+		t.Fatalf("unexpected DramaName: %#v", decoded["DramaName"])
 	}
 }

@@ -216,7 +216,10 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 	}
 
 	meta := pickTaskMeta(tasks)
-	dramaRaw, _ := decodeDramaInfo(row.DramaInfo)
+	dramaRaw, err := decodeDramaInfo(row.DramaInfo)
+	if err != nil {
+		return w.markFailed(ctx, row, fmt.Errorf("decode drama info failed: %v", err))
+	}
 
 	var records []CaptureRecordPayload
 	switch bizType {
@@ -258,13 +261,40 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 		return w.markFailed(ctx, row, fmt.Errorf("unknown biz type: %s", bizType))
 	}
 
-	payload := buildWebhookResultPayload(dramaRaw, meta.Params, records)
+	payload := buildWebhookResultPayload(dramaRaw, records)
+	if val, ok := payload["DramaName"]; !ok || strings.TrimSpace(fmt.Sprint(val)) == "" {
+		payload["DramaName"] = strings.TrimSpace(meta.Params)
+	}
+	taskItemIDs := buildTaskItemIDs(records)
+	recordsPayloadJSON, _ := json.Marshal(map[string]any{
+		"total":  len(taskItemIDs),
+		"format": "TaskID_ItemID",
+		"items":  taskItemIDs,
+	})
+	userInfoJSON, _ := json.Marshal(map[string]any{
+		"UserID":   meta.UserID,
+		"UserName": meta.UserName,
+	})
+	recordsStr := strings.TrimSpace(string(recordsPayloadJSON))
+	if recordsStr == "" {
+		recordsStr = `{"total":0,"format":"TaskID_ItemID","items":[]}`
+	}
+	userInfoStr := strings.TrimSpace(string(userInfoJSON))
+	if userInfoStr == "" {
+		userInfoStr = "{}"
+	}
+	// Persist payload artifacts before webhook delivery so operators can inspect failures.
+	if err := w.store.update(ctx, row.RecordID, webhookResultUpdate{
+		Records:  ptrString(recordsStr),
+		UserInfo: ptrString(userInfoStr),
+	}); err != nil {
+		return err
+	}
+
 	if err := PostWebhook(ctx, w.webhookURL, payload, nil); err != nil {
 		return w.markFailed(ctx, row, err)
 	}
 
-	recordsJSON, _ := json.Marshal(payload["records"])
-	userInfo := "{}"
 	end := time.Now().UTC().UnixMilli()
 	state := WebhookResultSuccess
 	zero := 0
@@ -274,19 +304,50 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 		EndAtMs:    &end,
 		RetryCount: &zero,
 		LastError:  &empty,
-		UserInfo:   &userInfo,
-		Records:    ptrString(string(recordsJSON)),
+		UserInfo:   ptrString(userInfoStr),
+		Records:    ptrString(recordsStr),
 	})
 }
 
-func buildWebhookResultPayload(dramaRaw map[string]any, fallbackDramaName string, records []CaptureRecordPayload) map[string]any {
+func buildWebhookResultPayload(dramaRaw map[string]any, records []CaptureRecordPayload) map[string]any {
 	payload := flattenDramaFields(dramaRaw, taskagent.DefaultDramaFields())
-	if val, ok := payload["DramaName"]; !ok || strings.TrimSpace(fmt.Sprint(val)) == "" {
-		payload["DramaName"] = strings.TrimSpace(fallbackDramaName)
-	}
 	flat, _ := FlattenRecordsAndCollectItemIDs(records, taskagent.DefaultResultFields())
 	payload["records"] = flat
 	return payload
+}
+
+func buildTaskItemIDs(records []CaptureRecordPayload) []string {
+	if len(records) == 0 {
+		return nil
+	}
+	fields := taskagent.DefaultResultFields()
+	taskKey := strings.TrimSpace(fields.TaskID)
+	itemKey := strings.TrimSpace(fields.ItemID)
+	seen := make(map[string]struct{}, len(records))
+	out := make([]string, 0, len(records))
+	for _, rec := range records {
+		if rec.Fields == nil {
+			continue
+		}
+		taskID := strings.TrimSpace(getString(rec.Fields, "TaskID"))
+		if taskID == "" && taskKey != "" {
+			taskID = strings.TrimSpace(getString(rec.Fields, taskKey))
+		}
+		itemID := strings.TrimSpace(getString(rec.Fields, "ItemID"))
+		if itemID == "" && itemKey != "" {
+			itemID = strings.TrimSpace(getString(rec.Fields, itemKey))
+		}
+		if taskID == "" || itemID == "" {
+			continue
+		}
+		key := fmt.Sprintf("%s_%s", taskID, itemID)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	return out
 }
 
 func (w *WebhookResultWorker) markFailed(ctx context.Context, row webhookResultRow, err error) error {

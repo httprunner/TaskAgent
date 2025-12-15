@@ -18,14 +18,15 @@ func fetchCaptureRecordsByTaskIDs(ctx context.Context, taskIDs []int64) ([]Captu
 	if err == nil && len(records) > 0 {
 		return records, nil
 	}
-	if err != nil {
-		feishuRecords, feishuErr := fetchFeishuCaptureRecordsByTaskIDs(ctx, taskIDs)
-		if feishuErr != nil {
+
+	feishuRecords, feishuErr := fetchFeishuCaptureRecordsByTaskIDs(ctx, taskIDs)
+	if feishuErr != nil {
+		if err != nil {
 			return nil, errors.Wrapf(feishuErr, "sqlite error: %v", err)
 		}
-		return feishuRecords, nil
+		return nil, feishuErr
 	}
-	return fetchFeishuCaptureRecordsByTaskIDs(ctx, taskIDs)
+	return feishuRecords, nil
 }
 
 func fetchCaptureRecordsByQuery(ctx context.Context, query recordQuery) ([]CaptureRecordPayload, error) {
@@ -66,6 +67,9 @@ func fetchCaptureRecordsByQuery(ctx context.Context, query recordQuery) ([]Captu
 }
 
 func fetchSQLiteCaptureRecordsByTaskIDs(ctx context.Context, taskIDs []int64) ([]CaptureRecordPayload, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	db, err := taskagent.OpenCaptureResultsDB()
 	if err != nil {
 		return nil, err
@@ -76,9 +80,11 @@ func fetchSQLiteCaptureRecordsByTaskIDs(ctx context.Context, taskIDs []int64) ([
 	if table == "" {
 		return nil, errors.New("sqlite result table name is empty")
 	}
-	taskIDCol := strings.TrimSpace(taskagent.DefaultResultFields().TaskID)
+	// SQLite schema uses stable column names (e.g. "TaskID") and should not rely on
+	// Feishu field mappings (RESULT_FIELD_*), which may be localized.
+	taskIDCol := strings.TrimSpace(taskagent.EnvString("RESULT_SQLITE_FIELD_TASKID", "TaskID"))
 	if taskIDCol == "" {
-		return nil, errors.New("result TaskID field mapping is empty")
+		return nil, errors.New("sqlite TaskID column name is empty")
 	}
 	placeholders := make([]string, 0, len(taskIDs))
 	args := make([]any, 0, len(taskIDs))
@@ -195,9 +201,58 @@ func decodeDramaInfo(raw string) (map[string]any, error) {
 	if trimmed == "" {
 		return nil, nil
 	}
-	var fields map[string]any
-	if err := json.Unmarshal([]byte(trimmed), &fields); err != nil {
-		return nil, err
+	var decoded any
+	if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
+		// Backward/compat: some writers may store DramaInfo as a JSON-encoded string
+		// (e.g. "\"{\\\"DramaID\\\":...}\""). Try decoding the wrapper string first.
+		var wrapped string
+		if err2 := json.Unmarshal([]byte(trimmed), &wrapped); err2 != nil {
+			return nil, err
+		}
+		wrapped = strings.TrimSpace(wrapped)
+		if wrapped == "" {
+			return nil, nil
+		}
+		if err3 := json.Unmarshal([]byte(wrapped), &decoded); err3 != nil {
+			return nil, err
+		}
 	}
-	return fields, nil
+	return normalizeDramaInfoValue(decoded)
+}
+
+func normalizeDramaInfoValue(decoded any) (map[string]any, error) {
+	switch v := decoded.(type) {
+	case nil:
+		return nil, nil
+	case map[string]any:
+		return v, nil
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return nil, nil
+		}
+		var nested any
+		if err := json.Unmarshal([]byte(trimmed), &nested); err != nil {
+			return nil, err
+		}
+		return normalizeDramaInfoValue(nested)
+	case []any:
+		// Feishu rich-text fields may be returned as an array of {text,type} objects.
+		// Attempt to flatten it to a JSON string, then parse again.
+		if text := extractTextArray(v); strings.TrimSpace(text) != "" {
+			var nested any
+			if err := json.Unmarshal([]byte(strings.TrimSpace(text)), &nested); err != nil {
+				return nil, err
+			}
+			return normalizeDramaInfoValue(nested)
+		}
+		if len(v) == 1 {
+			if only, ok := v[0].(map[string]any); ok {
+				return only, nil
+			}
+		}
+		return nil, fmt.Errorf("unexpected drama info json array")
+	default:
+		return nil, fmt.Errorf("unexpected drama info json type %T", decoded)
+	}
 }

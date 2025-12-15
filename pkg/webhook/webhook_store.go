@@ -239,9 +239,9 @@ func decodeWebhookResultRow(row taskagent.BitableRow, fields webhookResultFields
 	out.GroupID = strings.TrimSpace(toString(row.Fields[fields.GroupID]))
 	out.Status = strings.ToLower(strings.TrimSpace(toString(row.Fields[fields.Status])))
 	out.TaskIDs = parseTaskIDs(row.Fields[fields.TaskIDs])
-	out.DramaInfo = strings.TrimSpace(toString(row.Fields[fields.DramaInfo]))
-	out.UserInfo = strings.TrimSpace(toString(row.Fields[fields.UserInfo]))
-	out.Records = strings.TrimSpace(toString(row.Fields[fields.Records]))
+	out.DramaInfo = strings.TrimSpace(toJSONString(row.Fields[fields.DramaInfo]))
+	out.UserInfo = strings.TrimSpace(toJSONString(row.Fields[fields.UserInfo]))
+	out.Records = strings.TrimSpace(toJSONString(row.Fields[fields.Records]))
 	out.CreateAtMs = toInt64(row.Fields[fields.CreateAt])
 	out.StartAtMs = toInt64(row.Fields[fields.StartAt])
 	out.EndAtMs = toInt64(row.Fields[fields.EndAt])
@@ -343,6 +343,33 @@ func toString(v any) string {
 	case json.Number:
 		return x.String()
 	default:
+		return fmt.Sprint(x)
+	}
+}
+
+func toJSONString(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return x
+	case []byte:
+		return string(x)
+	case json.Number:
+		return x.String()
+	case []any:
+		// Prefer decoding Feishu rich-text arrays to their plain text form.
+		if text := extractTextArray(x); strings.TrimSpace(text) != "" {
+			return text
+		}
+		if b, err := json.Marshal(x); err == nil {
+			return string(b)
+		}
+		return fmt.Sprint(x)
+	default:
+		if b, err := json.Marshal(x); err == nil {
+			return string(b)
+		}
 		return fmt.Sprint(x)
 	}
 }
