@@ -255,7 +255,13 @@ func flattenDramaFields(raw map[string]any, schema taskagent.FeishuDramaFields) 
 		// values. Downstream webhooks expect plain strings, so normalize the
 		// value to a string to avoid validation errors.
 		if raw != nil {
-			payload[engName] = getString(raw, rawKey)
+			// Support both raw Feishu field names (e.g. "短剧名称") and already-normalized
+			// english keys (e.g. "DramaName") so stored DramaInfo can be schema-friendly.
+			if _, ok := raw[engName]; ok {
+				payload[engName] = getString(raw, engName)
+			} else {
+				payload[engName] = getString(raw, rawKey)
+			}
 			continue
 		}
 		payload[engName] = nil

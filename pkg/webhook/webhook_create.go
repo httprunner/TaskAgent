@@ -124,11 +124,26 @@ func fetchDramaInfoJSONByBookID(ctx context.Context, client *taskagent.FeishuCli
 	if len(rows) == 0 {
 		return "", sql.ErrNoRows
 	}
-	raw, err := json.Marshal(rows[0].Fields)
+	normalized := normalizeDramaInfoForStorage(rows[0].Fields)
+	raw, err := json.Marshal(normalized)
 	if err != nil {
 		return "", err
 	}
 	return string(raw), nil
+}
+
+func normalizeDramaInfoForStorage(raw map[string]any) map[string]any {
+	flat := flattenDramaFields(raw, taskagent.DefaultDramaFields())
+	out := make(map[string]any, len(flat))
+	for key, val := range flat {
+		str, _ := val.(string)
+		str = strings.TrimSpace(str)
+		if str == "" {
+			continue
+		}
+		out[key] = str
+	}
+	return out
 }
 
 func fetchGroupTaskIDsWithRetry(ctx context.Context, client *taskagent.FeishuClient, taskTableURL, groupID, day string, attempts int) ([]int64, error) {
