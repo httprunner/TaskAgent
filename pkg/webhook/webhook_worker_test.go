@@ -50,3 +50,97 @@ func TestAllTasksReady(t *testing.T) {
 		t.Fatalf("expected not ready when task missing")
 	}
 }
+
+func TestBuildTaskItemsByTaskID(t *testing.T) {
+	records := []CaptureRecordPayload{
+		{Fields: map[string]any{"TaskID": "1001", "ItemID": "b"}},
+		{Fields: map[string]any{"TaskID": "1001", "ItemID": "a"}},
+		{Fields: map[string]any{"TaskID": "1002", "ItemID": "c"}},
+		{Fields: map[string]any{"TaskID": "1002", "ItemID": "c"}}, // duplicate
+		{Fields: map[string]any{"TaskID": "9999", "ItemID": "x"}}, // task id not in hint list
+		{Fields: map[string]any{"ItemID": "missing_task_id"}},
+		{Fields: map[string]any{"TaskID": "1001"}},
+	}
+
+	got := buildTaskItemsByTaskID(records, []int64{1001, 1002, 1003})
+
+	assertGroup := func(taskID string, total int, items []string) {
+		t.Helper()
+		group, ok := got[taskID]
+		if !ok {
+			t.Fatalf("missing taskID %s", taskID)
+		}
+		if group.Total != total {
+			t.Fatalf("taskID %s total mismatch: got=%d want=%d", taskID, group.Total, total)
+		}
+		if len(group.Items) != len(items) {
+			t.Fatalf("taskID %s items length mismatch: got=%v want=%v", taskID, group.Items, items)
+		}
+		for i := range items {
+			if group.Items[i] != items[i] {
+				t.Fatalf("taskID %s items mismatch: got=%v want=%v", taskID, group.Items, items)
+			}
+		}
+	}
+
+	assertGroup("1001", 2, []string{"a", "b"})
+	assertGroup("1002", 1, []string{"c"})
+	assertGroup("1003", 0, []string{})
+	assertGroup("9999", 1, []string{"x"})
+}
+
+func TestPickFirstNonEmptyCaptureFieldByTaskIDs(t *testing.T) {
+	cases := []struct {
+		name      string
+		records   []CaptureRecordPayload
+		taskIDs   []int64
+		taskIDRaw string
+		fieldEng  string
+		fieldRaw  string
+		want      string
+	}{
+		{
+			name: "sqlite_taskid_eng_field",
+			records: []CaptureRecordPayload{
+				{Fields: map[string]any{"TaskID": "1", "UserAlias": ""}},
+				{Fields: map[string]any{"TaskID": "1", "UserAlias": "alias-1"}},
+				{Fields: map[string]any{"TaskID": "2", "UserAlias": "alias-2"}},
+			},
+			taskIDs:  []int64{1, 2},
+			fieldEng: "UserAlias",
+			want:     "alias-1",
+		},
+		{
+			name: "prefers_first_taskid_in_order",
+			records: []CaptureRecordPayload{
+				{Fields: map[string]any{"TaskID": "1", "UserAlias": "alias-1"}},
+				{Fields: map[string]any{"TaskID": "2", "UserAlias": "alias-2"}},
+			},
+			taskIDs:  []int64{2, 1},
+			fieldEng: "UserAlias",
+			want:     "alias-2",
+		},
+		{
+			name: "feishu_raw_field_fallback",
+			records: []CaptureRecordPayload{
+				{Fields: map[string]any{"任务ID": "1", "用户别名": ""}},
+				{Fields: map[string]any{"任务ID": "1", "用户别名": "alias-raw"}},
+			},
+			taskIDs:   []int64{1},
+			taskIDRaw: "任务ID",
+			fieldEng:  "UserAlias",
+			fieldRaw:  "用户别名",
+			want:      "alias-raw",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := pickFirstNonEmptyCaptureFieldByTaskIDs(tc.records, tc.taskIDs, tc.taskIDRaw, tc.fieldEng, tc.fieldRaw)
+			if got != tc.want {
+				t.Fatalf("got=%q want=%q", got, tc.want)
+			}
+		})
+	}
+}

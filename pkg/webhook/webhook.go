@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
@@ -417,6 +418,9 @@ func getString(fields map[string]any, name string) string {
 		return ""
 	}
 	if val, ok := fields[name]; ok {
+		if val == nil {
+			return ""
+		}
 		switch v := val.(type) {
 		case string:
 			return strings.TrimSpace(v)
@@ -429,8 +433,20 @@ func getString(fields map[string]any, name string) string {
 				return text
 			}
 		default:
+			rv := reflect.ValueOf(val)
+			switch rv.Kind() {
+			case reflect.Ptr, reflect.Map, reflect.Slice, reflect.Interface, reflect.Func, reflect.Chan:
+				if rv.IsNil() {
+					return ""
+				}
+			}
 			if b, err := json.Marshal(v); err == nil {
-				return strings.TrimSpace(string(b))
+				out := strings.TrimSpace(string(b))
+				// Ensure JSON null values never leak as the literal string "null".
+				if strings.EqualFold(out, "null") {
+					return ""
+				}
+				return out
 			}
 			return ""
 		}

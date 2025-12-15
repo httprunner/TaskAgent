@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -265,19 +266,27 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 	if val, ok := payload["DramaName"]; !ok || strings.TrimSpace(fmt.Sprint(val)) == "" {
 		payload["DramaName"] = strings.TrimSpace(meta.Params)
 	}
-	taskItemIDs := buildTaskItemIDs(records)
-	recordsPayloadJSON, _ := json.Marshal(map[string]any{
-		"total":  len(taskItemIDs),
-		"format": "TaskID_ItemID",
-		"items":  taskItemIDs,
-	})
-	userInfoJSON, _ := json.Marshal(map[string]any{
-		"UserID":   meta.UserID,
-		"UserName": meta.UserName,
-	})
+
+	fields := taskagent.DefaultResultFields()
+	userAlias := pickFirstNonEmptyCaptureFieldByTaskIDs(
+		records, taskIDs, strings.TrimSpace(fields.TaskID),
+		"UserAlias", strings.TrimSpace(fields.UserAlias))
+	userAuthEntity := pickFirstNonEmptyCaptureFieldByTaskIDs(
+		records, taskIDs, strings.TrimSpace(fields.TaskID),
+		"UserAuthEntity", strings.TrimSpace(fields.UserAuthEntity))
+	userInfo := map[string]any{
+		"UserID":         meta.UserID,
+		"UserName":       meta.UserName,
+		"UserAlias":      userAlias,
+		"UserAuthEntity": userAuthEntity,
+	}
+	payload["UserInfo"] = userInfo
+
+	recordsPayloadJSON, _ := json.Marshal(buildTaskItemsByTaskID(records, taskIDs))
+	userInfoJSON, _ := json.Marshal(userInfo)
 	recordsStr := strings.TrimSpace(string(recordsPayloadJSON))
 	if recordsStr == "" {
-		recordsStr = `{"total":0,"format":"TaskID_ItemID","items":[]}`
+		recordsStr = "{}"
 	}
 	userInfoStr := strings.TrimSpace(string(userInfoJSON))
 	if userInfoStr == "" {
@@ -316,15 +325,27 @@ func buildWebhookResultPayload(dramaRaw map[string]any, records []CaptureRecordP
 	return payload
 }
 
-func buildTaskItemIDs(records []CaptureRecordPayload) []string {
-	if len(records) == 0 {
-		return nil
+type taskItemsPayload struct {
+	Total int      `json:"total"`
+	Items []string `json:"items"`
+}
+
+func buildTaskItemsByTaskID(records []CaptureRecordPayload, taskIDs []int64) map[string]taskItemsPayload {
+	result := make(map[string]taskItemsPayload)
+	seen := make(map[string]map[string]struct{})
+
+	for _, id := range taskIDs {
+		if id <= 0 {
+			continue
+		}
+		key := fmt.Sprintf("%d", id)
+		result[key] = taskItemsPayload{Total: 0, Items: []string{}}
+		seen[key] = make(map[string]struct{})
 	}
+
 	fields := taskagent.DefaultResultFields()
 	taskKey := strings.TrimSpace(fields.TaskID)
 	itemKey := strings.TrimSpace(fields.ItemID)
-	seen := make(map[string]struct{}, len(records))
-	out := make([]string, 0, len(records))
 	for _, rec := range records {
 		if rec.Fields == nil {
 			continue
@@ -340,14 +361,65 @@ func buildTaskItemIDs(records []CaptureRecordPayload) []string {
 		if taskID == "" || itemID == "" {
 			continue
 		}
-		key := fmt.Sprintf("%s_%s", taskID, itemID)
-		if _, ok := seen[key]; ok {
+
+		if _, ok := result[taskID]; !ok {
+			result[taskID] = taskItemsPayload{Total: 0, Items: []string{}}
+		}
+		if _, ok := seen[taskID]; !ok {
+			seen[taskID] = make(map[string]struct{})
+		}
+		if _, ok := seen[taskID][itemID]; ok {
 			continue
 		}
-		seen[key] = struct{}{}
-		out = append(out, key)
+		seen[taskID][itemID] = struct{}{}
+
+		group := result[taskID]
+		group.Items = append(group.Items, itemID)
+		result[taskID] = group
 	}
-	return out
+
+	for taskID, group := range result {
+		sort.Strings(group.Items)
+		group.Total = len(group.Items)
+		result[taskID] = group
+	}
+	return result
+}
+
+func pickFirstNonEmptyCaptureFieldByTaskIDs(
+	records []CaptureRecordPayload, taskIDs []int64, taskIDFieldRaw, fieldEng, fieldRaw string) string {
+	if len(records) == 0 || len(taskIDs) == 0 {
+		return ""
+	}
+	for _, id := range taskIDs {
+		if id <= 0 {
+			continue
+		}
+		taskIDStr := fmt.Sprintf("%d", id)
+		for _, rec := range records {
+			if rec.Fields == nil {
+				continue
+			}
+			recTaskID := strings.TrimSpace(getString(rec.Fields, "TaskID"))
+			if recTaskID == "" && strings.TrimSpace(taskIDFieldRaw) != "" {
+				recTaskID = strings.TrimSpace(getString(rec.Fields, taskIDFieldRaw))
+			}
+			if recTaskID != taskIDStr {
+				continue
+			}
+			val := strings.TrimSpace(getString(rec.Fields, fieldEng))
+			if val == "" && strings.TrimSpace(fieldRaw) != "" {
+				val = strings.TrimSpace(getString(rec.Fields, fieldRaw))
+			}
+			if strings.EqualFold(val, "null") {
+				val = ""
+			}
+			if val != "" {
+				return val
+			}
+		}
+	}
+	return ""
 }
 
 func (w *WebhookResultWorker) markFailed(ctx context.Context, row webhookResultRow, err error) error {
