@@ -1428,7 +1428,20 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 			return nil, fmt.Errorf("feishu: decode bitable search response: %w", err)
 		}
 		if resp.Code != 0 {
-			return nil, fmt.Errorf("feishu: search bitable records failed code=%d msg=%s", resp.Code, resp.Msg)
+			filterJSON := ""
+			if filterInfo != nil {
+				if b, err := json.Marshal(filterInfo); err == nil {
+					filterJSON = string(b)
+					const maxLen = 2048
+					if len(filterJSON) > maxLen {
+						filterJSON = filterJSON[:maxLen] + "...(truncated)"
+					}
+				}
+			}
+			return nil, fmt.Errorf(
+				"feishu: search bitable records failed code=%d msg=%s table_id=%s view_id=%s filter=%s",
+				resp.Code, resp.Msg, ref.TableID, viewID, filterJSON,
+			)
 		}
 
 		page++

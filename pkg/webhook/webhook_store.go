@@ -95,7 +95,11 @@ func (s *webhookResultStore) getExistingByParentAndGroup(ctx context.Context, bi
 	if field := strings.TrimSpace(s.fields.GroupID); field != "" {
 		filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(field, "is", gid))
 	}
-	rows, err := s.client.FetchBitableRows(ctx, s.tableURL, &taskagent.FeishuTaskQueryOptions{Filter: filter, Limit: 1})
+	rows, err := s.client.FetchBitableRows(ctx, s.tableURL, &taskagent.FeishuTaskQueryOptions{
+		Filter:     filter,
+		Limit:      1,
+		IgnoreView: true,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -166,10 +170,12 @@ func (s *webhookResultStore) listCandidates(ctx context.Context, batchLimit int)
 	if statusField == "" {
 		return nil, errors.New("webhook result table status field is not configured")
 	}
-	filter := taskagent.NewFeishuFilterInfo("or")
-	filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(statusField, "is", WebhookResultPending))
-	filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(statusField, "is", WebhookResultFailed))
-	rows, err := s.client.FetchBitableRows(ctx, s.tableURL, &taskagent.FeishuTaskQueryOptions{Filter: filter, Limit: batchLimit})
+	filter := listCandidatesFilter(statusField)
+	rows, err := s.client.FetchBitableRows(ctx, s.tableURL, &taskagent.FeishuTaskQueryOptions{
+		Filter:     filter,
+		Limit:      batchLimit,
+		IgnoreView: true,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -178,6 +184,15 @@ func (s *webhookResultStore) listCandidates(ctx context.Context, batchLimit int)
 		out = append(out, decodeWebhookResultRow(row, s.fields))
 	}
 	return out, nil
+}
+
+func listCandidatesFilter(statusField string) *taskagent.FeishuFilterInfo {
+	filter := taskagent.NewFeishuFilterInfo("or")
+	filter.Children = append(filter.Children,
+		taskagent.NewFeishuChildrenFilter("and", taskagent.NewFeishuCondition(statusField, "is", WebhookResultPending)),
+		taskagent.NewFeishuChildrenFilter("and", taskagent.NewFeishuCondition(statusField, "is", WebhookResultFailed)),
+	)
+	return filter
 }
 
 type webhookResultUpdate struct {
