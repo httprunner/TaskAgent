@@ -8,7 +8,6 @@ import (
 	"github.com/httprunner/TaskAgent/internal/env"
 	"github.com/httprunner/TaskAgent/internal/feishusdk"
 	"github.com/httprunner/TaskAgent/pkg/webhook"
-	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 )
 
@@ -44,6 +43,11 @@ func newWebhookCreatorCmd() *cobra.Command {
 				return fmt.Errorf("--date must be in YYYY-MM-DD format, got=%q", scanDate)
 			}
 
+			pollEnabled := cmd.Flags().Lookup("poll-interval").Changed
+			if pollEnabled && flagPollInterval <= 0 {
+				return fmt.Errorf("--poll-interval must be greater than 0 when enabled, got=%s", flagPollInterval)
+			}
+
 			creator, err := webhook.NewWebhookResultCreator(webhook.WebhookResultCreatorConfig{
 				TaskBitableURL:    strings.TrimSpace(taskURL),
 				WebhookBitableURL: strings.TrimSpace(webhookBitable),
@@ -55,19 +59,17 @@ func newWebhookCreatorCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			log.Info().
-				Str("task_bitable", strings.TrimSpace(taskURL)).
-				Str("webhook_bitable", strings.TrimSpace(webhookBitable)).
-				Str("app_filter", strings.TrimSpace(app)).
-				Msg("starting webhook result creator")
-			return creator.Run(cmd.Context())
+			if pollEnabled {
+				return creator.Run(cmd.Context())
+			}
+			return creator.RunOnce(cmd.Context())
 		},
 	}
 
 	cmd.Flags().StringVar(&flagTaskURL, "task-url", "", "Feishu task bitable URL (default from TASK_BITABLE_URL)")
 	cmd.Flags().StringVar(&flagWebhookBitable, "webhook-bitable-url", "", "Webhook result bitable URL (default from WEBHOOK_BITABLE_URL)")
 	cmd.Flags().StringVar(&flagApp, "app", "", "Optional App filter (defaults to root --app or BUNDLE_ID env)")
-	cmd.Flags().DurationVar(&flagPollInterval, "poll-interval", 30*time.Second, "Interval between scans")
+	cmd.Flags().DurationVar(&flagPollInterval, "poll-interval", 0, "Enable polling with the given interval (e.g. 30s); default runs once")
 	cmd.Flags().IntVar(&flagBatchLimit, "batch-limit", 50, "Maximum number of tasks processed per scan")
 	cmd.Flags().StringVar(&flagDate, "date", "", "Filter tasks by Datetime=ExactDate (YYYY-MM-DD); defaults to today")
 

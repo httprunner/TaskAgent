@@ -55,4 +55,3 @@ func ResolveResultDBPath() (string, error) {
 func MirrorDramaRowsIfNeeded(tableURL string, rows []BitableRow) {
 	storage.MirrorDramaRowsIfNeeded(tableURL, rows)
 }
-

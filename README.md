@@ -165,7 +165,7 @@ Feishu Task Table ──> FeishuTaskClient (task)
 
 ### Infra CLI (`cmd`)
 - **Webhook worker**: `go run ./cmd webhook-worker --task-url "$TASK_BITABLE_URL" --webhook-bitable-url "$WEBHOOK_BITABLE_URL" --webhook-url "$SUMMARY_WEBHOOK_URL"`
-- **Webhook creator (video screen capture)**: `go run ./cmd webhook-creator --task-url "$TASK_BITABLE_URL" --webhook-bitable-url "$WEBHOOK_BITABLE_URL" --app kwai`
+- **Webhook creator (video screen capture)**: one-shot `go run ./cmd webhook-creator --task-url "$TASK_BITABLE_URL" --webhook-bitable-url "$WEBHOOK_BITABLE_URL" --app kwai`, or polling with `--poll-interval 30s`
 - **Single URL worker**: `go run ./cmd singleurl --task-url "$TASK_BITABLE_URL" --crawler-base-url "$CRAWLER_SERVICE_BASE_URL"`
 - **Drama tasks generator**: `go run ./cmd drama-tasks --date 2025-12-01 --drama-url "$DRAMA_BITABLE_URL" --task-url "$TASK_BITABLE_URL"`
 

@@ -322,9 +322,6 @@ func NewWebhookResultCreator(cfg WebhookResultCreatorConfig) (*WebhookResultCrea
 		return nil, err
 	}
 	interval := cfg.PollInterval
-	if interval <= 0 {
-		interval = 30 * time.Second
-	}
 	batch := cfg.BatchLimit
 	if batch <= 0 {
 		batch = 50
@@ -350,17 +347,25 @@ func (c *WebhookResultCreator) Run(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	interval := c.interval
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
 	log.Info().
 		Str("task_bitable", c.taskTableURL).
 		Str("webhook_bitable", c.store.table()).
 		Str("app_filter", c.appFilter).
-		Dur("poll_interval", c.interval).
+		Dur("poll_interval", interval).
 		Int("batch_limit", c.batchLimit).
 		Str("scan_date", c.scanDate).
 		Bool("enable_single_url_capture", c.enableSU).
 		Msg("webhook result creator started")
 
-	ticker := time.NewTicker(c.interval)
+	if err := c.processOnce(ctx); err != nil {
+		log.Error().Err(err).Msg("webhook result creator scan failed")
+	}
+
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -373,6 +378,25 @@ func (c *WebhookResultCreator) Run(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+func (c *WebhookResultCreator) RunOnce(ctx context.Context) error {
+	if c == nil {
+		return errors.New("webhook result creator is nil")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	log.Info().
+		Str("task_bitable", c.taskTableURL).
+		Str("webhook_bitable", c.store.table()).
+		Str("app_filter", c.appFilter).
+		Int("batch_limit", c.batchLimit).
+		Str("scan_date", c.scanDate).
+		Bool("enable_single_url_capture", c.enableSU).
+		Bool("run_once", true).
+		Msg("webhook result creator started")
+	return c.processOnce(ctx)
 }
 
 func (c *WebhookResultCreator) processOnce(ctx context.Context) error {

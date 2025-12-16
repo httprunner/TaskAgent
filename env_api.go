@@ -8,4 +8,3 @@ import "github.com/httprunner/TaskAgent/internal/env"
 func EnvString(key, defaultValue string) string {
 	return env.String(key, defaultValue)
 }
-

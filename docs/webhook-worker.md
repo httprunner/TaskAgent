@@ -73,6 +73,18 @@ Webhook 结果表用于存储 webhook 的关联信息和推送结果，核心字
 
 > 建议外部系统创建 `Scene=视频录屏采集` 任务时尽量补齐 `BookID`/`UserID`/`ItemID`，以提升 webhook payload 完整性与排查效率。
 
+#### 单个链接采集（SingleURL Capture，可选）
+
+`pkg/webhook.WebhookResultCreator` 支持可选扫描任务表中的 `Scene=单个链接采集` 任务并按 `(GroupID, DatetimeDay)` 聚合创建 webhook 结果表记录（用于上层业务把“单链采集”也纳入统一的 webhook 结果表机制）。
+
+该能力由 `WebhookResultCreatorConfig.EnableSingleURLCapture=true` 开启。开启后 creator 会额外向 Feishu 发起一条筛选查询，过滤条件包含：
+
+- `Scene is "单个链接采集"`
+- `Datetime is ExactDate(YYYY-MM-DD)`（若配置了 `ScanDate`）
+- `Status in {"success","failed","error"}`（通过 `children(or)` 组合实现）
+
+注意：若任务表中 `Scene`/`Status` 是单选（枚举）字段，且其选项里不包含上述 value（最常见是 `Status` 没有 `error` 选项），Feishu 会返回 `code=1254018 msg=InvalidFilter`，导致本轮扫描失败。此时请在任务表中补齐对应枚举选项（确保 `Scene`/`Status` 的选项包含筛选值），再开启该功能。
+
 ### 轮询/处理逻辑（WebhookResultWorker）
 
 worker 定时轮询 webhook 结果表：
@@ -114,7 +126,7 @@ worker 定时轮询 webhook 结果表：
 TaskAgent CLI（可选）：
 
 - `go run ./cmd webhook-worker --task-url "$TASK_BITABLE_URL" --webhook-bitable-url "$WEBHOOK_BITABLE_URL" --webhook-url "$SUMMARY_WEBHOOK_URL"`
-- `go run ./cmd webhook-creator --task-url "$TASK_BITABLE_URL" --webhook-bitable-url "$WEBHOOK_BITABLE_URL" --app kwai`
+- `go run ./cmd webhook-creator --task-url "$TASK_BITABLE_URL" --webhook-bitable-url "$WEBHOOK_BITABLE_URL" --app kwai`（默认单次执行；如需轮询加 `--poll-interval 30s`）
 
 ## 故障排查速查表
 
@@ -126,6 +138,8 @@ TaskAgent CLI（可选）：
   - Creator/回填器是否已覆盖到该 TaskID（否则结果表不会出现待推送行）
   - 任务表中该 TaskID 的 `ItemID` 是否为空（为空时无法按 `Scene+ItemID` 查询结果记录）
   - 采集结果表中是否已落到该 `ItemID` 的记录（预期仅推送最新 1 条）
+- 若启用了 `EnableSingleURLCapture=true` 且出现 `code=1254018 msg=InvalidFilter`：
+  - 重点检查任务表 `Scene`/`Status` 字段是否为单选枚举，以及其选项是否包含 `单个链接采集` / `error`（缺失时 Feishu 会拒绝该 Filter）
 
 ## 日志与测试
 - 日志建议统一带上 `biz_type`、`group_id`、`task_ids`、`webhook_status`，方便在 `zerolog` 输出中追踪一整条链路。
