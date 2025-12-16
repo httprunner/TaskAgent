@@ -350,6 +350,29 @@ func toString(v any) string {
 		return string(x)
 	case json.Number:
 		return x.String()
+	case map[string]any:
+		// Feishu multi-select and rich-text cells are often encoded as
+		// objects like {"text": "123"} or {"value": "123"}; prefer these
+		// well-known keys before falling back to fmt.Sprint.
+		if raw, ok := x["text"]; ok {
+			if s := toString(raw); strings.TrimSpace(s) != "" {
+				return s
+			}
+		}
+		if raw, ok := x["value"]; ok {
+			if s := toString(raw); strings.TrimSpace(s) != "" {
+				return s
+			}
+		}
+		return fmt.Sprint(x)
+	case []any:
+		// For arrays, return the first non-empty string representation.
+		for _, item := range x {
+			if s := toString(item); strings.TrimSpace(s) != "" {
+				return s
+			}
+		}
+		return ""
 	default:
 		return fmt.Sprint(x)
 	}

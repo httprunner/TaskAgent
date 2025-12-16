@@ -127,7 +127,22 @@ func (w *WebhookResultWorker) Run(ctx context.Context) error {
 }
 
 func (w *WebhookResultWorker) processOnce(ctx context.Context) error {
-	rows, err := w.store.listCandidates(ctx, w.batchLimit)
+	// Determine how many rows to fetch from the result table this round.
+	// We intentionally fetch more than we plan to process so that "stuck"
+	// rows at the top (tasks_not_ready) do not starve later ready rows.
+	baseLimit := w.batchLimit
+	if baseLimit <= 0 {
+		baseLimit = 20
+	}
+	fetchLimit := baseLimit * 5
+	if fetchLimit < 100 {
+		fetchLimit = 100
+	}
+	if fetchLimit > 200 {
+		fetchLimit = 200
+	}
+
+	rows, err := w.store.listCandidates(ctx, fetchLimit)
 	if err != nil {
 		return err
 	}
@@ -135,7 +150,11 @@ func (w *WebhookResultWorker) processOnce(ctx context.Context) error {
 		return nil
 	}
 	var errs []string
+	processed := 0
 	for _, row := range rows {
+		if processed >= baseLimit {
+			break
+		}
 		if strings.TrimSpace(row.RecordID) == "" {
 			continue
 		}
@@ -147,6 +166,7 @@ func (w *WebhookResultWorker) processOnce(ctx context.Context) error {
 			errs = append(errs, err.Error())
 			w.markCooldown(key, "error")
 		}
+		processed++
 	}
 	if len(errs) > 0 {
 		return errors.New(strings.Join(errs, "; "))
@@ -220,7 +240,18 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 		AllowError:             w.allowError,
 		AllowFailedBeforeToday: w.allowStale,
 	}
-	if !allTasksReady(tasks, taskIDs, time.Now(), policy) {
+	now := time.Now()
+	log.Debug().
+		Str("record_id", strings.TrimSpace(row.RecordID)).
+		Str("biz_type", strings.TrimSpace(row.BizType)).
+		Int64("parent_task_id", row.ParentTaskID).
+		Str("group_id", strings.TrimSpace(row.GroupID)).
+		Int("task_id_count", len(taskIDs)).
+		Int("fetched_tasks", len(tasks)).
+		Interface("task_ids", taskIDs).
+		Msg("webhook: fetched tasks for result row")
+	if !allTasksReady(tasks, taskIDs, now, policy) {
+		logTaskReadinessDebug(tasks, taskIDs, now, policy)
 		w.markCooldown(row.RecordID, "tasks_not_ready")
 		return nil
 	}
@@ -545,6 +576,65 @@ func allTasksReady(tasks []taskagent.FeishuTaskRow, taskIDs []int64, now time.Ti
 		}
 	}
 	return true
+}
+
+func logTaskReadinessDebug(tasks []taskagent.FeishuTaskRow, taskIDs []int64, now time.Time, policy taskReadyPolicy) {
+	if len(taskIDs) == 0 {
+		return
+	}
+	byID := make(map[int64]taskagent.FeishuTaskRow, len(tasks))
+	for _, t := range tasks {
+		if t.TaskID == 0 {
+			continue
+		}
+		byID[t.TaskID] = t
+	}
+
+	type taskState struct {
+		TaskID   int64  `json:"task_id"`
+		Status   string `json:"status"`
+		Datetime string `json:"datetime,omitempty"`
+		Missing  bool   `json:"missing"`
+		Ready    bool   `json:"ready"`
+	}
+
+	states := make([]taskState, 0, len(taskIDs))
+	for _, id := range taskIDs {
+		ts := taskState{TaskID: id}
+		task, ok := byID[id]
+		if !ok {
+			ts.Missing = true
+			states = append(states, ts)
+			continue
+		}
+		st := strings.ToLower(strings.TrimSpace(task.Status))
+		ts.Status = st
+
+		if task.Datetime != nil && !task.Datetime.IsZero() {
+			ts.Datetime = task.Datetime.In(time.Local).Format(time.RFC3339)
+		} else if strings.TrimSpace(task.DatetimeRaw) != "" {
+			ts.Datetime = strings.TrimSpace(task.DatetimeRaw)
+		}
+
+		switch st {
+		case taskagent.StatusSuccess:
+			ts.Ready = true
+		case taskagent.StatusError:
+			ts.Ready = policy.AllowError
+		case taskagent.StatusFailed:
+			ts.Ready = policy.AllowFailedBeforeToday && taskDatetimeBeforeToday(task, now)
+		case "":
+			ts.Ready = policy.AllowEmpty
+		default:
+			ts.Ready = false
+		}
+
+		states = append(states, ts)
+	}
+
+	log.Debug().
+		Interface("task_readiness", states).
+		Msg("webhook: tasks not ready for result row")
 }
 
 func taskDatetimeBeforeToday(task taskagent.FeishuTaskRow, now time.Time) bool {

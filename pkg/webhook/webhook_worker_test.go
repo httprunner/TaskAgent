@@ -18,6 +18,15 @@ func TestParseTaskIDs(t *testing.T) {
 		{name: "string_mixed", in: " 123 | 456  123 ", want: []int64{123, 456}},
 		{name: "slice_any", in: []any{"123", "456", "123"}, want: []int64{123, 456}},
 		{name: "slice_string", in: []string{"123", "456", "123"}, want: []int64{123, 456}},
+		{
+			name: "feishu_multi_select_objects",
+			in: []any{
+				map[string]any{"text": "123"},
+				map[string]any{"value": "456"},
+				map[string]any{"text": "123"},
+			},
+			want: []int64{123, 456},
+		},
 	}
 	for _, tc := range cases {
 		tc := tc
