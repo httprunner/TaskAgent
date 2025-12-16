@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"testing"
+	"time"
 
 	taskagent "github.com/httprunner/TaskAgent"
 )
@@ -35,18 +36,39 @@ func TestParseTaskIDs(t *testing.T) {
 }
 
 func TestAllTasksReady(t *testing.T) {
+	now := time.Date(2025, 12, 16, 10, 0, 0, 0, time.Local)
+	yesterday := now.Add(-24 * time.Hour)
+
 	tasks := []taskagent.FeishuTaskRow{
 		{TaskID: 1, Status: taskagent.StatusSuccess},
 		{TaskID: 2, Status: taskagent.StatusError},
-		{TaskID: 3, Status: taskagent.StatusFailed},
+		{TaskID: 3, Status: ""},
+		{TaskID: 4, Status: taskagent.StatusFailed, Datetime: &yesterday},
+		{TaskID: 5, Status: taskagent.StatusFailed, Datetime: &now},
 	}
-	if !allTasksReady(tasks[:2], []int64{1, 2}) {
+
+	if !allTasksReady(tasks[:2], []int64{1, 2}, now, taskReadyPolicy{AllowError: true}) {
 		t.Fatalf("expected ready for success/error")
 	}
-	if allTasksReady(tasks, []int64{1, 2, 3}) {
-		t.Fatalf("expected not ready when failed exists")
+	if allTasksReady(tasks, []int64{1, 2, 3}, now, taskReadyPolicy{AllowError: true}) {
+		t.Fatalf("expected not ready when empty status disallowed")
 	}
-	if allTasksReady(tasks[:2], []int64{1, 999}) {
+	if !allTasksReady(tasks, []int64{1, 2, 3}, now, taskReadyPolicy{AllowEmpty: true, AllowError: true}) {
+		t.Fatalf("expected ready when empty status allowed")
+	}
+	if allTasksReady(tasks, []int64{1, 2, 4}, now, taskReadyPolicy{AllowEmpty: true, AllowError: true}) {
+		t.Fatalf("expected not ready when failed not allowed")
+	}
+	if !allTasksReady(tasks, []int64{1, 2, 4}, now, taskReadyPolicy{AllowEmpty: true, AllowError: true, AllowFailedBeforeToday: true}) {
+		t.Fatalf("expected ready when failed is before today and allowed")
+	}
+	if allTasksReady(tasks, []int64{1, 2, 5}, now, taskReadyPolicy{AllowEmpty: true, AllowError: true, AllowFailedBeforeToday: true}) {
+		t.Fatalf("expected not ready when failed is today")
+	}
+	if allTasksReady(tasks[:2], []int64{1, 2}, now, taskReadyPolicy{AllowError: false}) {
+		t.Fatalf("expected not ready when error is disallowed")
+	}
+	if allTasksReady(tasks[:2], []int64{1, 999}, now, taskReadyPolicy{AllowError: true}) {
 		t.Fatalf("expected not ready when task missing")
 	}
 }

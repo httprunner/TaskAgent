@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +21,15 @@ type WebhookResultWorkerConfig struct {
 	PollInterval      time.Duration
 	BatchLimit        int
 	GroupCooldown     time.Duration
+	// AllowEmptyStatusAsReady controls whether an empty task status should be treated as a
+	// terminal state when deciding if a group is ready.
+	AllowEmptyStatusAsReady bool
+	// AllowErrorStatusAsReady controls whether status "error" should be treated as ready (terminal).
+	// When nil, it defaults to true for backward compatibility.
+	AllowErrorStatusAsReady bool
+	// AllowFailedStatusBeforeToday controls whether status "failed" can be treated as ready
+	// when the task's Datetime is strictly before today (local time).
+	AllowFailedStatusBeforeToday bool
 }
 
 type WebhookResultWorker struct {
@@ -31,6 +41,9 @@ type WebhookResultWorker struct {
 	batchLimit   int
 	cooldownDur  time.Duration
 	groupCD      map[string]time.Time
+	allowEmpty   bool
+	allowError   bool
+	allowStale   bool
 }
 
 const maxWebhookResultRetries = 3
@@ -78,6 +91,9 @@ func NewWebhookResultWorker(cfg WebhookResultWorkerConfig) (*WebhookResultWorker
 		batchLimit:   batch,
 		cooldownDur:  cd,
 		groupCD:      make(map[string]time.Time),
+		allowEmpty:   cfg.AllowEmptyStatusAsReady,
+		allowError:   cfg.AllowErrorStatusAsReady,
+		allowStale:   cfg.AllowFailedStatusBeforeToday,
 	}, nil
 }
 
@@ -199,7 +215,12 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 	if err != nil {
 		return err
 	}
-	if !allTasksReady(tasks, taskIDs) {
+	policy := taskReadyPolicy{
+		AllowEmpty:             w.allowEmpty,
+		AllowError:             w.allowError,
+		AllowFailedBeforeToday: w.allowStale,
+	}
+	if !allTasksReady(tasks, taskIDs, time.Now(), policy) {
 		w.markCooldown(row.RecordID, "tasks_not_ready")
 		return nil
 	}
@@ -470,30 +491,101 @@ func pickTaskMeta(tasks []taskagent.FeishuTaskRow) taskMeta {
 	return meta
 }
 
-func allTasksReady(tasks []taskagent.FeishuTaskRow, taskIDs []int64) bool {
+type taskReadyPolicy struct {
+	AllowEmpty             bool
+	AllowError             bool
+	AllowFailedBeforeToday bool
+}
+
+func allTasksReady(tasks []taskagent.FeishuTaskRow, taskIDs []int64, now time.Time, policy taskReadyPolicy) bool {
 	if len(taskIDs) == 0 {
 		return false
 	}
-	byID := make(map[int64]string, len(tasks))
+	byID := make(map[int64]taskagent.FeishuTaskRow, len(tasks))
 	for _, t := range tasks {
 		if t.TaskID == 0 {
 			continue
 		}
-		byID[t.TaskID] = strings.ToLower(strings.TrimSpace(t.Status))
+		byID[t.TaskID] = t
 	}
 	for _, id := range taskIDs {
-		st, ok := byID[id]
+		task, ok := byID[id]
 		if !ok {
 			return false
 		}
+		st := strings.ToLower(strings.TrimSpace(task.Status))
 		switch st {
-		case taskagent.StatusSuccess, taskagent.StatusError:
+		case taskagent.StatusSuccess:
 			continue
+		case taskagent.StatusError:
+			if policy.AllowError {
+				continue
+			}
+			return false
+		case taskagent.StatusFailed:
+			if policy.AllowFailedBeforeToday && taskDatetimeBeforeToday(task, now) {
+				continue
+			}
+			return false
+		case "":
+			if policy.AllowEmpty {
+				continue
+			}
+			return false
 		default:
 			return false
 		}
 	}
 	return true
+}
+
+func taskDatetimeBeforeToday(task taskagent.FeishuTaskRow, now time.Time) bool {
+	loc := time.Local
+	if !now.IsZero() {
+		now = now.In(loc)
+	} else {
+		now = time.Now().In(loc)
+	}
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+
+	taskTime := task.Datetime
+	if taskTime == nil || taskTime.IsZero() {
+		parsed := parseFeishuDatetime(task.DatetimeRaw)
+		if parsed == nil || parsed.IsZero() {
+			return false
+		}
+		taskTime = parsed
+	}
+	return taskTime.In(loc).Before(todayStart)
+}
+
+func parseFeishuDatetime(raw string) *time.Time {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	if strings.EqualFold(trimmed, "today") {
+		t := time.Now()
+		return &t
+	}
+	if n, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+		var t time.Time
+		if len(trimmed) == 10 {
+			t = time.Unix(n, 0)
+		} else {
+			t = time.UnixMilli(n)
+		}
+		t = t.In(time.Local)
+		return &t
+	}
+	if parsed, err := time.ParseInLocation("2006-01-02", trimmed, time.Local); err == nil {
+		return &parsed
+	}
+	if parsed, err := time.Parse(time.RFC3339, trimmed); err == nil {
+		parsed = parsed.In(time.Local)
+		return &parsed
+	}
+	return nil
 }
 
 func (w *WebhookResultWorker) fetchTasksByIDs(ctx context.Context, taskIDs []int64) ([]taskagent.FeishuTaskRow, error) {
