@@ -12,6 +12,9 @@ type Task struct {
 	DeviceSerial string
 	ResultStatus string
 	Logs         string
+	// LastScreenShotPath stores the local screenshot file path for this task.
+	// It can be used by TaskAgent to upload the screenshot to a Feishu attachment field.
+	LastScreenShotPath string
 }
 
 // TaskLifecycle 暴露任务生命周期回调。

@@ -1,9 +1,15 @@
 package taskagent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/jpeg"
+	_ "image/png"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -861,6 +867,11 @@ func UpdateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 		startField := strings.TrimSpace(source.table.Fields.StartAt)
 		endField := strings.TrimSpace(source.table.Fields.EndAt)
 		logsField := strings.TrimSpace(source.table.Fields.Logs)
+		lastScreenshotField := strings.TrimSpace(source.table.Fields.LastScreenShot)
+		type bitableMediaUploader interface {
+			UploadBitableMedia(ctx context.Context, appToken string, fileName string, content []byte, asImage bool) (string, error)
+		}
+		uploader, canUploadScreenshot := source.client.(bitableMediaUploader)
 		var logsValue string
 		if meta != nil {
 			logsValue = strings.TrimSpace(meta.Logs)
@@ -900,6 +911,42 @@ func UpdateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 			}
 			if err := source.client.UpdateTaskFields(ctx, source.table, task.TaskID, fields); err != nil {
 				errs = append(errs, fmt.Sprintf("task %d: %v", task.TaskID, err))
+				continue
+			}
+
+			if lastScreenshotField == "" || !canUploadScreenshot || task == nil || task.TaskRef == nil {
+				continue
+			}
+			path := strings.TrimSpace(task.TaskRef.LastScreenShotPath)
+			if path == "" {
+				continue
+			}
+			raw, readErr := os.ReadFile(path)
+			if readErr != nil {
+				log.Warn().Err(readErr).Str("path", path).Msg("read last screenshot failed; skip reporting")
+				continue
+			}
+			content, ext := compressImageIfNeeded(raw)
+			fileName := fmt.Sprintf("last_screenshot_task_%d%s", task.TaskID, ext)
+			fileToken, uploadErr := uploader.UploadBitableMedia(ctx, source.table.Ref.AppToken, fileName, content, true)
+			if uploadErr != nil {
+				log.Warn().Err(uploadErr).Str("path", path).Msg("upload last screenshot failed; skip reporting")
+				continue
+			}
+			if strings.TrimSpace(fileToken) == "" {
+				continue
+			}
+			if err := source.client.UpdateTaskFields(ctx, source.table, task.TaskID, map[string]any{
+				lastScreenshotField: []map[string]any{
+					{
+						"file_token": strings.TrimSpace(fileToken),
+						"name":       filepath.Base(fileName),
+					},
+				},
+			}); err != nil {
+				log.Warn().Err(err).
+					Int64("task_id", task.TaskID).
+					Msg("update LastScreenShot field failed; skip reporting")
 			}
 		}
 	}
@@ -907,6 +954,53 @@ func UpdateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 		return errors.New(strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+func compressImageIfNeeded(raw []byte) ([]byte, string) {
+	const (
+		defaultThreshold = 200 * 1024
+		defaultQuality   = 75
+	)
+	if len(raw) == 0 {
+		return raw, ".png"
+	}
+
+	threshold := defaultThreshold
+	if v := strings.TrimSpace(os.Getenv("SCREENSHOT_COMPRESS_MIN_BYTES")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+			threshold = parsed
+		}
+	}
+	if len(raw) < threshold {
+		return raw, ".png"
+	}
+
+	quality := defaultQuality
+	if v := strings.TrimSpace(os.Getenv("SCREENSHOT_JPEG_QUALITY")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			if parsed < 30 {
+				parsed = 30
+			}
+			if parsed > 95 {
+				parsed = 95
+			}
+			quality = parsed
+		}
+	}
+
+	img, _, err := image.Decode(bytes.NewReader(raw))
+	if err != nil || img == nil {
+		return raw, ".png"
+	}
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: quality}); err != nil {
+		return raw, ".png"
+	}
+	if buf.Len() == 0 || buf.Len() >= len(raw) {
+		return raw, ".png"
+	}
+	return buf.Bytes(), ".jpg"
 }
 
 func UpdateFeishuTaskWebhooks(ctx context.Context, tasks []*FeishuTask, webhookStatus string) error {

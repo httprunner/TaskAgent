@@ -81,6 +81,7 @@ var (
 		Status:           "Status",           // 任务状态
 		Webhook:          "Webhook",          // Webhook 同步状态
 		Logs:             "Logs",             // 日志目录
+		LastScreenShot:   "LastScreenShot",   // Last task screenshot (attachment)
 		GroupID:          "GroupID",          // 任务分组ID，用于关联同一业务线索的多场景任务
 		DeviceSerial:     "DeviceSerial",     // 目标执行设备
 		DispatchedDevice: "DispatchedDevice", // 实际派发设备
@@ -172,6 +173,7 @@ func applyTaskFieldEnvOverrides(fields *TaskFields) {
 	overrideFieldFromEnv("TASK_FIELD_STATUS", &fields.Status)
 	overrideFieldFromEnv("TASK_FIELD_WEBHOOK", &fields.Webhook)
 	overrideFieldFromEnv("TASK_FIELD_LOGS", &fields.Logs)
+	overrideFieldFromEnv("TASK_FIELD_LAST_SCREENSHOT", &fields.LastScreenShot)
 	overrideFieldFromEnv("TASK_FIELD_EXTRA", &fields.Extra)
 	overrideFieldFromEnv("TASK_FIELD_GROUPID", &fields.GroupID)
 	overrideFieldFromEnv("TASK_FIELD_DEVICE_SERIAL", &fields.DeviceSerial)

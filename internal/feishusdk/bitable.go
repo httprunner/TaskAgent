@@ -45,6 +45,7 @@ type TaskFields struct {
 	Webhook          string
 	Extra            string
 	Logs             string
+	LastScreenShot   string
 	GroupID          string
 	DeviceSerial     string
 	DispatchedDevice string
