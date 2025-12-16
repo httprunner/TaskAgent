@@ -186,6 +186,8 @@ func listCandidatesFilter(statusField string) *taskagent.FeishuFilterInfo {
 
 type webhookResultUpdate struct {
 	Status     *string
+	TaskIDs    *[]int64
+	DramaInfo  *string
 	StartAtMs  *int64
 	EndAtMs    *int64
 	RetryCount *int
@@ -204,6 +206,12 @@ func (s *webhookResultStore) update(ctx context.Context, recordID string, upd we
 	fields := map[string]any{}
 	if upd.Status != nil && strings.TrimSpace(s.fields.Status) != "" {
 		fields[s.fields.Status] = strings.TrimSpace(*upd.Status)
+	}
+	if upd.TaskIDs != nil && strings.TrimSpace(s.fields.TaskIDs) != "" {
+		fields[s.fields.TaskIDs] = encodeTaskIDsForFeishu(*upd.TaskIDs)
+	}
+	if upd.DramaInfo != nil && strings.TrimSpace(s.fields.DramaInfo) != "" {
+		fields[s.fields.DramaInfo] = strings.TrimSpace(*upd.DramaInfo)
 	}
 	if upd.StartAtMs != nil && strings.TrimSpace(s.fields.StartAt) != "" {
 		fields[s.fields.StartAt] = *upd.StartAtMs

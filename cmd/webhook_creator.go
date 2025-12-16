@@ -19,7 +19,7 @@ func newWebhookCreatorCmd() *cobra.Command {
 		flagApp            string
 		flagPollInterval   time.Duration
 		flagBatchLimit     int
-		flagTodayOnly      bool
+		flagDate           string
 	)
 
 	cmd := &cobra.Command{
@@ -36,13 +36,21 @@ func newWebhookCreatorCmd() *cobra.Command {
 			}
 			app := firstNonEmpty(flagApp, rootApp, env.String("BUNDLE_ID", ""))
 
+			scanDate := strings.TrimSpace(flagDate)
+			if scanDate == "" {
+				scanDate = time.Now().In(time.Local).Format("2006-01-02")
+			}
+			if _, err := time.ParseInLocation("2006-01-02", scanDate, time.Local); err != nil {
+				return fmt.Errorf("--date must be in YYYY-MM-DD format, got=%q", scanDate)
+			}
+
 			creator, err := webhook.NewWebhookResultCreator(webhook.WebhookResultCreatorConfig{
 				TaskBitableURL:    strings.TrimSpace(taskURL),
 				WebhookBitableURL: strings.TrimSpace(webhookBitable),
 				AppFilter:         strings.TrimSpace(app),
 				PollInterval:      flagPollInterval,
 				BatchLimit:        flagBatchLimit,
-				ScanTodayOnly:     flagTodayOnly,
+				ScanDate:          scanDate,
 			})
 			if err != nil {
 				return err
@@ -61,7 +69,7 @@ func newWebhookCreatorCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flagApp, "app", "", "Optional App filter (defaults to root --app or BUNDLE_ID env)")
 	cmd.Flags().DurationVar(&flagPollInterval, "poll-interval", 30*time.Second, "Interval between scans")
 	cmd.Flags().IntVar(&flagBatchLimit, "batch-limit", 50, "Maximum number of tasks processed per scan")
-	cmd.Flags().BoolVar(&flagTodayOnly, "today-only", true, "Filter tasks by Datetime=Today when scanning the task table")
+	cmd.Flags().StringVar(&flagDate, "date", "", "Filter tasks by Datetime=ExactDate (YYYY-MM-DD); defaults to today")
 
 	return cmd
 }

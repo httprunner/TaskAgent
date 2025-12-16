@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -30,6 +31,7 @@ type WebhookResultCreateOptions struct {
 const (
 	WebhookBizTypePiracyGeneralSearch = "piracy_general_search"
 	WebhookBizTypeVideoScreenCapture  = "video_screen_capture"
+	WebhookBizTypeSingleURLCapture    = "single_url_capture"
 )
 
 // CreateWebhookResultsForGroups creates one webhook result row per GroupID under a parent task.
@@ -272,8 +274,13 @@ type WebhookResultCreatorConfig struct {
 	// BatchLimit caps how many tasks are processed per scan.
 	BatchLimit int
 
-	// ScanTodayOnly applies Datetime=Today filter when querying Feishu.
-	ScanTodayOnly bool
+	// ScanDate applies Datetime=ExactDate(YYYY-MM-DD, local time) filter when querying Feishu.
+	// When empty, no Datetime filter is applied.
+	ScanDate string
+
+	// EnableSingleURLCapture enables creating rows for Scene=单个链接采集
+	// (BizType=single_url_capture). Rows are keyed by (GroupID, DatetimeDay).
+	EnableSingleURLCapture bool
 }
 
 // WebhookResultCreator creates pending webhook result rows for tasks that are
@@ -290,7 +297,8 @@ type WebhookResultCreator struct {
 	appFilter  string
 	interval   time.Duration
 	batchLimit int
-	todayOnly  bool
+	scanDate   string
+	enableSU   bool
 
 	// seen avoids creating duplicate webhook result rows for the same TaskID
 	// within a single long-running creator process.
@@ -321,6 +329,7 @@ func NewWebhookResultCreator(cfg WebhookResultCreatorConfig) (*WebhookResultCrea
 	if batch <= 0 {
 		batch = 50
 	}
+	scanDate := strings.TrimSpace(cfg.ScanDate)
 	return &WebhookResultCreator{
 		store:        store,
 		taskClient:   client,
@@ -328,7 +337,8 @@ func NewWebhookResultCreator(cfg WebhookResultCreatorConfig) (*WebhookResultCrea
 		appFilter:    strings.TrimSpace(cfg.AppFilter),
 		interval:     interval,
 		batchLimit:   batch,
-		todayOnly:    cfg.ScanTodayOnly,
+		scanDate:     scanDate,
+		enableSU:     cfg.EnableSingleURLCapture,
 		seen:         make(map[int64]time.Time),
 	}, nil
 }
@@ -346,7 +356,8 @@ func (c *WebhookResultCreator) Run(ctx context.Context) error {
 		Str("app_filter", c.appFilter).
 		Dur("poll_interval", c.interval).
 		Int("batch_limit", c.batchLimit).
-		Bool("today_only", c.todayOnly).
+		Str("scan_date", c.scanDate).
+		Bool("enable_single_url_capture", c.enableSU).
 		Msg("webhook result creator started")
 
 	ticker := time.NewTicker(c.interval)
@@ -369,15 +380,13 @@ func (c *WebhookResultCreator) processOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if len(tasks) == 0 {
-		return nil
-	}
 
 	now := time.Now()
 	c.gcSeen(now)
 
 	var errs []string
 	created := 0
+	updated := 0
 	skipped := 0
 	for _, t := range tasks {
 		if t.TaskID <= 0 {
@@ -405,9 +414,20 @@ func (c *WebhookResultCreator) processOnce(ctx context.Context) error {
 		created++
 	}
 
+	if c.enableSU {
+		cr, up, sk, err := c.createSingleURLCaptureWebhookResults(ctx)
+		created += cr
+		updated += up
+		skipped += sk
+		if err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+
 	if created > 0 || skipped > 0 {
 		log.Info().
 			Int("created", created).
+			Int("updated", updated).
 			Int("skipped", skipped).
 			Int("fetched", len(tasks)).
 			Msg("webhook result creator iteration completed")
@@ -416,6 +436,129 @@ func (c *WebhookResultCreator) processOnce(ctx context.Context) error {
 		return errors.New(strings.Join(errs, "; "))
 	}
 	return nil
+}
+
+type singleURLCaptureGroupCandidate struct {
+	GroupID string
+	Day     string
+	DayKey  int64
+	BookID  string
+}
+
+func (c *WebhookResultCreator) createSingleURLCaptureWebhookResults(ctx context.Context) (created, updated, skipped int, retErr error) {
+	rows, err := c.fetchSingleURLCaptureTasks(ctx, c.batchLimit)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	if len(rows) == 0 {
+		return 0, 0, 0, nil
+	}
+
+	candidates := make(map[string]singleURLCaptureGroupCandidate, len(rows))
+	for _, row := range rows {
+		groupID := strings.TrimSpace(row.GroupID)
+		if groupID == "" {
+			skipped++
+			continue
+		}
+		day := dayString(row.Datetime, row.DatetimeRaw)
+		if strings.TrimSpace(day) == "" {
+			skipped++
+			continue
+		}
+		dayKey := dayKeyYYYYMMDD(day)
+		if dayKey <= 0 {
+			skipped++
+			continue
+		}
+		key := fmt.Sprintf("%s|%d", groupID, dayKey)
+		cand := candidates[key]
+		if cand.GroupID == "" {
+			cand = singleURLCaptureGroupCandidate{
+				GroupID: groupID,
+				Day:     day,
+				DayKey:  dayKey,
+				BookID:  strings.TrimSpace(row.BookID),
+			}
+		} else if cand.BookID == "" {
+			cand.BookID = strings.TrimSpace(row.BookID)
+		}
+		candidates[key] = cand
+	}
+
+	if len(candidates) == 0 {
+		return 0, 0, skipped, nil
+	}
+
+	for _, cand := range candidates {
+		taskIDs, err := fetchGroupTaskIDs(ctx, c.taskClient, c.taskTableURL, cand.GroupID, cand.Day)
+		if err != nil {
+			return created, updated, skipped, err
+		}
+		taskIDs = uniqueInt64(taskIDs)
+		sort.Slice(taskIDs, func(i, j int) bool { return taskIDs[i] < taskIDs[j] })
+		if len(taskIDs) == 0 {
+			skipped++
+			continue
+		}
+
+		dramaInfo := "{}"
+		if strings.TrimSpace(cand.BookID) != "" {
+			if raw, err := fetchDramaInfoJSONByBookID(ctx, c.taskClient, taskagent.EnvString("DRAMA_BITABLE_URL", ""), cand.BookID); err == nil {
+				if strings.TrimSpace(raw) != "" {
+					dramaInfo = raw
+				}
+			}
+		}
+
+		existing, err := c.store.getExistingByParentAndGroup(ctx, WebhookBizTypeSingleURLCapture, cand.DayKey, cand.GroupID)
+		if err != nil {
+			return created, updated, skipped, err
+		}
+		if existing == nil || strings.TrimSpace(existing.RecordID) == "" {
+			if _, err := c.store.createPending(ctx, webhookResultCreateInput{
+				BizType:      WebhookBizTypeSingleURLCapture,
+				ParentTaskID: cand.DayKey,
+				GroupID:      cand.GroupID,
+				TaskIDs:      taskIDs,
+				DramaInfo:    dramaInfo,
+			}); err != nil {
+				return created, updated, skipped, err
+			}
+			created++
+			continue
+		}
+
+		state := strings.ToLower(strings.TrimSpace(existing.Status))
+		if state == WebhookResultSuccess || state == WebhookResultError {
+			skipped++
+			continue
+		}
+
+		existingIDs := uniqueInt64(existing.TaskIDs)
+		sort.Slice(existingIDs, func(i, j int) bool { return existingIDs[i] < existingIDs[j] })
+
+		needsTaskUpdate := !sameInt64Slice(existingIDs, taskIDs)
+		needsDramaUpdate := strings.TrimSpace(existing.DramaInfo) == "" || strings.TrimSpace(existing.DramaInfo) == "{}"
+		if !needsTaskUpdate && !needsDramaUpdate {
+			skipped++
+			continue
+		}
+
+		upd := webhookResultUpdate{}
+		if needsTaskUpdate {
+			upd.TaskIDs = &taskIDs
+		}
+		if needsDramaUpdate && strings.TrimSpace(dramaInfo) != "" {
+			upd.DramaInfo = ptrString(strings.TrimSpace(dramaInfo))
+		}
+		if err := c.store.update(ctx, existing.RecordID, upd); err != nil {
+			return created, updated, skipped, err
+		}
+		updated++
+	}
+
+	return created, updated, skipped, nil
 }
 
 func (c *WebhookResultCreator) fetchVideoScreenCaptureTasks(ctx context.Context, limit int) ([]taskagent.FeishuTaskRow, error) {
@@ -434,9 +577,56 @@ func (c *WebhookResultCreator) fetchVideoScreenCaptureTasks(ctx context.Context,
 	filter := taskagent.NewFeishuFilterInfo("and")
 	filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(sceneField, "is", taskagent.SceneVideoScreenCapture))
 	filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(statusField, "is", taskagent.StatusSuccess))
-	if c.todayOnly {
-		if dtField := strings.TrimSpace(fields.Datetime); dtField != "" {
-			filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(dtField, "is", "Today"))
+	if dtField := strings.TrimSpace(fields.Datetime); dtField != "" {
+		if cond := exactDateCondition(dtField, c.scanDate); cond != nil {
+			filter.Conditions = append(filter.Conditions, cond)
+		}
+	}
+	if app := strings.TrimSpace(c.appFilter); app != "" {
+		if appField := strings.TrimSpace(fields.App); appField != "" {
+			filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(appField, "is", app))
+		}
+	}
+
+	table, err := c.taskClient.FetchTaskTableWithOptions(ctx, c.taskTableURL, nil, &taskagent.FeishuTaskQueryOptions{
+		Filter:     filter,
+		Limit:      limit,
+		IgnoreView: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if table == nil {
+		return nil, nil
+	}
+	return table.Rows, nil
+}
+
+func (c *WebhookResultCreator) fetchSingleURLCaptureTasks(ctx context.Context, limit int) ([]taskagent.FeishuTaskRow, error) {
+	if c == nil || c.taskClient == nil {
+		return nil, errors.New("task client is nil")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	fields := taskagent.DefaultTaskFields()
+	sceneField := strings.TrimSpace(fields.Scene)
+	statusField := strings.TrimSpace(fields.Status)
+	if sceneField == "" || statusField == "" {
+		return nil, errors.New("task table field mapping is missing (Scene/Status)")
+	}
+
+	filter := taskagent.NewFeishuFilterInfo("and")
+	filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(sceneField, "is", taskagent.SceneSingleURLCapture))
+	filter.Children = append(filter.Children, taskagent.NewFeishuChildrenFilter("or",
+		taskagent.NewFeishuCondition(statusField, "is", taskagent.StatusSuccess),
+		taskagent.NewFeishuCondition(statusField, "is", taskagent.StatusFailed),
+		taskagent.NewFeishuCondition(statusField, "is", taskagent.StatusError),
+	))
+
+	if dtField := strings.TrimSpace(fields.Datetime); dtField != "" {
+		if cond := exactDateCondition(dtField, c.scanDate); cond != nil {
+			filter.Conditions = append(filter.Conditions, cond)
 		}
 	}
 	if app := strings.TrimSpace(c.appFilter); app != "" {
@@ -470,4 +660,42 @@ func (c *WebhookResultCreator) gcSeen(now time.Time) {
 			delete(c.seen, id)
 		}
 	}
+}
+
+func dayKeyYYYYMMDD(day string) int64 {
+	trimmed := strings.TrimSpace(day)
+	if trimmed == "" {
+		return 0
+	}
+	parsed, err := time.ParseInLocation("2006-01-02", trimmed, time.Local)
+	if err != nil {
+		return 0
+	}
+	y, m, d := parsed.Date()
+	return int64(y*10000 + int(m)*100 + d)
+}
+
+func sameInt64Slice(a, b []int64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func exactDateCondition(fieldName, date string) *taskagent.FeishuCondition {
+	trimmed := strings.TrimSpace(date)
+	if trimmed == "" || strings.TrimSpace(fieldName) == "" {
+		return nil
+	}
+	dayTime, err := time.ParseInLocation("2006-01-02", trimmed, time.Local)
+	if err != nil {
+		return nil
+	}
+	tsMs := strconv.FormatInt(dayTime.UnixMilli(), 10)
+	return taskagent.NewFeishuCondition(fieldName, "is", "ExactDate", tsMs)
 }

@@ -279,6 +279,14 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 		if len(records) == 0 {
 			return w.markFailed(ctx, row, ErrNoCaptureRecords)
 		}
+	case WebhookBizTypeSingleURLCapture:
+		records, err = fetchCaptureRecordsByTaskIDs(ctx, taskIDs)
+		if err != nil {
+			return w.markFailed(ctx, row, err)
+		}
+		if len(records) == 0 {
+			return w.markFailed(ctx, row, ErrNoCaptureRecords)
+		}
 	default:
 		return w.markFailed(ctx, row, fmt.Errorf("unknown biz type: %s", bizType))
 	}
