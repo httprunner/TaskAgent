@@ -125,7 +125,7 @@ TaskAgent exposes per-table override knobs so you can align with custom schemas 
 | `DEVICE_FIELD_STATUS` | `Status` | idle/running/offline. |
 | `DEVICE_FIELD_LAST_SEEN_AT` / `DEVICE_FIELD_LAST_ERROR` | `LastSeenAt` / `LastError` | Health data. |
 | `DEVICE_FIELD_TAGS` | `Tags` | Optional labels. |
-| `DEVICE_FIELD_RUNNING_TASK` / `DEVICE_FIELD_PENDING_TASKS` | `RunningTask` / `PendingTasks` | Live task snapshot.
+| `DEVICE_FIELD_RUNNING_TASK` / `DEVICE_FIELD_PENDING_TASKS` | `RunningTask` / `PendingTasks` | Live task snapshot. `RunningTask` is stored as plain text; `PendingTasks` is stored as a comma-separated string in a text column (for example: `"44007,44008,44009"`).
 
 Device-task history tables follow the same pattern; set `DEVICE_TASK_FIELD_*` (e.g., `DEVICE_TASK_FIELD_JOBID`, `DEVICE_TASK_FIELD_DEVICE_SERIAL`, `DEVICE_TASK_FIELD_ASSIGNED_TASKS`, `DEVICE_TASK_FIELD_STATE`, `DEVICE_TASK_FIELD_ERROR_MESSAGE`, `DEVICE_TASK_FIELD_STARTED_AT`, `DEVICE_TASK_FIELD_FINISHED_AT`) to match your schema when writing dispatch rows.
 

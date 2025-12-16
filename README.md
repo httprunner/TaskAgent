@@ -174,7 +174,7 @@ Feishu Task Table ──> FeishuTaskClient (task)
 ### Storage & observability
 - `taskagent.NewResultStorageManager` + `taskagent.ResultStorageConfig` 写入 SQLite (`TRACKING_STORAGE_DB_PATH`) 并可选上报 Feishu (`RESULT_STORAGE_ENABLE_FEISHU=1`)。
 - Async reporter knobs (`RESULT_REPORT_*`, `FEISHU_REPORT_RPS`) keep uploads within Feishu rate-limits（内部由 `internal/storage` 驱动）。
-- `taskagent.NewDeviceRecorderFromEnv` 封装了设备状态上报（`DeviceSerial`, `Status`, `RunningTask`, 等）到 Feishu 表；字段名可通过 `DEVICE_FIELD_*` env 覆盖。
+- `taskagent.NewDeviceRecorderFromEnv` 封装了设备状态上报（`DeviceSerial`, `Status`, `RunningTask`, `PendingTasks` 等）到 Feishu 表；字段名可通过 `DEVICE_FIELD_*` env 覆盖，其中 `RunningTask` 建议使用文本列，`PendingTasks` 需配置为文本列并按逗号分隔的任务 ID 展示（例如 `44007,44008,44009`）。
 - Consult [`docs/result-storage.md`](docs/result-storage.md) for schema diagrams and failure playbooks.
 
 ## Configuration quick reference
