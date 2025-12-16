@@ -305,11 +305,12 @@ func buildDeviceInfoPayload(rec DeviceRecordInput, fields DeviceFields) (map[str
 		row[runningCol] = strings.TrimSpace(rec.RunningTask)
 	}
 	if pendingCol := strings.TrimSpace(fields.PendingTasks); pendingCol != "" {
-		if pending := filterNonEmpty(rec.PendingTasks); pending != nil {
-			row[pendingCol] = pending
+		// Encode pending tasks as a single comma-separated string for text columns.
+		if pending := filterNonEmpty(rec.PendingTasks); len(pending) > 0 {
+			row[pendingCol] = strings.Join(pending, ",")
 		} else {
-			// Write empty slice to clear stale pending tasks.
-			row[pendingCol] = []string{}
+			// Clear existing text value by writing an empty string.
+			row[pendingCol] = ""
 		}
 	}
 	if rec.LastSeenAt != nil {
