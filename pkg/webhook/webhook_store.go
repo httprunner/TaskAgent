@@ -321,12 +321,12 @@ func uniqueInt64(v []int64) []int64 {
 	return out
 }
 
-func encodeTaskIDsForFeishu(taskIDs []int64) []string {
+func encodeTaskIDsForFeishu(taskIDs []int64) string {
 	if len(taskIDs) == 0 {
-		return nil
+		return ""
 	}
-	out := make([]string, 0, len(taskIDs))
 	seen := make(map[int64]struct{}, len(taskIDs))
+	out := make([]string, 0, len(taskIDs))
 	for _, id := range taskIDs {
 		if id <= 0 {
 			continue
@@ -337,7 +337,7 @@ func encodeTaskIDsForFeishu(taskIDs []int64) []string {
 		seen[id] = struct{}{}
 		out = append(out, fmt.Sprintf("%d", id))
 	}
-	return out
+	return strings.Join(out, ",")
 }
 
 func toString(v any) string {

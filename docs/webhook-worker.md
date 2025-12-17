@@ -21,7 +21,7 @@ Webhook 结果表用于存储 webhook 的关联信息和推送结果，核心字
 - `ParentTaskID`：综合页搜索 TaskID（用于区分同一个 GroupID 在不同父任务下的唯一性）
 - `GroupID`：`{App}_{BookID}_{UserID}`
 - `Status`：`pending/success/failed/error`
-- `TaskIDs`：多选文本（每个选项是 TaskID 字符串，例如 `123`；UI 上可能展示为 `123,456`）
+- `TaskIDs`：文本（逗号分隔的 TaskID 列表，例如 `123,456`）
 - `DramaInfo`：文本（JSON），创建时按 `BookID` 从剧单表拉取整行 fields 后序列化
 - `UserInfo`：文本（JSON，占位）
 - `Records`：文本（JSON，占位/或写入扁平化 records）
@@ -64,7 +64,7 @@ Webhook 结果表用于存储 webhook 的关联信息和推送结果，核心字
 - 每个录屏 TaskID 对应结果表一条记录：
   - `BizType=video_screen_capture`
   - `Status=pending`
-  - `TaskIDs=[TaskID]`（单元素多选文本）
+  - `TaskIDs`：文本字段，填入该 TaskID 的数字字符串（例如 `123`）
   - `DramaInfo`：若任务表已填 `BookID`，可按 `BookID` 查询剧单表并序列化写入；若缺失 `BookID` 则先写 `{}`，worker 仍可继续推送（仅 drama 维度信息为空）
   - `CreateAt`：创建时间
 - 建议的扫描条件（可按实际落地调整）：
@@ -98,7 +98,7 @@ worker 定时轮询 webhook 结果表：
      - `Drama`：优先使用结果表里的 `DramaInfo`（fields JSON）构造 payload
      - `Records`：按 `TaskIDs` 从 SQLite（优先）或 Feishu 结果表汇总记录
    - `BizType=video_screen_capture`：
-     - 结果表仅提供 `TaskIDs=[TaskID]`；worker 需要回查任务表拿到该 TaskID 的 `App/Scene/Params/ItemID/...`
+     - 结果表仅提供单个 TaskID（写入 `TaskIDs` 文本字段）；worker 需要回查任务表拿到该 TaskID 的 `App/Scene/Params/ItemID/...`
      - `Records`：按 “`Scene=视频录屏采集` + `ItemID`” 查询采集结果表，仅取最新 1 条
      - `Drama`：可先为空或由 Params 兜底（当前 BookID 为空，暂不强依赖剧单表）
 4. 状态回写：
