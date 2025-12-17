@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,6 +31,14 @@ type WebhookResultWorkerConfig struct {
 	// AllowFailedStatusBeforeToday controls whether status "failed" can be treated as ready
 	// when the task's Datetime is strictly before today (local time).
 	AllowFailedStatusBeforeToday bool
+
+	// NodeIndex and NodeTotal control optional sharding for piracy webhook processing.
+	// When NodeTotal <= 1, sharding is disabled and all rows are processed.
+	// When NodeTotal > 1, rows will be routed to a single shard based on (BookID, App) for
+	// piracy_general_search groups to keep capture_results lookups co-located with the
+	// node that executed general + child tasks.
+	NodeIndex int
+	NodeTotal int
 }
 
 type WebhookResultWorker struct {
@@ -44,6 +53,9 @@ type WebhookResultWorker struct {
 	allowEmpty   bool
 	allowError   bool
 	allowStale   bool
+
+	nodeIndex int
+	nodeTotal int
 }
 
 const maxWebhookResultRetries = 3
@@ -82,6 +94,16 @@ func NewWebhookResultWorker(cfg WebhookResultWorkerConfig) (*WebhookResultWorker
 	if cd <= 0 {
 		cd = 2 * time.Minute
 	}
+
+	nodeTotal := cfg.NodeTotal
+	if nodeTotal <= 0 {
+		nodeTotal = 1
+	}
+	nodeIndex := cfg.NodeIndex
+	if nodeIndex < 0 || nodeIndex >= nodeTotal {
+		nodeIndex = 0
+	}
+
 	return &WebhookResultWorker{
 		store:        store,
 		taskClient:   client,
@@ -94,6 +116,9 @@ func NewWebhookResultWorker(cfg WebhookResultWorkerConfig) (*WebhookResultWorker
 		allowEmpty:   cfg.AllowEmptyStatusAsReady,
 		allowError:   cfg.AllowErrorStatusAsReady,
 		allowStale:   cfg.AllowFailedStatusBeforeToday,
+
+		nodeIndex: nodeIndex,
+		nodeTotal: nodeTotal,
 	}, nil
 }
 
@@ -109,6 +134,8 @@ func (w *WebhookResultWorker) Run(ctx context.Context) error {
 		Str("webhook_bitable", w.store.table()).
 		Dur("poll_interval", w.pollInterval).
 		Int("batch_limit", w.batchLimit).
+		Int("node_index", w.nodeIndex).
+		Int("node_total", w.nodeTotal).
 		Msg("webhook result worker started")
 
 	ticker := time.NewTicker(w.pollInterval)
@@ -274,10 +301,31 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 		return w.markFailed(ctx, row, fmt.Errorf("decode drama info failed: %v", err))
 	}
 
+	if bizType == WebhookBizTypePiracyGeneralSearch && w.nodeTotal > 1 {
+		bookID := ""
+		if dramaRaw != nil {
+			if v, ok := dramaRaw["DramaID"]; ok {
+				bookID = strings.TrimSpace(fmt.Sprint(v))
+			}
+		}
+		app := strings.TrimSpace(meta.App)
+		if bookID != "" && app != "" && !w.shouldHandleShard(bookID, app) {
+			log.Debug().
+				Str("record_id", strings.TrimSpace(row.RecordID)).
+				Str("group_id", strings.TrimSpace(row.GroupID)).
+				Str("book_id", bookID).
+				Str("app", app).
+				Int("node_index", w.nodeIndex).
+				Int("node_total", w.nodeTotal).
+				Msg("webhook: skip piracy group due to shard mismatch")
+			return nil
+		}
+	}
+
 	var records []CaptureRecordPayload
 	switch bizType {
 	case WebhookBizTypePiracyGeneralSearch:
-		records, err = fetchCaptureRecordsByTaskIDs(ctx, taskIDs)
+		records, err = w.fetchPiracyGeneralSearchRecords(ctx, row, meta, dramaRaw, taskIDs)
 		if err != nil {
 			return w.markFailed(ctx, row, err)
 		}
@@ -684,6 +732,83 @@ func parseFeishuDatetime(raw string) *time.Time {
 		return &parsed
 	}
 	return nil
+}
+
+func (w *WebhookResultWorker) shouldHandleShard(bookID, app string) bool {
+	if w == nil || w.nodeTotal <= 1 {
+		return true
+	}
+	bookID = strings.TrimSpace(bookID)
+	app = strings.TrimSpace(app)
+	if bookID == "" || app == "" {
+		return true
+	}
+	key := bookID + "|" + app
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(key))
+	shard := int(h.Sum32() % uint32(w.nodeTotal))
+	return shard == w.nodeIndex
+}
+
+func (w *WebhookResultWorker) fetchPiracyGeneralSearchRecords(
+	ctx context.Context, row webhookResultRow, meta taskMeta,
+	dramaRaw map[string]any, taskIDs []int64) ([]CaptureRecordPayload, error) {
+
+	records, err := fetchCaptureRecordsByTaskIDs(ctx, taskIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return records, nil
+	}
+
+	bookID := ""
+	if dramaRaw != nil {
+		if v, ok := dramaRaw["DramaID"]; ok {
+			bookID = strings.TrimSpace(fmt.Sprint(v))
+		}
+	}
+	app := strings.TrimSpace(meta.App)
+	userID := strings.TrimSpace(meta.UserID)
+	if bookID == "" || app == "" || userID == "" {
+		return records, nil
+	}
+
+	generalRecords, err := fetchCaptureRecordsByQuery(ctx, recordQuery{
+		App:    app,
+		UserID: userID,
+		Scene:  taskagent.SceneGeneralSearch,
+	})
+	if err != nil {
+		log.Warn().
+			Err(err).
+			Str("group_id", strings.TrimSpace(row.GroupID)).
+			Str("book_id", bookID).
+			Str("app", app).
+			Str("user_id", userID).
+			Msg("webhook: fetch general search records for piracy group failed; continue with child task records only")
+		return records, nil
+	}
+	if len(generalRecords) == 0 {
+		return records, nil
+	}
+
+	merged := make([]CaptureRecordPayload, 0, len(records)+len(generalRecords))
+	seen := make(map[string]struct{}, len(records)+len(generalRecords))
+	for _, rec := range append(records, generalRecords...) {
+		id := strings.TrimSpace(rec.RecordID)
+		if id == "" {
+			id = fmt.Sprintf("%v", rec.Fields["id"])
+		}
+		if id != "" {
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+		}
+		merged = append(merged, rec)
+	}
+	return merged, nil
 }
 
 func (w *WebhookResultWorker) fetchTasksByIDs(ctx context.Context, taskIDs []int64) ([]taskagent.FeishuTaskRow, error) {
