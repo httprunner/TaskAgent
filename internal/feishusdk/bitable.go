@@ -53,6 +53,7 @@ type TaskFields struct {
 	StartAt          string
 	EndAt            string
 	ElapsedSeconds   string
+	ItemsCollected   string
 }
 
 // CookieFields lists the expected columns for the cookies table.
@@ -90,6 +91,7 @@ type TaskRow struct {
 	DispatchedAt     *time.Time
 	DispatchedAtRaw  string
 	ElapsedSeconds   int64
+	ItemsCollected   int64
 }
 
 // CookieRow represents a single row stored inside the cookies table.
@@ -128,6 +130,7 @@ type TaskRecordInput struct {
 	DispatchedAt     *time.Time
 	DispatchedAtRaw  string
 	ElapsedSeconds   *int64
+	ItemsCollected   *int64
 }
 
 // ResultFields defines the schema for the capture result table.
@@ -1173,6 +1176,9 @@ func buildTaskRecordPayloads(records []TaskRecordInput, fields TaskFields) ([]ma
 		if strings.TrimSpace(fields.ElapsedSeconds) != "" && rec.ElapsedSeconds != nil {
 			row[fields.ElapsedSeconds] = *rec.ElapsedSeconds
 		}
+		if strings.TrimSpace(fields.ItemsCollected) != "" && rec.ItemsCollected != nil {
+			row[fields.ItemsCollected] = *rec.ItemsCollected
+		}
 		if len(row) == 0 {
 			return nil, fmt.Errorf("feishu: record %d has no fields to set", idx)
 		}
@@ -1548,6 +1554,20 @@ func decodeTaskRow(rec bitableRecord, fields TaskFields) (TaskRow, error) {
 		if val, ok := rec.Fields[field]; ok {
 			if secs, err := toInt64(val); err == nil {
 				row.ElapsedSeconds = secs
+			}
+		}
+	}
+	if field := strings.TrimSpace(fields.ItemsCollected); field != "" {
+		if val, ok := rec.Fields[field]; ok {
+			if count, err := toInt64(val); err == nil {
+				row.ItemsCollected = count
+			}
+		}
+	}
+	if field := strings.TrimSpace(fields.ItemsCollected); field != "" {
+		if val, ok := rec.Fields[field]; ok {
+			if count, err := toInt64(val); err == nil {
+				row.ItemsCollected = count
 			}
 		}
 	}

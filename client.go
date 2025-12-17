@@ -411,6 +411,7 @@ type FeishuTask struct {
 	DispatchedAt     *time.Time
 	DispatchedAtRaw  string
 	ElapsedSeconds   int64
+	ItemsCollected   int64
 	TargetCount      int
 	TaskRef          *Task `json:"-"`
 
@@ -446,6 +447,7 @@ func toStorageTaskStatus(task *FeishuTask) *storage.TaskStatus {
 		DispatchedAt:     task.DispatchedAt,
 		DispatchedAtRaw:  task.DispatchedAtRaw,
 		ElapsedSeconds:   task.ElapsedSeconds,
+		ItemsCollected:   task.ItemsCollected,
 	}
 }
 
@@ -864,6 +866,7 @@ func UpdateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 		}
 		dispatchedTimeField := strings.TrimSpace(source.table.Fields.DispatchedAt)
 		elapsedField := strings.TrimSpace(source.table.Fields.ElapsedSeconds)
+		itemsCollectedField := strings.TrimSpace(source.table.Fields.ItemsCollected)
 		startField := strings.TrimSpace(source.table.Fields.StartAt)
 		endField := strings.TrimSpace(source.table.Fields.EndAt)
 		logsField := strings.TrimSpace(source.table.Fields.Logs)
@@ -904,6 +907,9 @@ func UpdateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 					fields[elapsedField] = secs
 					task.ElapsedSeconds = secs
 				}
+			}
+			if itemsCollectedField != "" && task.ItemsCollected > 0 {
+				fields[itemsCollectedField] = task.ItemsCollected
 			}
 			if logsField != "" && logsValue != "" {
 				fields[logsField] = logsValue

@@ -41,6 +41,7 @@ type TaskStatus struct {
 	DispatchedAt     *time.Time
 	DispatchedAtRaw  string
 	ElapsedSeconds   int64
+	ItemsCollected   int64
 }
 
 // TaskMirror keeps Feishu task rows synchronized inside SQLite.
@@ -118,6 +119,7 @@ func buildTaskColumnOrder(fields feishusdk.TaskFields) []string {
 		fields.DispatchedDevice,
 		fields.DispatchedAt,
 		fields.ElapsedSeconds,
+		fields.ItemsCollected,
 	}
 }
 
@@ -143,6 +145,7 @@ func ensureTaskSchema(db *sql.DB, table string, fields feishusdk.TaskFields, col
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.DispatchedDevice)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.DispatchedAt)),
 		fmt.Sprintf("%s INTEGER", quoteIdent(fields.ElapsedSeconds)),
+		fmt.Sprintf("%s INTEGER", quoteIdent(fields.ItemsCollected)),
 		fmt.Sprintf("%s TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP", quoteIdent(targetUpdatedAtColumn)),
 	}
 	createStmt := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
@@ -250,6 +253,10 @@ func (m *TaskMirror) upsert(task *TaskStatus) error {
 	if task.ElapsedSeconds > 0 {
 		elapsed = sql.NullInt64{Int64: task.ElapsedSeconds, Valid: true}
 	}
+	itemsCollected := sql.NullInt64{}
+	if task.ItemsCollected > 0 {
+		itemsCollected = sql.NullInt64{Int64: task.ItemsCollected, Valid: true}
+	}
 	_, err := m.stmt.Exec(
 		task.TaskID,
 		nullableString(task.Params),
@@ -271,6 +278,7 @@ func (m *TaskMirror) upsert(task *TaskStatus) error {
 		nullableString(task.DispatchedDevice),
 		formatDatetime(task.DispatchedAtRaw, task.DispatchedAt),
 		elapsed,
+		itemsCollected,
 	)
 	if err != nil {
 		return errors.Wrapf(err, "upsert capture target %d failed", task.TaskID)
