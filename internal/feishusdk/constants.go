@@ -69,6 +69,7 @@ var (
 var (
 	baseTaskFields = TaskFields{
 		TaskID:           "TaskID",           // 任务 ID
+		ParentTaskID:     "ParentTaskID",     // Parent task ID (general search TaskID)
 		App:              "App",              // 平台名称
 		Scene:            "Scene",            // 场景名称
 		Params:           "Params",           // 查询参数
@@ -162,6 +163,7 @@ func applyTaskFieldEnvOverrides(fields *TaskFields) {
 		return
 	}
 	overrideFieldFromEnv("TASK_FIELD_TASKID", &fields.TaskID)
+	overrideFieldFromEnv("TASK_FIELD_PARENT_TASK_ID", &fields.ParentTaskID)
 	overrideFieldFromEnv("TASK_FIELD_APP", &fields.App)
 	overrideFieldFromEnv("TASK_FIELD_SCENE", &fields.Scene)
 	overrideFieldFromEnv("TASK_FIELD_PARAMS", &fields.Params)

@@ -32,6 +32,7 @@ type BitableRef struct {
 // TaskFields lists the expected column names inside the task status table.
 type TaskFields struct {
 	TaskID           string
+	ParentTaskID     string
 	App              string
 	Scene            string
 	Params           string
@@ -67,6 +68,7 @@ type CookieFields struct {
 type TaskRow struct {
 	RecordID         string
 	TaskID           int64
+	ParentTaskID     int64
 	Params           string
 	ItemID           string
 	BookID           string
@@ -107,6 +109,7 @@ type CookieRow struct {
 // DatetimeRaw takes precedence if both it and Datetime are set.
 type TaskRecordInput struct {
 	TaskID           int64
+	ParentTaskID     int64
 	Params           string
 	ItemID           string
 	BookID           string
@@ -1145,6 +1148,9 @@ func buildTaskRecordPayloads(records []TaskRecordInput, fields TaskFields) ([]ma
 		if rec.TaskID != 0 {
 			row[fields.TaskID] = rec.TaskID
 		}
+		if rec.ParentTaskID > 0 && strings.TrimSpace(fields.ParentTaskID) != "" {
+			row[fields.ParentTaskID] = rec.ParentTaskID
+		}
 		addOptionalField(row, fields.ItemID, rec.ItemID)
 		addOptionalField(row, fields.BookID, rec.BookID)
 		addOptionalField(row, fields.URL, rec.URL)
@@ -1501,11 +1507,21 @@ func decodeTaskRow(rec bitableRecord, fields TaskFields) (TaskRow, error) {
 		return TaskRow{}, fmt.Errorf("record %s: %w", rec.RecordID, err)
 	}
 
+	var parentTaskID int64
+	if field := strings.TrimSpace(fields.ParentTaskID); field != "" {
+		if val, ok := rec.Fields[field]; ok {
+			if n, err := toInt64(val); err == nil {
+				parentTaskID = n
+			}
+		}
+	}
+
 	targetDevice := strings.TrimSpace(bitableOptionalString(rec.Fields, fields.DeviceSerial))
 	dispatchedDevice := strings.TrimSpace(bitableOptionalString(rec.Fields, fields.DispatchedDevice))
 	row := TaskRow{
 		RecordID:         rec.RecordID,
 		TaskID:           taskID,
+		ParentTaskID:     parentTaskID,
 		Params:           bitableOptionalString(rec.Fields, fields.Params),
 		ItemID:           bitableOptionalString(rec.Fields, fields.ItemID),
 		BookID:           bitableOptionalString(rec.Fields, fields.BookID),

@@ -44,6 +44,7 @@ TaskAgent exposes per-table override knobs so you can align with custom schemas 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `TASK_FIELD_TASKID` | `TaskID` | Primary identifier column. |
+| `TASK_FIELD_PARENT_TASK_ID` | `ParentTaskID` | Parent task ID (综合页搜索 TaskID). |
 | `TASK_FIELD_APP` | `App` | App/platform name used for filtering by `agent.Start(ctx, app)`. |
 | `TASK_FIELD_SCENE` | `Scene` | Scene name (个人页搜索、综合页搜索、视频录屏采集、单个链接采集等). |
 | `TASK_FIELD_PARAMS` | `Params` | Parameters/payload column consumed by runners. |

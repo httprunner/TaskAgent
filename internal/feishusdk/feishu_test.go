@@ -558,6 +558,24 @@ func TestCreateTaskRecords(t *testing.T) {
 	}
 }
 
+func TestBuildTaskRecordPayloadsParentTaskID(t *testing.T) {
+	records := []TaskRecordInput{{TaskID: 1, ParentTaskID: 42}}
+	rows, err := buildTaskRecordPayloads(records, DefaultTaskFields)
+	if err != nil {
+		t.Fatalf("buildTaskRecordPayloads returned error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("unexpected payload length %d", len(rows))
+	}
+	val, ok := rows[0][DefaultTaskFields.ParentTaskID]
+	if !ok {
+		t.Fatalf("ParentTaskID field missing in payload")
+	}
+	if v, ok := val.(int64); !ok || v != 42 {
+		t.Fatalf("unexpected ParentTaskID value %#v", val)
+	}
+}
+
 func TestBuildTaskRecordPayloadsDatetimeMs(t *testing.T) {
 	records := []TaskRecordInput{
 		{TaskID: 1, DatetimeRaw: "1700000000000"},
