@@ -92,6 +92,7 @@ var (
 		ElapsedSeconds:   "ElapsedSeconds",   // 任务耗时（秒）
 		ItemsCollected:   "ItemsCollected",   // 本次任务采集到的内容条数
 		Extra:            "Extra",            // 额外信息
+		RetryCount:       "RetryCount",       // 重试次数
 	}
 	DefaultTaskFields = baseTaskFields
 )
@@ -186,6 +187,7 @@ func applyTaskFieldEnvOverrides(fields *TaskFields) {
 	overrideFieldFromEnv("TASK_FIELD_END_AT", &fields.EndAt)
 	overrideFieldFromEnv("TASK_FIELD_ELAPSED_SECONDS", &fields.ElapsedSeconds)
 	overrideFieldFromEnv("TASK_FIELD_ITEMS_COLLECTED", &fields.ItemsCollected)
+	overrideFieldFromEnv("TASK_FIELD_RETRYCOUNT", &fields.RetryCount)
 }
 
 func applyResultFieldEnvOverrides(fields *ResultFields) {

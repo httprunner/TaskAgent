@@ -42,6 +42,7 @@ type TaskStatus struct {
 	DispatchedAtRaw  string
 	ElapsedSeconds   int64
 	ItemsCollected   int64
+	RetryCount       int64
 }
 
 // TaskMirror keeps Feishu task rows synchronized inside SQLite.
@@ -120,6 +121,7 @@ func buildTaskColumnOrder(fields feishusdk.TaskFields) []string {
 		fields.DispatchedAt,
 		fields.ElapsedSeconds,
 		fields.ItemsCollected,
+		fields.RetryCount,
 	}
 }
 
@@ -146,6 +148,7 @@ func ensureTaskSchema(db *sql.DB, table string, fields feishusdk.TaskFields, col
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.DispatchedAt)),
 		fmt.Sprintf("%s INTEGER", quoteIdent(fields.ElapsedSeconds)),
 		fmt.Sprintf("%s INTEGER", quoteIdent(fields.ItemsCollected)),
+		fmt.Sprintf("%s INTEGER", quoteIdent(fields.RetryCount)),
 		fmt.Sprintf("%s TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP", quoteIdent(targetUpdatedAtColumn)),
 	}
 	createStmt := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
@@ -176,6 +179,9 @@ func ensureTaskSchema(db *sql.DB, table string, fields feishusdk.TaskFields, col
 		return err
 	}
 	if err := ensureColumnExists(db, table, fields.ItemsCollected, "INTEGER"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(db, table, fields.RetryCount, "INTEGER"); err != nil {
 		return err
 	}
 	indexes := []string{
@@ -257,10 +263,10 @@ func (m *TaskMirror) upsert(task *TaskStatus) error {
 		elapsed = sql.NullInt64{Int64: task.ElapsedSeconds, Valid: true}
 	}
 	itemsCollected := sql.NullInt64{}
-	// Preserve historical rows where ItemsCollected was NULL, but for new
-	// mirrored data treat zero as an explicit value so analytics can
-	// distinguish "missing" from "zero collected".
-	itemsCollected = sql.NullInt64{Int64: task.ItemsCollected, Valid: true}
+	if task.ItemsCollected > 0 {
+		itemsCollected = sql.NullInt64{Int64: task.ItemsCollected, Valid: true}
+	}
+	retryCount := sql.NullInt64{Int64: task.RetryCount, Valid: true}
 	_, err := m.stmt.Exec(
 		task.TaskID,
 		nullableString(task.Params),
@@ -283,6 +289,7 @@ func (m *TaskMirror) upsert(task *TaskStatus) error {
 		formatDatetime(task.DispatchedAtRaw, task.DispatchedAt),
 		elapsed,
 		itemsCollected,
+		retryCount,
 	)
 	if err != nil {
 		return errors.Wrapf(err, "upsert capture target %d failed", task.TaskID)

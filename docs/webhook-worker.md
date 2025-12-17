@@ -108,6 +108,8 @@ worker 定时轮询 webhook 结果表：
    - 失败：`Status=failed`，`RetryCount += 1`
    - 达到上限：重试 3 次后转 `Status=error`（不再重试）
 
+> **补充说明（Task 表 RetryCount）**：除了 Webhook 结果表外，TaskAgent 也在任务表中维护 `RetryCount` 字段：当某个 Feishu 任务从 `failed` 再次切换到 `running` 时，TaskAgent 会在同一次状态更新中将任务表的 `RetryCount` 自增；一旦发现某个 `Status=failed` 的任务其 `RetryCount` 已超过 3 次，TaskAgent 会将该任务标记为 `Status=error`，后续调度不再拉取该任务。这样任务表与 Webhook 结果表在重试语义上保持一致。
+
 ## 运行与接入
 
 目前 `WebhookResultWorker` / `WebhookResultCreator` 可由上层业务进程（例如 fox agent 或独立服务）在进程内启动；核心实现位于：

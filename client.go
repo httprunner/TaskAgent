@@ -195,9 +195,9 @@ func (c *FeishuTaskClient) OnTaskStarted(ctx context.Context, deviceSerial strin
 			}
 		}
 	}
-	var meta *TaskStatusMeta
+	meta := &TaskStatusMeta{}
 	if logsPath != "" {
-		meta = &TaskStatusMeta{Logs: logsPath}
+		meta.Logs = logsPath
 		for _, ft := range feishuTasks {
 			if ft == nil {
 				continue
@@ -207,6 +207,20 @@ func (c *FeishuTaskClient) OnTaskStarted(ctx context.Context, deviceSerial strin
 			}
 		}
 	}
+
+	// For failed tasks, increment RetryCount when they start running again.
+	for _, ft := range feishuTasks {
+		if ft == nil {
+			continue
+		}
+		if strings.TrimSpace(ft.OriginalStatus) != feishusdk.StatusFailed {
+			continue
+		}
+		next := ft.RetryCount + 1
+		meta.RetryCount = &next
+		break
+	}
+
 	return c.updateTaskStatuses(ctx, feishuTasks, feishusdk.StatusRunning, meta)
 }
 
@@ -227,18 +241,11 @@ func (c *FeishuTaskClient) OnTaskResult(ctx context.Context, deviceSerial string
 		return nil
 	}
 	if status == feishusdk.StatusSuccess {
-		// Only apply ItemsCollected-based overrides when TASK_MIN_ITEMS_COLLECTED
-		// is explicitly configured. If the env is unset, keep success as-is.
-		rawMin := env.String("TASK_MIN_ITEMS_COLLECTED", "")
-		trimmed := strings.TrimSpace(rawMin)
-		if trimmed != "" {
-			minItems, err := strconv.Atoi(trimmed)
-			if err != nil || minItems <= 0 {
-				minItems = 0
-			}
-			if minItems <= 0 {
-				return c.updateTaskStatuses(ctx, feishuTasks, status, nil)
-			}
+		// Apply ItemsCollected-based overrides only when TASK_MIN_ITEMS_COLLECTED
+		// is explicitly configured to a positive value. If the env is unset or
+		// non-positive, keep success as-is.
+		minItems := env.Int("TASK_MIN_ITEMS_COLLECTED", 0)
+		if minItems > 0 {
 			threshold := int64(minItems)
 			for _, ft := range feishuTasks {
 				if ft == nil {
@@ -448,6 +455,7 @@ type FeishuTask struct {
 	DispatchedAtRaw  string
 	ElapsedSeconds   int64
 	ItemsCollected   int64
+	RetryCount       int64
 	TargetCount      int
 	TaskRef          *Task `json:"-"`
 
@@ -484,6 +492,7 @@ func toStorageTaskStatus(task *FeishuTask) *storage.TaskStatus {
 		DispatchedAtRaw:  task.DispatchedAtRaw,
 		ElapsedSeconds:   task.ElapsedSeconds,
 		ItemsCollected:   task.ItemsCollected,
+		RetryCount:       task.RetryCount,
 	}
 }
 
@@ -506,6 +515,8 @@ const (
 	SceneAnchorCapture      = "视频锚点采集"
 	SceneVideoScreenCapture = "视频录屏采集"
 	SceneSingleURLCapture   = "单个链接采集"
+
+	maxTaskRetries = 3
 )
 
 var defaultDeviceScenes = []string{
@@ -582,6 +593,47 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client TargetTableClient,
 	if len(result) > limit && limit > 0 {
 		result = result[:limit]
 	}
+
+	if len(result) > 0 {
+		ready := make([]*FeishuTask, 0, len(result))
+		toError := make([]*FeishuTask, 0)
+
+		for _, t := range result {
+			if t == nil {
+				continue
+			}
+			status := strings.TrimSpace(t.Status)
+			if status == feishusdk.StatusFailed && t.RetryCount > maxTaskRetries {
+				toError = append(toError, t)
+				continue
+			}
+			ready = append(ready, t)
+		}
+
+		if len(toError) > 0 {
+			if err := UpdateFeishuTaskStatuses(ctx, toError, feishusdk.StatusError, "", nil); err != nil {
+				log.Error().
+					Err(err).
+					Int("task_count", len(toError)).
+					Msg("feishusdk: mark tasks as error due to RetryCount limit failed")
+			} else {
+				ids := make([]int64, 0, len(toError))
+				for _, t := range toError {
+					if t != nil && t.TaskID > 0 {
+						ids = append(ids, t.TaskID)
+					}
+				}
+				log.Info().
+					Int("task_count", len(ids)).
+					Interface("task_ids", ids).
+					Int("max_retries", maxTaskRetries).
+					Msg("feishusdk: tasks exceeded retry limit and were marked error")
+			}
+		}
+
+		result = ready
+	}
+
 	return result, nil
 }
 
@@ -680,6 +732,8 @@ func FetchFeishuTasksWithFilter(ctx context.Context, client TargetTableClient, b
 			DispatchedAt:     row.DispatchedAt,
 			DispatchedAtRaw:  row.DispatchedAtRaw,
 			ElapsedSeconds:   row.ElapsedSeconds,
+			ItemsCollected:   row.ItemsCollected,
+			RetryCount:       row.RetryCount,
 			source:           source,
 		})
 		if limit > 0 && len(tasks) >= limit {
@@ -849,6 +903,7 @@ type TaskStatusMeta struct {
 	DispatchedAt *time.Time
 	CompletedAt  *time.Time
 	Logs         string
+	RetryCount   *int64
 }
 
 func UpdateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status string, deviceSerial string, meta *TaskStatusMeta) error {
@@ -906,6 +961,7 @@ func UpdateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 		startField := strings.TrimSpace(source.table.Fields.StartAt)
 		endField := strings.TrimSpace(source.table.Fields.EndAt)
 		logsField := strings.TrimSpace(source.table.Fields.Logs)
+		retryField := strings.TrimSpace(source.table.Fields.RetryCount)
 		lastScreenshotField := strings.TrimSpace(source.table.Fields.LastScreenShot)
 		type bitableMediaUploader interface {
 			UploadBitableMedia(ctx context.Context, appToken string, fileName string, content []byte, asImage bool) (string, error)
@@ -950,6 +1006,10 @@ func UpdateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 			if logsField != "" && logsValue != "" {
 				fields[logsField] = logsValue
 				task.Logs = logsValue
+			}
+			if meta != nil && meta.RetryCount != nil && retryField != "" {
+				fields[retryField] = *meta.RetryCount
+				task.RetryCount = *meta.RetryCount
 			}
 			if err := source.client.UpdateTaskFields(ctx, source.table, task.TaskID, fields); err != nil {
 				errs = append(errs, fmt.Sprintf("task %d: %v", task.TaskID, err))

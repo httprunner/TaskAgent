@@ -55,6 +55,7 @@ type TaskFields struct {
 	EndAt            string
 	ElapsedSeconds   string
 	ItemsCollected   string
+	RetryCount       string
 }
 
 // CookieFields lists the expected columns for the cookies table.
@@ -94,6 +95,7 @@ type TaskRow struct {
 	DispatchedAtRaw  string
 	ElapsedSeconds   int64
 	ItemsCollected   int64
+	RetryCount       int64
 }
 
 // CookieRow represents a single row stored inside the cookies table.
@@ -1580,10 +1582,10 @@ func decodeTaskRow(rec bitableRecord, fields TaskFields) (TaskRow, error) {
 			}
 		}
 	}
-	if field := strings.TrimSpace(fields.ItemsCollected); field != "" {
+	if field := strings.TrimSpace(fields.RetryCount); field != "" {
 		if val, ok := rec.Fields[field]; ok {
 			if count, err := toInt64(val); err == nil {
-				row.ItemsCollected = count
+				row.RetryCount = count
 			}
 		}
 	}

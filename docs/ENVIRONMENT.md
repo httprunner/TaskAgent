@@ -79,6 +79,8 @@ TaskAgent exposes per-table override knobs so you can align with custom schemas 
 | `TASK_FIELD_START_AT` | `StartAt` | Execution start timestamp. |
 | `TASK_FIELD_END_AT` | `EndAt` | Execution end timestamp. |
 | `TASK_FIELD_ELAPSED_SECONDS` | `ElapsedSeconds` | Duration of the run in seconds. |
+| `TASK_FIELD_ITEMS_COLLECTED` | `ItemsCollected` | Number of items collected during the run. |
+| `TASK_FIELD_RETRYCOUNT` | `RetryCount` | Task retry counter (failed→running transitions). |
 | `TASK_FIELD_EXTRA` | `Extra` | Free-form JSON for additional metadata. |
 
 ### Result table (`RESULT_FIELD_*`)
