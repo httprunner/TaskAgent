@@ -175,6 +175,9 @@ func ensureTaskSchema(db *sql.DB, table string, fields feishusdk.TaskFields, col
 	if err := ensureColumnExists(db, table, fields.Webhook, "TEXT"); err != nil {
 		return err
 	}
+	if err := ensureColumnExists(db, table, fields.ItemsCollected, "INTEGER"); err != nil {
+		return err
+	}
 	indexes := []string{
 		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS %s ON %s(%s);`, quoteIdent("idx_"+table+"_status"), quoteIdent(table), quoteIdent(fields.Status)),
 		fmt.Sprintf(`CREATE INDEX IF NOT EXISTS %s ON %s(%s);`, quoteIdent("idx_"+table+"_updated_at"), quoteIdent(table), quoteIdent(targetUpdatedAtColumn)),
