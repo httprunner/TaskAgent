@@ -257,9 +257,10 @@ func (m *TaskMirror) upsert(task *TaskStatus) error {
 		elapsed = sql.NullInt64{Int64: task.ElapsedSeconds, Valid: true}
 	}
 	itemsCollected := sql.NullInt64{}
-	if task.ItemsCollected > 0 {
-		itemsCollected = sql.NullInt64{Int64: task.ItemsCollected, Valid: true}
-	}
+	// Preserve historical rows where ItemsCollected was NULL, but for new
+	// mirrored data treat zero as an explicit value so analytics can
+	// distinguish "missing" from "zero collected".
+	itemsCollected = sql.NullInt64{Int64: task.ItemsCollected, Valid: true}
 	_, err := m.stmt.Exec(
 		task.TaskID,
 		nullableString(task.Params),

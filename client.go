@@ -227,8 +227,18 @@ func (c *FeishuTaskClient) OnTaskResult(ctx context.Context, deviceSerial string
 		return nil
 	}
 	if status == feishusdk.StatusSuccess {
-		minItems := env.Int("TASK_MIN_ITEMS_COLLECTED", defaultMinItemsCollected)
-		if minItems > 0 {
+		// Only apply ItemsCollected-based overrides when TASK_MIN_ITEMS_COLLECTED
+		// is explicitly configured. If the env is unset, keep success as-is.
+		rawMin := env.String("TASK_MIN_ITEMS_COLLECTED", "")
+		trimmed := strings.TrimSpace(rawMin)
+		if trimmed != "" {
+			minItems, err := strconv.Atoi(trimmed)
+			if err != nil || minItems <= 0 {
+				minItems = 0
+			}
+			if minItems <= 0 {
+				return c.updateTaskStatuses(ctx, feishuTasks, status, nil)
+			}
 			threshold := int64(minItems)
 			for _, ft := range feishuTasks {
 				if ft == nil {
@@ -840,8 +850,6 @@ type TaskStatusMeta struct {
 	CompletedAt  *time.Time
 	Logs         string
 }
-
-const defaultMinItemsCollected = 20
 
 func UpdateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status string, deviceSerial string, meta *TaskStatusMeta) error {
 	if len(tasks) == 0 {
