@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/httprunner/TaskAgent/internal/env"
 	"github.com/httprunner/TaskAgent/internal/feishusdk"
 	"github.com/httprunner/TaskAgent/internal/storage"
 	"github.com/pkg/errors"
@@ -224,6 +225,31 @@ func (c *FeishuTaskClient) OnTaskResult(ctx context.Context, deviceSerial string
 	}
 	if len(feishuTasks) == 0 {
 		return nil
+	}
+	if status == feishusdk.StatusSuccess {
+		minItems := env.Int("TASK_MIN_ITEMS_COLLECTED", defaultMinItemsCollected)
+		if minItems > 0 {
+			threshold := int64(minItems)
+			for _, ft := range feishuTasks {
+				if ft == nil {
+					continue
+				}
+				scene := strings.TrimSpace(ft.Scene)
+				if scene != SceneGeneralSearch && scene != SceneProfileSearch && scene != SceneCollection {
+					continue
+				}
+				if ft.ItemsCollected < threshold {
+					log.Warn().
+						Int64("task_id", ft.TaskID).
+						Str("scene", scene).
+						Int64("items_collected", ft.ItemsCollected).
+						Int("min_items_collected", minItems).
+						Msg("override task status to failed due to low items collected")
+					status = feishusdk.StatusFailed
+					break
+				}
+			}
+		}
 	}
 	return c.updateTaskStatuses(ctx, feishuTasks, status, nil)
 }
@@ -814,6 +840,8 @@ type TaskStatusMeta struct {
 	CompletedAt  *time.Time
 	Logs         string
 }
+
+const defaultMinItemsCollected = 20
 
 func UpdateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status string, deviceSerial string, meta *TaskStatusMeta) error {
 	if len(tasks) == 0 {
