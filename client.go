@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/httprunner/TaskAgent/internal/env"
 	"github.com/httprunner/TaskAgent/internal/feishusdk"
 	"github.com/httprunner/TaskAgent/internal/storage"
 	"github.com/pkg/errors"
@@ -239,34 +238,6 @@ func (c *FeishuTaskClient) OnTaskResult(ctx context.Context, deviceSerial string
 	}
 	if len(feishuTasks) == 0 {
 		return nil
-	}
-	if status == feishusdk.StatusSuccess {
-		// Apply ItemsCollected-based overrides only when TASK_MIN_ITEMS_COLLECTED
-		// is explicitly configured to a positive value. If the env is unset or
-		// non-positive, keep success as-is.
-		minItems := env.Int("TASK_MIN_ITEMS_COLLECTED", 0)
-		if minItems > 0 {
-			threshold := int64(minItems)
-			for _, ft := range feishuTasks {
-				if ft == nil {
-					continue
-				}
-				scene := strings.TrimSpace(ft.Scene)
-				if scene != SceneGeneralSearch && scene != SceneProfileSearch && scene != SceneCollection {
-					continue
-				}
-				if ft.ItemsCollected < threshold {
-					log.Warn().
-						Int64("task_id", ft.TaskID).
-						Str("scene", scene).
-						Int64("items_collected", ft.ItemsCollected).
-						Int("min_items_collected", minItems).
-						Msg("override task status to failed due to low items collected")
-					status = feishusdk.StatusFailed
-					break
-				}
-			}
-		}
 	}
 	return c.updateTaskStatuses(ctx, feishuTasks, status, nil)
 }
