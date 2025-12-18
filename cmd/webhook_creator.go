@@ -51,10 +51,6 @@ func newWebhookCreatorCmd() *cobra.Command {
 			}
 
 			bizType := strings.TrimSpace(flagBizType)
-			if bizType == "" {
-				bizType = webhook.WebhookBizTypePiracyGeneralSearch
-			}
-
 			creator, err := webhook.NewWebhookResultCreator(webhook.WebhookResultCreatorConfig{
 				TaskBitableURL:    strings.TrimSpace(taskURL),
 				WebhookBitableURL: strings.TrimSpace(webhookBitable),

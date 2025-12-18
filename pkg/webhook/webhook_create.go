@@ -38,13 +38,13 @@ const (
 // It is designed for the "综合页搜索 -> 盗版筛查" flow where child tasks are generated and webhook
 // should only fire after all TaskIDs complete (success/error).
 func CreateWebhookResultsForGroups(ctx context.Context, opts WebhookResultCreateOptions) error {
-	log.Info().Msg("creating webhook tasks for groups")
+	log.Info().Str("book_id", opts.BookID).Strs("group_ids", opts.GroupIDs).Msg("creating webhook tasks for groups")
 	store, err := newWebhookResultStore(firstNonEmpty(opts.WebhookBitableURL, taskagent.EnvString(taskagent.EnvWebhookBitableURL, "")))
 	if err != nil {
 		return err
 	}
 	if store == nil || strings.TrimSpace(store.table()) == "" {
-		log.Debug().Msg("webhook result table not configured; skip creating webhook result rows")
+		log.Warn().Msg("webhook result table not configured; skip creating webhook result rows")
 		return nil
 	}
 	bookID := strings.TrimSpace(opts.BookID)
@@ -90,7 +90,7 @@ func CreateWebhookResultsForGroups(ctx context.Context, opts WebhookResultCreate
 		}
 		if len(taskIDs) == 0 {
 			log.Warn().
-				Str("group_id", groupID).
+				Str("group_id", groupID).Str("date", day).
 				Msg("webhook result: group has no child tasks; skip creating row")
 			continue
 		}
@@ -107,7 +107,10 @@ func CreateWebhookResultsForGroups(ctx context.Context, opts WebhookResultCreate
 		}); err != nil {
 			return err
 		}
+		log.Info().Str("group_id", groupID).Ints64("task_ids", allTaskIDs).
+			Msg("webhook piracy creator: create webhook result for group successful")
 	}
+
 	return nil
 }
 
@@ -165,6 +168,8 @@ func fetchGroupTaskIDsWithRetry(ctx context.Context, client *taskagent.FeishuCli
 			return ids, nil
 		}
 		if err != nil {
+			log.Error().Err(err).Str("group_id", groupID).Str("day", day).
+				Int("attempt", i+1).Msg("fetch group task ids failed; retrying")
 			lastErr = err
 		}
 		if i < attempts-1 {
@@ -438,7 +443,7 @@ func (c *WebhookResultCreator) processOnce(ctx context.Context) error {
 		_, _, _, err := c.createSingleURLCaptureWebhookResults(ctx)
 		return err
 	default:
-		// Backward compatible behavior: process video_screen_capture tasks and,
+		// process video_screen_capture tasks and,
 		// when enabled, also process single_url_capture tasks.
 		if err := c.processOnceVideoScreenCapture(ctx); err != nil {
 			return err
@@ -529,12 +534,13 @@ func (c *WebhookResultCreator) processOncePiracyGroups(ctx context.Context) erro
 		return err
 	}
 	if len(rows) == 0 {
-		log.Info().
-			Str("scan_date", c.scanDate).
-			Str("app_filter", c.appFilter).
+		log.Warn().Str("scan_date", c.scanDate).Str("app_filter", c.appFilter).
 			Msg("webhook piracy creator: no tasks found for date")
 		return nil
 	}
+	log.Info().Str("scan_date", c.scanDate).Str("app_filter", c.appFilter).
+		Int("fetched", len(rows)).
+		Msg("webhook piracy creator: tasks fetched for date")
 
 	type bookKey struct {
 		BookID string
@@ -574,11 +580,17 @@ func (c *WebhookResultCreator) processOncePiracyGroups(ctx context.Context) erro
 	}
 
 	if len(groupsByBook) == 0 {
-		log.Info().
-			Str("scan_date", c.scanDate).
-			Str("app_filter", c.appFilter).
+		log.Warn().Str("scan_date", c.scanDate).Str("app_filter", c.appFilter).
 			Msg("webhook piracy creator: no groups found for date")
 		return nil
+	}
+	log.Info().Str("scan_date", c.scanDate).Str("app_filter", c.appFilter).
+		Int("group_count", len(groupsByBook)).
+		Msg("webhook piracy creator: groups found for date")
+
+	totalGroups := 0
+	for _, groupSet := range groupsByBook {
+		totalGroups += len(groupSet)
 	}
 
 	var parentDatetime *time.Time
@@ -590,12 +602,20 @@ func (c *WebhookResultCreator) processOncePiracyGroups(ctx context.Context) erro
 
 	created := 0
 	skipped := 0
+	groupIndex := 0
 	var errs []string
 
 	for key, groupSet := range groupsByBook {
 		extraTaskIDs := uniqueInt64(generalByBook[key])
 
 		for groupID := range groupSet {
+			groupIndex++
+			log.Info().
+				Int("group_index", groupIndex).
+				Int("group_total", totalGroups).
+				Str("group_id", groupID).
+				Str("date", c.scanDate).
+				Msg("webhook piracy creator: processing group")
 			trimmedGroup := strings.TrimSpace(groupID)
 			if trimmedGroup == "" {
 				continue
@@ -609,6 +629,8 @@ func (c *WebhookResultCreator) processOncePiracyGroups(ctx context.Context) erro
 				}
 				if existing != nil && strings.TrimSpace(existing.RecordID) != "" {
 					skipped++
+					log.Warn().Str("group_id", trimmedGroup).Str("date", c.scanDate).Int("skipped", skipped).
+						Msg("webhook piracy creator: existing webhook result found; skipping")
 					continue
 				}
 			}
@@ -623,6 +645,8 @@ func (c *WebhookResultCreator) processOncePiracyGroups(ctx context.Context) erro
 				ExtraTaskIDs:      extraTaskIDs,
 			}
 			if err := CreateWebhookResultsForGroups(ctx, opts); err != nil {
+				log.Error().Err(err).Str("group_id", trimmedGroup).Str("date", c.scanDate).
+					Msg("webhook piracy creator: failed to create webhook result for group")
 				errs = append(errs, fmt.Sprintf("book=%s, group=%s: %v", key.BookID, trimmedGroup, err))
 				continue
 			}
