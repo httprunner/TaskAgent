@@ -329,7 +329,7 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 	var records []CaptureRecordPayload
 	switch bizType {
 	case WebhookBizTypePiracyGeneralSearch:
-		records, err = w.fetchPiracyGeneralSearchRecords(ctx, row, meta, dramaRaw, tasks, taskIDs)
+		records, err = w.fetchPiracyGeneralSearchRecords(ctx, meta, tasks, taskIDs)
 		if err != nil {
 			return w.markFailed(ctx, row, err)
 		}
@@ -357,28 +357,20 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 		task := pickVideoScreenCaptureTask(tasks)
 		groupUserID := strings.TrimSpace(task.UserID)
 
-		records, err = fetchCaptureRecordsByTaskIDs(ctx, taskIDs)
+		records, err = fetchCaptureRecordsByTaskIDs(ctx, taskIDs, groupUserID)
 		if err != nil {
 			return w.markFailed(ctx, row, err)
 		}
-		if len(records) == 0 {
-			return w.markFailed(ctx, row, ErrNoCaptureRecords)
-		}
-		records = filterRecordsByUser(records, tasks, groupUserID)
 		if len(records) == 0 {
 			return w.markFailed(ctx, row, ErrNoCaptureRecords)
 		}
 	case WebhookBizTypeSingleURLCapture:
-		records, err = fetchCaptureRecordsByTaskIDs(ctx, taskIDs)
+		groupUserID := strings.TrimSpace(meta.UserID)
+
+		records, err = fetchCaptureRecordsByTaskIDs(ctx, taskIDs, groupUserID)
 		if err != nil {
 			return w.markFailed(ctx, row, err)
 		}
-		if len(records) == 0 {
-			return w.markFailed(ctx, row, ErrNoCaptureRecords)
-		}
-
-		groupUserID := strings.TrimSpace(meta.UserID)
-		records = filterRecordsByUser(records, tasks, groupUserID)
 		if len(records) == 0 {
 			return w.markFailed(ctx, row, ErrNoCaptureRecords)
 		}
@@ -788,85 +780,56 @@ func (w *WebhookResultWorker) shouldHandleVideoScreenCapture(taskIDs []int64) bo
 }
 
 func (w *WebhookResultWorker) fetchPiracyGeneralSearchRecords(
-	ctx context.Context, row webhookResultRow, meta taskMeta,
-	dramaRaw map[string]any, tasks []taskagent.FeishuTaskRow, taskIDs []int64) ([]CaptureRecordPayload, error) {
-
-	records, err := fetchCaptureRecordsByTaskIDs(ctx, taskIDs)
-	if err != nil {
-		return nil, err
-	}
-	if len(records) == 0 {
-		return records, nil
-	}
-
+	ctx context.Context, meta taskMeta,
+	_ []taskagent.FeishuTaskRow, taskIDs []int64,
+) ([]CaptureRecordPayload, error) {
 	userID := strings.TrimSpace(meta.UserID)
-	filtered := filterRecordsByUser(records, tasks, userID)
-	return filtered, nil
+	return fetchCaptureRecordsByTaskIDs(ctx, taskIDs, userID)
 }
 
-func filterRecordsByUser(
+// filterRecordsByTaskAndUser narrows capture records using TaskID and UserID
+// from the capture rows themselves, independent of the task table. This keeps
+// webhook workers resilient when task rows are pruned while SQLite still
+// holds valid capture history.
+func filterRecordsByTaskAndUser(
 	records []CaptureRecordPayload,
-	tasks []taskagent.FeishuTaskRow,
+	taskIDs []int64,
 	userID string,
 ) []CaptureRecordPayload {
 	if len(records) == 0 {
 		return records
 	}
 
-	userID = strings.TrimSpace(userID)
-
-	// When we have no task rows or no user hint, just de-duplicate by RecordID.
-	if len(tasks) == 0 || userID == "" {
-		seen := make(map[string]struct{}, len(records))
-		out := make([]CaptureRecordPayload, 0, len(records))
-		for _, rec := range records {
-			id := strings.TrimSpace(rec.RecordID)
-			if id == "" {
-				id = fmt.Sprintf("%v", rec.Fields["id"])
-			}
-			if id != "" {
-				if _, ok := seen[id]; ok {
-					continue
-				}
-				seen[id] = struct{}{}
-			}
-			out = append(out, rec)
-		}
-		return out
-	}
-
-	// Build a quick lookup from TaskID to the corresponding task row so we can
-	// enforce App/BookID/UserID consistency for each capture record.
-	taskByID := make(map[int64]taskagent.FeishuTaskRow, len(tasks))
-	for _, t := range tasks {
-		if t.TaskID == 0 {
+	allowedTaskIDs := make(map[string]struct{}, len(taskIDs))
+	for _, id := range taskIDs {
+		if id <= 0 {
 			continue
 		}
-		taskByID[t.TaskID] = t
-	}
-	if len(taskByID) == 0 {
-		return records
+		allowedTaskIDs[fmt.Sprintf("%d", id)] = struct{}{}
 	}
 
+	trimmedUserID := strings.TrimSpace(userID)
 	resultFields := taskagent.DefaultResultFields()
 	rawTaskIDField := strings.TrimSpace(resultFields.TaskID)
+	rawUserIDField := strings.TrimSpace(resultFields.UserID)
 
+	seenRecord := make(map[string]struct{}, len(records))
 	filtered := make([]CaptureRecordPayload, 0, len(records))
-	seen := make(map[string]struct{}, len(records))
 
 	for _, rec := range records {
-		id := strings.TrimSpace(rec.RecordID)
-		if id == "" {
-			id = fmt.Sprintf("%v", rec.Fields["id"])
+		// Deduplicate by record ID when present.
+		recordID := strings.TrimSpace(rec.RecordID)
+		if recordID == "" {
+			recordID = strings.TrimSpace(fmt.Sprint(rec.Fields["id"]))
 		}
-		if id != "" {
-			if _, ok := seen[id]; ok {
+		if recordID != "" {
+			if _, ok := seenRecord[recordID]; ok {
 				continue
 			}
-			seen[id] = struct{}{}
+			seenRecord[recordID] = struct{}{}
 		}
 
-		// Resolve TaskID from the record so we can look up the originating task row.
+		// Resolve TaskID from capture fields.
 		taskIDStr := strings.TrimSpace(getString(rec.Fields, "TaskID"))
 		if taskIDStr == "" && rawTaskIDField != "" {
 			taskIDStr = strings.TrimSpace(getString(rec.Fields, rawTaskIDField))
@@ -874,18 +837,21 @@ func filterRecordsByUser(
 		if taskIDStr == "" {
 			continue
 		}
-		taskID, err := strconv.ParseInt(taskIDStr, 10, 64)
-		if err != nil || taskID <= 0 {
-			continue
-		}
-		task, ok := taskByID[taskID]
-		if !ok {
-			continue
+		if len(allowedTaskIDs) > 0 {
+			if _, ok := allowedTaskIDs[taskIDStr]; !ok {
+				continue
+			}
 		}
 
-		// Enforce UserID consistency per TaskID.
-		if userID != "" && !strings.EqualFold(strings.TrimSpace(task.UserID), userID) {
-			continue
+		// Optionally enforce UserID equality from capture fields.
+		if trimmedUserID != "" {
+			recUserID := strings.TrimSpace(getString(rec.Fields, "UserID"))
+			if recUserID == "" && rawUserIDField != "" {
+				recUserID = strings.TrimSpace(getString(rec.Fields, rawUserIDField))
+			}
+			if recUserID == "" || !strings.EqualFold(recUserID, trimmedUserID) {
+				continue
+			}
 		}
 
 		filtered = append(filtered, rec)

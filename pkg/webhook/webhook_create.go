@@ -66,7 +66,8 @@ func CreateWebhookResultsForGroups(ctx context.Context, opts WebhookResultCreate
 		return err
 	}
 
-	dramaInfoJSON, _ := fetchDramaInfoJSONByBookID(ctx, client, firstNonEmpty(opts.DramaBitableURL, taskagent.EnvString("DRAMA_BITABLE_URL", "")), bookID)
+	dramaInfoJSON, _ := fetchDramaInfoJSONByBookID(ctx, client,
+		firstNonEmpty(opts.DramaBitableURL, taskagent.EnvString("DRAMA_BITABLE_URL", "")), bookID)
 	day := dayString(opts.ParentDatetime, opts.ParentDatetimeRaw)
 	var dateMs int64
 	if strings.TrimSpace(day) != "" {
@@ -107,7 +108,7 @@ func CreateWebhookResultsForGroups(ctx context.Context, opts WebhookResultCreate
 		}); err != nil {
 			return err
 		}
-		log.Info().Str("group_id", groupID).Ints64("task_ids", allTaskIDs).
+		log.Info().Str("group_id", groupID).Ints64("task_ids", allTaskIDs).Str("date", day).
 			Msg("webhook piracy creator: create webhook result for group successful")
 	}
 

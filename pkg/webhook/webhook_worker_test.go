@@ -120,6 +120,77 @@ func TestBuildTaskItemsByTaskID(t *testing.T) {
 	assertGroup("9999", 1, []string{"x"})
 }
 
+func TestFilterRecordsByTaskAndUser(t *testing.T) {
+	type args struct {
+		records []CaptureRecordPayload
+		taskIDs []int64
+		userID  string
+	}
+	cases := []struct {
+		name string
+		args args
+		want int
+	}{
+		{
+			name: "match_task_and_user",
+			args: args{
+				records: []CaptureRecordPayload{
+					{RecordID: "1", Fields: map[string]any{"TaskID": "179", "UserID": "u1"}},
+					{RecordID: "2", Fields: map[string]any{"TaskID": "180", "UserID": "u1"}},
+				},
+				taskIDs: []int64{179},
+				userID:  "u1",
+			},
+			want: 1,
+		},
+		{
+			name: "task_match_user_mismatch",
+			args: args{
+				records: []CaptureRecordPayload{
+					{RecordID: "1", Fields: map[string]any{"TaskID": "179", "UserID": "u2"}},
+				},
+				taskIDs: []int64{179},
+				userID:  "u1",
+			},
+			want: 0,
+		},
+		{
+			name: "user_empty_filters_by_task_only",
+			args: args{
+				records: []CaptureRecordPayload{
+					{RecordID: "1", Fields: map[string]any{"TaskID": "179", "UserID": "u1"}},
+					{RecordID: "2", Fields: map[string]any{"TaskID": "180", "UserID": "u1"}},
+				},
+				taskIDs: []int64{179},
+				userID:  "",
+			},
+			want: 1,
+		},
+		{
+			name: "deduplicates_by_record_id",
+			args: args{
+				records: []CaptureRecordPayload{
+					{RecordID: "1", Fields: map[string]any{"TaskID": "179", "UserID": "u1"}},
+					{RecordID: "1", Fields: map[string]any{"TaskID": "179", "UserID": "u1"}},
+				},
+				taskIDs: []int64{179},
+				userID:  "u1",
+			},
+			want: 1,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := filterRecordsByTaskAndUser(tc.args.records, tc.args.taskIDs, tc.args.userID)
+			if len(got) != tc.want {
+				t.Fatalf("len(got)=%d want=%d, got=%v", len(got), tc.want, got)
+			}
+		})
+	}
+}
+
 func TestPickFirstNonEmptyCaptureFieldByTaskIDs(t *testing.T) {
 	cases := []struct {
 		name      string

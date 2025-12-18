@@ -54,21 +54,21 @@ func defaultWebhookResultFields() webhookResultFields {
 		LastError:    "LastError",
 	}
 
-	// Prefer WEBHOOK_FIELD_* overrides; keep PUSH_RESULT_FIELD_* as backward compatible aliases.
-	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_BIZTYPE", "PUSH_RESULT_FIELD_BIZTYPE"}, &fields.BizType)
-	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_PARENT_TASK_ID", "PUSH_RESULT_FIELD_PARENT_TASK_ID"}, &fields.ParentTaskID)
-	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_GROUPID", "PUSH_RESULT_FIELD_GROUPID"}, &fields.GroupID)
-	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_STATUS", "PUSH_RESULT_FIELD_STATUS"}, &fields.Status)
-	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_TASKIDS", "PUSH_RESULT_FIELD_TASKIDS"}, &fields.TaskIDs)
-	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_DRAMAINFO", "PUSH_RESULT_FIELD_DRAMAINFO"}, &fields.DramaInfo)
-	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_USERINFO", "PUSH_RESULT_FIELD_USERINFO"}, &fields.UserInfo)
-	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_RECORDS", "PUSH_RESULT_FIELD_RECORDS"}, &fields.Records)
+	// Prefer WEBHOOK_FIELD_* overrides.
+	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_BIZTYPE"}, &fields.BizType)
+	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_PARENT_TASK_ID"}, &fields.ParentTaskID)
+	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_GROUPID"}, &fields.GroupID)
+	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_STATUS"}, &fields.Status)
+	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_TASKIDS"}, &fields.TaskIDs)
+	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_DRAMAINFO"}, &fields.DramaInfo)
+	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_USERINFO"}, &fields.UserInfo)
+	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_RECORDS"}, &fields.Records)
 	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_DATE"}, &fields.Date)
-	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_CREATEAT", "PUSH_RESULT_FIELD_CREATEAT"}, &fields.CreateAt)
-	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_STARTAT", "PUSH_RESULT_FIELD_STARTAT"}, &fields.StartAt)
-	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_ENDAT", "PUSH_RESULT_FIELD_ENDAT"}, &fields.EndAt)
-	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_RETRYCOUNT", "PUSH_RESULT_FIELD_RETRYCOUNT"}, &fields.RetryCount)
-	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_LASTERROR", "PUSH_RESULT_FIELD_LASTERROR"}, &fields.LastError)
+	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_CREATEAT"}, &fields.CreateAt)
+	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_STARTAT"}, &fields.StartAt)
+	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_ENDAT"}, &fields.EndAt)
+	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_RETRYCOUNT"}, &fields.RetryCount)
+	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_LASTERROR"}, &fields.LastError)
 	return fields
 }
 

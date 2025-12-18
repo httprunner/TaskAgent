@@ -10,11 +10,11 @@ import (
 	"github.com/pkg/errors"
 )
 
-func fetchCaptureRecordsByTaskIDs(ctx context.Context, taskIDs []int64) ([]CaptureRecordPayload, error) {
+func fetchCaptureRecordsByTaskIDs(ctx context.Context, taskIDs []int64, userID string) ([]CaptureRecordPayload, error) {
 	if len(taskIDs) == 0 {
 		return nil, nil
 	}
-	records, err := fetchSQLiteCaptureRecordsByTaskIDs(ctx, taskIDs)
+	records, err := fetchSQLiteCaptureRecordsByTaskIDsAndUserID(ctx, taskIDs, userID)
 	if err == nil && len(records) > 0 {
 		return records, nil
 	}
@@ -26,47 +26,12 @@ func fetchCaptureRecordsByTaskIDs(ctx context.Context, taskIDs []int64) ([]Captu
 		}
 		return nil, feishuErr
 	}
-	return feishuRecords, nil
+	// Fallback: filter Feishu records purely by TaskID + UserID from the
+	// capture rows themselves to keep behavior consistent with the sqlite path.
+	return filterRecordsByTaskAndUser(feishuRecords, taskIDs, userID), nil
 }
 
-func fetchCaptureRecordsByQuery(ctx context.Context, query recordQuery) ([]CaptureRecordPayload, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	fields := loadSummaryFieldConfig()
-
-	var sqliteErr error
-	sqliteDS, err := newSummaryDataSource(SourceSQLite, fields, Options{})
-	if err == nil && sqliteDS != nil {
-		defer sqliteDS.Close()
-		recs, err := sqliteDS.FetchRecords(ctx, query)
-		if err == nil && len(recs) > 0 {
-			return recs, nil
-		}
-		if err != nil {
-			sqliteErr = err
-		}
-	}
-
-	feishuDS, ferr := newSummaryDataSource(SourceFeishu, fields, Options{})
-	if ferr != nil {
-		if sqliteErr != nil {
-			return nil, errors.Wrapf(ferr, "sqlite error: %v", sqliteErr)
-		}
-		return nil, ferr
-	}
-	defer feishuDS.Close()
-	recs, ferr2 := feishuDS.FetchRecords(ctx, query)
-	if ferr2 != nil {
-		if sqliteErr != nil {
-			return nil, errors.Wrapf(ferr2, "sqlite error: %v", sqliteErr)
-		}
-		return nil, ferr2
-	}
-	return recs, nil
-}
-
-func fetchSQLiteCaptureRecordsByTaskIDs(ctx context.Context, taskIDs []int64) ([]CaptureRecordPayload, error) {
+func fetchSQLiteCaptureRecordsByTaskIDsAndUserID(ctx context.Context, taskIDs []int64, userID string) ([]CaptureRecordPayload, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -80,12 +45,17 @@ func fetchSQLiteCaptureRecordsByTaskIDs(ctx context.Context, taskIDs []int64) ([
 	if table == "" {
 		return nil, errors.New("sqlite result table name is empty")
 	}
-	// SQLite schema uses stable column names (e.g. "TaskID") and should not rely on
+	// SQLite schema uses stable column names (e.g. "TaskID", "UserID") and should not rely on
 	// Feishu field mappings (RESULT_FIELD_*), which may be localized.
 	taskIDCol := strings.TrimSpace(taskagent.EnvString("RESULT_SQLITE_FIELD_TASKID", "TaskID"))
 	if taskIDCol == "" {
 		return nil, errors.New("sqlite TaskID column name is empty")
 	}
+	userIDCol := strings.TrimSpace(taskagent.EnvString("RESULT_SQLITE_FIELD_USERID", "UserID"))
+	if userIDCol == "" {
+		return nil, errors.New("sqlite UserID column name is empty")
+	}
+
 	placeholders := make([]string, 0, len(taskIDs))
 	args := make([]any, 0, len(taskIDs))
 	for _, id := range taskIDs {
@@ -99,11 +69,24 @@ func fetchSQLiteCaptureRecordsByTaskIDs(ctx context.Context, taskIDs []int64) ([
 		return nil, nil
 	}
 
-	query := fmt.Sprintf("SELECT * FROM %s WHERE %s IN (%s)",
-		quoteIdentifier(table),
-		quoteIdentifier(taskIDCol),
-		strings.Join(placeholders, ","),
-	)
+	builder := strings.Builder{}
+	builder.WriteString("SELECT * FROM ")
+	builder.WriteString(quoteIdentifier(table))
+	builder.WriteString(" WHERE ")
+	builder.WriteString(quoteIdentifier(taskIDCol))
+	builder.WriteString(" IN (")
+	builder.WriteString(strings.Join(placeholders, ","))
+	builder.WriteString(")")
+
+	trimmedUserID := strings.TrimSpace(userID)
+	if trimmedUserID != "" {
+		builder.WriteString(" AND ")
+		builder.WriteString(quoteIdentifier(userIDCol))
+		builder.WriteString(" = ?")
+		args = append(args, trimmedUserID)
+	}
+
+	query := builder.String()
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, errors.Wrap(err, "query sqlite capture_results failed")
