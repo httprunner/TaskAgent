@@ -344,6 +344,16 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 			})
 		}
 	case WebhookBizTypeVideoScreenCapture:
+		if !w.shouldHandleVideoScreenCapture(taskIDs) {
+			log.Debug().
+				Str("record_id", strings.TrimSpace(row.RecordID)).
+				Str("group_id", strings.TrimSpace(row.GroupID)).
+				Int("node_index", w.nodeIndex).
+				Int("node_total", w.nodeTotal).
+				Interface("task_ids", taskIDs).
+				Msg("webhook: skip video screen capture row due to shard mismatch")
+			return nil
+		}
 		task := pickVideoScreenCaptureTask(tasks)
 		if strings.TrimSpace(task.ItemID) == "" {
 			return w.markFailed(ctx, row, fmt.Errorf("video screen capture task missing item id, task_id=%d", task.TaskID))
@@ -750,6 +760,27 @@ func (w *WebhookResultWorker) shouldHandleShard(bookID, app string) bool {
 	key := bookID + "|" + app
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(key))
+	shard := int(h.Sum32() % uint32(w.nodeTotal))
+	return shard == w.nodeIndex
+}
+
+func (w *WebhookResultWorker) shouldHandleVideoScreenCapture(taskIDs []int64) bool {
+	if w == nil || w.nodeTotal <= 1 {
+		return true
+	}
+	var keyID int64
+	for _, id := range taskIDs {
+		if id > 0 {
+			keyID = id
+			break
+		}
+	}
+	if keyID <= 0 {
+		// Fallback to no sharding when TaskIDs are empty or invalid.
+		return true
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(fmt.Sprintf("%d", keyID)))
 	shard := int(h.Sum32() % uint32(w.nodeTotal))
 	return shard == w.nodeIndex
 }
