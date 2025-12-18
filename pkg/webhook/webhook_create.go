@@ -872,7 +872,26 @@ func (c *WebhookResultCreator) fetchPiracyTasksForDay(ctx context.Context) ([]ta
 	if table == nil {
 		return nil, nil
 	}
-	return table.Rows, nil
+
+	rows := table.Rows
+	if len(rows) == 0 {
+		return nil, nil
+	}
+
+	// Extra safety: re-filter by scanDate on the client side to ensure the
+	// behavior matches the expected "Datetime = ExactDate(ScanDate)" semantics,
+	// even if the upstream filter behaves differently.
+	targetDay := strings.TrimSpace(c.scanDate)
+	if targetDay == "" {
+		return rows, nil
+	}
+	filtered := make([]taskagent.FeishuTaskRow, 0, len(rows))
+	for _, row := range rows {
+		if day := dayString(row.Datetime, row.DatetimeRaw); day == targetDay {
+			filtered = append(filtered, row)
+		}
+	}
+	return filtered, nil
 }
 
 func (c *WebhookResultCreator) fetchSingleURLCaptureTasks(ctx context.Context, limit int) ([]taskagent.FeishuTaskRow, error) {
