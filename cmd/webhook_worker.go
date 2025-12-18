@@ -20,6 +20,8 @@ func newWebhookWorkerCmd() *cobra.Command {
 		flagPollInterval     time.Duration
 		flagBatchLimit       int
 		flagGroupCooldownDur time.Duration
+		flagFilterGroupID    string
+		flagFilterDate       string
 	)
 
 	cmd := &cobra.Command{
@@ -46,6 +48,8 @@ func newWebhookWorkerCmd() *cobra.Command {
 				PollInterval:      flagPollInterval,
 				BatchLimit:        flagBatchLimit,
 				GroupCooldown:     flagGroupCooldownDur,
+				TargetGroupID:     strings.TrimSpace(flagFilterGroupID),
+				TargetDate:        strings.TrimSpace(flagFilterDate),
 			})
 			if err != nil {
 				return err
@@ -54,6 +58,8 @@ func newWebhookWorkerCmd() *cobra.Command {
 				Str("task_bitable", strings.TrimSpace(taskURL)).
 				Str("webhook_bitable", strings.TrimSpace(webhookBitable)).
 				Str("webhook_url", strings.TrimSpace(webhookURL)).
+				Str("filter_group_id", strings.TrimSpace(flagFilterGroupID)).
+				Str("filter_date", strings.TrimSpace(flagFilterDate)).
 				Msg("starting webhook result worker")
 			return worker.Run(cmd.Context())
 		},
@@ -65,6 +71,8 @@ func newWebhookWorkerCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&flagPollInterval, "poll-interval", 30*time.Second, "Interval between scans")
 	cmd.Flags().IntVar(&flagBatchLimit, "batch-limit", 20, "Maximum number of webhook result rows processed per scan")
 	cmd.Flags().DurationVar(&flagGroupCooldownDur, "group-cooldown", 2*time.Minute, "Cooldown duration before rechecking an incomplete row")
+	cmd.Flags().StringVar(&flagFilterGroupID, "group-id", "", "Limit processing to the specified GroupID (optional)")
+	cmd.Flags().StringVar(&flagFilterDate, "date", "", "Limit processing to the specified logical date (YYYY-MM-DD, optional)")
 
 	return cmd
 }

@@ -22,6 +22,12 @@ type WebhookResultWorkerConfig struct {
 	PollInterval      time.Duration
 	BatchLimit        int
 	GroupCooldown     time.Duration
+	// TargetGroupID optionally narrows processing to a single webhook
+	// result group (matching the GroupID field on the result table).
+	TargetGroupID string
+	// TargetDate optionally narrows processing to a specific logical
+	// task day in "2006-01-02" format, matched against the Date field.
+	TargetDate string
 	// AllowEmptyStatusAsReady controls whether an empty task status should be treated as a
 	// terminal state when deciding if a group is ready.
 	AllowEmptyStatusAsReady bool
@@ -56,6 +62,11 @@ type WebhookResultWorker struct {
 
 	nodeIndex int
 	nodeTotal int
+
+	targetGroupID string
+	targetDate    string
+
+	singleRun bool
 }
 
 const maxWebhookResultRetries = 3
@@ -104,6 +115,9 @@ func NewWebhookResultWorker(cfg WebhookResultWorkerConfig) (*WebhookResultWorker
 		nodeIndex = 0
 	}
 
+	targetGroupID := strings.TrimSpace(cfg.TargetGroupID)
+	targetDate := strings.TrimSpace(cfg.TargetDate)
+
 	return &WebhookResultWorker{
 		store:        store,
 		taskClient:   client,
@@ -119,6 +133,10 @@ func NewWebhookResultWorker(cfg WebhookResultWorkerConfig) (*WebhookResultWorker
 
 		nodeIndex: nodeIndex,
 		nodeTotal: nodeTotal,
+
+		targetGroupID: targetGroupID,
+		targetDate:    targetDate,
+		singleRun:     targetGroupID != "" || targetDate != "",
 	}, nil
 }
 
@@ -134,9 +152,17 @@ func (w *WebhookResultWorker) Run(ctx context.Context) error {
 		Str("webhook_bitable", w.store.table()).
 		Dur("poll_interval", w.pollInterval).
 		Int("batch_limit", w.batchLimit).
+		Str("filter_group_id", w.targetGroupID).
+		Str("filter_date", w.targetDate).
 		Int("node_index", w.nodeIndex).
 		Int("node_total", w.nodeTotal).
 		Msg("webhook result worker started")
+
+	// When running in targeted debug mode (group/date filter configured),
+	// execute a single scan and return instead of polling.
+	if w.singleRun {
+		return w.processOnce(ctx)
+	}
 
 	ticker := time.NewTicker(w.pollInterval)
 	defer ticker.Stop()
@@ -184,6 +210,21 @@ func (w *WebhookResultWorker) processOnce(ctx context.Context) error {
 		}
 		if strings.TrimSpace(row.RecordID) == "" {
 			continue
+		}
+		// Optional filters for targeted debugging: when configured, only
+		// process rows that match the desired GroupID and/or logical Date.
+		if w.targetGroupID != "" && strings.TrimSpace(row.GroupID) != w.targetGroupID {
+			continue
+		}
+		if w.targetDate != "" {
+			day := ""
+			if row.DateMs > 0 {
+				t := time.UnixMilli(row.DateMs).In(time.Local)
+				day = t.Format("2006-01-02")
+			}
+			if day != w.targetDate {
+				continue
+			}
 		}
 		key := webhookResultCooldownKey(row)
 		if w.shouldSkip(key) {
