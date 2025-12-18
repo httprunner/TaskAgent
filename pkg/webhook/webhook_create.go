@@ -280,6 +280,21 @@ type WebhookResultCreatorConfig struct {
 	// EnableSingleURLCapture enables creating rows for Scene=单个链接采集
 	// (BizType=single_url_capture). Rows are keyed by (GroupID, DatetimeDay).
 	EnableSingleURLCapture bool
+
+	// BizType controls which biz type the creator should process. When empty, the
+	// creator uses the legacy behavior: process video_screen_capture tasks and,
+	// when EnableSingleURLCapture is true, also process single_url_capture tasks.
+	// Supported values:
+	//   - piracy_general_search
+	//   - video_screen_capture
+	//   - single_url_capture
+	BizType string
+
+	// SkipExisting controls whether the creator should skip creating or updating
+	// webhook rows when an existing row for <BizType, GroupID, Date> is found.
+	// This is primarily used for backfill flows where only missing rows should
+	// be created while leaving historical rows untouched.
+	SkipExisting bool
 }
 
 // WebhookResultCreator creates pending webhook result rows for tasks that are
@@ -293,11 +308,13 @@ type WebhookResultCreator struct {
 	taskClient   *taskagent.FeishuClient
 	taskTableURL string
 
-	appFilter  string
-	interval   time.Duration
-	batchLimit int
-	scanDate   string
-	enableSU   bool
+	appFilter    string
+	interval     time.Duration
+	batchLimit   int
+	scanDate     string
+	enableSU     bool
+	bizType      string
+	skipExisting bool
 
 	// seen avoids creating duplicate webhook result rows for the same TaskID
 	// within a single long-running creator process.
@@ -326,6 +343,7 @@ func NewWebhookResultCreator(cfg WebhookResultCreatorConfig) (*WebhookResultCrea
 		batch = 50
 	}
 	scanDate := strings.TrimSpace(cfg.ScanDate)
+	bizType := strings.TrimSpace(cfg.BizType)
 	return &WebhookResultCreator{
 		store:        store,
 		taskClient:   client,
@@ -335,6 +353,8 @@ func NewWebhookResultCreator(cfg WebhookResultCreatorConfig) (*WebhookResultCrea
 		batchLimit:   batch,
 		scanDate:     scanDate,
 		enableSU:     cfg.EnableSingleURLCapture,
+		bizType:      bizType,
+		skipExisting: cfg.SkipExisting,
 		seen:         make(map[int64]time.Time),
 	}, nil
 }
@@ -354,6 +374,7 @@ func (c *WebhookResultCreator) Run(ctx context.Context) error {
 		Str("task_bitable", c.taskTableURL).
 		Str("webhook_bitable", c.store.table()).
 		Str("app_filter", c.appFilter).
+		Str("biz_type", c.bizType).
 		Dur("poll_interval", interval).
 		Int("batch_limit", c.batchLimit).
 		Str("scan_date", c.scanDate).
@@ -390,6 +411,7 @@ func (c *WebhookResultCreator) RunOnce(ctx context.Context) error {
 		Str("task_bitable", c.taskTableURL).
 		Str("webhook_bitable", c.store.table()).
 		Str("app_filter", c.appFilter).
+		Str("biz_type", c.bizType).
 		Int("batch_limit", c.batchLimit).
 		Str("scan_date", c.scanDate).
 		Bool("enable_single_url_capture", c.enableSU).
@@ -399,6 +421,30 @@ func (c *WebhookResultCreator) RunOnce(ctx context.Context) error {
 }
 
 func (c *WebhookResultCreator) processOnce(ctx context.Context) error {
+	biz := strings.TrimSpace(c.bizType)
+	switch biz {
+	case WebhookBizTypePiracyGeneralSearch:
+		return c.processOncePiracyGroups(ctx)
+	case WebhookBizTypeVideoScreenCapture:
+		return c.processOnceVideoScreenCapture(ctx)
+	case WebhookBizTypeSingleURLCapture:
+		_, _, _, err := c.createSingleURLCaptureWebhookResults(ctx)
+		return err
+	default:
+		// Backward compatible behavior: process video_screen_capture tasks and,
+		// when enabled, also process single_url_capture tasks.
+		if err := c.processOnceVideoScreenCapture(ctx); err != nil {
+			return err
+		}
+		if c.enableSU {
+			_, _, _, err := c.createSingleURLCaptureWebhookResults(ctx)
+			return err
+		}
+		return nil
+	}
+}
+
+func (c *WebhookResultCreator) processOnceVideoScreenCapture(ctx context.Context) error {
 	tasks, err := c.fetchVideoScreenCaptureTasks(ctx, c.batchLimit)
 	if err != nil {
 		return err
@@ -455,6 +501,137 @@ func (c *WebhookResultCreator) processOnce(ctx context.Context) error {
 			Int("fetched", len(tasks)).
 			Msg("webhook result creator iteration completed")
 	}
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// processOncePiracyGroups scans the task table for the given ScanDate and
+// creates piracy_general_search webhook result rows per GroupID. TaskIDs for
+// each row contain:
+//   - all child task IDs under the same GroupID (profile / collection / anchor)
+//   - all general_search TaskIDs for the same BookID (and App) on that day
+func (c *WebhookResultCreator) processOncePiracyGroups(ctx context.Context) error {
+	if c == nil || c.taskClient == nil {
+		return errors.New("webhook result creator is nil or task client is nil")
+	}
+
+	rows, err := c.fetchPiracyTasksForDay(ctx, c.batchLimit)
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		log.Info().
+			Str("scan_date", c.scanDate).
+			Str("app_filter", c.appFilter).
+			Msg("webhook piracy creator: no tasks found for date")
+		return nil
+	}
+
+	type bookKey struct {
+		BookID string
+		App    string
+	}
+
+	groupsByBook := make(map[bookKey]map[string]struct{})
+	generalByBook := make(map[bookKey][]int64)
+
+	for _, row := range rows {
+		bookID := strings.TrimSpace(row.BookID)
+		app := strings.TrimSpace(row.App)
+		if bookID == "" || app == "" {
+			continue
+		}
+		key := bookKey{BookID: bookID, App: app}
+		scene := strings.TrimSpace(row.Scene)
+		switch scene {
+		case taskagent.SceneGeneralSearch:
+			if row.TaskID > 0 {
+				generalByBook[key] = append(generalByBook[key], row.TaskID)
+			}
+		case taskagent.SceneProfileSearch, taskagent.SceneCollection, taskagent.SceneAnchorCapture:
+			gid := strings.TrimSpace(row.GroupID)
+			if gid == "" {
+				continue
+			}
+			m := groupsByBook[key]
+			if m == nil {
+				m = make(map[string]struct{})
+				groupsByBook[key] = m
+			}
+			m[gid] = struct{}{}
+		default:
+			continue
+		}
+	}
+
+	if len(groupsByBook) == 0 {
+		log.Info().
+			Str("scan_date", c.scanDate).
+			Str("app_filter", c.appFilter).
+			Msg("webhook piracy creator: no groups found for date")
+		return nil
+	}
+
+	var parentDatetime *time.Time
+	if trimmed := strings.TrimSpace(c.scanDate); trimmed != "" {
+		if dayTime, err := time.ParseInLocation("2006-01-02", trimmed, time.Local); err == nil {
+			parentDatetime = &dayTime
+		}
+	}
+
+	created := 0
+	skipped := 0
+	var errs []string
+
+	for key, groupSet := range groupsByBook {
+		extraTaskIDs := uniqueInt64(generalByBook[key])
+
+		for groupID := range groupSet {
+			trimmedGroup := strings.TrimSpace(groupID)
+			if trimmedGroup == "" {
+				continue
+			}
+
+			if c.skipExisting {
+				existing, err := c.store.getExistingByBizGroupAndDay(ctx, WebhookBizTypePiracyGeneralSearch, trimmedGroup, c.scanDate)
+				if err != nil {
+					errs = append(errs, err.Error())
+					continue
+				}
+				if existing != nil && strings.TrimSpace(existing.RecordID) != "" {
+					skipped++
+					continue
+				}
+			}
+
+			opts := WebhookResultCreateOptions{
+				TaskBitableURL:    c.taskTableURL,
+				WebhookBitableURL: c.store.table(),
+				ParentDatetime:    parentDatetime,
+				ParentDatetimeRaw: "",
+				BookID:            key.BookID,
+				GroupIDs:          []string{trimmedGroup},
+				ExtraTaskIDs:      extraTaskIDs,
+			}
+			if err := CreateWebhookResultsForGroups(ctx, opts); err != nil {
+				errs = append(errs, fmt.Sprintf("book=%s, group=%s: %v", key.BookID, trimmedGroup, err))
+				continue
+			}
+			created++
+		}
+	}
+
+	log.Info().
+		Int("created", created).
+		Int("skipped", skipped).
+		Int("book_count", len(groupsByBook)).
+		Int("fetched", len(rows)).
+		Str("scan_date", c.scanDate).
+		Str("app_filter", c.appFilter).
+		Msg("webhook piracy creator iteration completed")
+
 	if len(errs) > 0 {
 		return errors.New(strings.Join(errs, "; "))
 	}
@@ -609,6 +786,52 @@ func (c *WebhookResultCreator) fetchVideoScreenCaptureTasks(ctx context.Context,
 			filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(appField, "is", app))
 		}
 	}
+
+	table, err := c.taskClient.FetchTaskTableWithOptions(ctx, c.taskTableURL, nil, &taskagent.FeishuTaskQueryOptions{
+		Filter:     filter,
+		Limit:      limit,
+		IgnoreView: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if table == nil {
+		return nil, nil
+	}
+	return table.Rows, nil
+}
+
+func (c *WebhookResultCreator) fetchPiracyTasksForDay(ctx context.Context, limit int) ([]taskagent.FeishuTaskRow, error) {
+	if c == nil || c.taskClient == nil {
+		return nil, errors.New("task client is nil")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	fields := taskagent.DefaultTaskFields()
+	sceneField := strings.TrimSpace(fields.Scene)
+	datetimeField := strings.TrimSpace(fields.Datetime)
+	if sceneField == "" || datetimeField == "" {
+		return nil, errors.New("task table field mapping is missing (Scene/Datetime)")
+	}
+
+	filter := taskagent.NewFeishuFilterInfo("and")
+	if cond := exactDateCondition(datetimeField, c.scanDate); cond != nil {
+		filter.Conditions = append(filter.Conditions, cond)
+	}
+	if app := strings.TrimSpace(c.appFilter); app != "" {
+		if appField := strings.TrimSpace(fields.App); appField != "" {
+			filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(appField, "is", app))
+		}
+	}
+
+	// Scenes involved in piracy group flows: general_search + profile_search + collection + anchor_capture.
+	filter.Children = append(filter.Children, taskagent.NewFeishuChildrenFilter("or",
+		taskagent.NewFeishuCondition(sceneField, "is", taskagent.SceneGeneralSearch),
+		taskagent.NewFeishuCondition(sceneField, "is", taskagent.SceneProfileSearch),
+		taskagent.NewFeishuCondition(sceneField, "is", taskagent.SceneCollection),
+		taskagent.NewFeishuCondition(sceneField, "is", taskagent.SceneAnchorCapture),
+	))
 
 	table, err := c.taskClient.FetchTaskTableWithOptions(ctx, c.taskTableURL, nil, &taskagent.FeishuTaskQueryOptions{
 		Filter:     filter,

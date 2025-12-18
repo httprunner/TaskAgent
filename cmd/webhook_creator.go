@@ -19,6 +19,8 @@ func newWebhookCreatorCmd() *cobra.Command {
 		flagPollInterval   time.Duration
 		flagBatchLimit     int
 		flagDate           string
+		flagBizType        string
+		flagSkipExisting   bool
 	)
 
 	cmd := &cobra.Command{
@@ -48,6 +50,11 @@ func newWebhookCreatorCmd() *cobra.Command {
 				return fmt.Errorf("--poll-interval must be greater than 0 when enabled, got=%s", flagPollInterval)
 			}
 
+			bizType := strings.TrimSpace(flagBizType)
+			if bizType == "" {
+				bizType = webhook.WebhookBizTypePiracyGeneralSearch
+			}
+
 			creator, err := webhook.NewWebhookResultCreator(webhook.WebhookResultCreatorConfig{
 				TaskBitableURL:    strings.TrimSpace(taskURL),
 				WebhookBitableURL: strings.TrimSpace(webhookBitable),
@@ -55,6 +62,8 @@ func newWebhookCreatorCmd() *cobra.Command {
 				PollInterval:      flagPollInterval,
 				BatchLimit:        flagBatchLimit,
 				ScanDate:          scanDate,
+				BizType:           bizType,
+				SkipExisting:      flagSkipExisting,
 			})
 			if err != nil {
 				return err
@@ -72,6 +81,8 @@ func newWebhookCreatorCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&flagPollInterval, "poll-interval", 0, "Enable polling with the given interval (e.g. 30s); default runs once")
 	cmd.Flags().IntVar(&flagBatchLimit, "batch-limit", 50, "Maximum number of tasks processed per scan")
 	cmd.Flags().StringVar(&flagDate, "date", "", "Filter tasks by Datetime=ExactDate (YYYY-MM-DD); defaults to today")
+	cmd.Flags().StringVar(&flagBizType, "biz-type", "", "BizType to process: piracy_general_search, video_screen_capture, or single_url_capture (default piracy_general_search)")
+	cmd.Flags().BoolVar(&flagSkipExisting, "skip-existing", false, "Skip webhook rows when <BizType, GroupID, Date> already exists")
 
 	return cmd
 }
