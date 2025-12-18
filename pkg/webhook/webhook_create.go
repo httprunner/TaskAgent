@@ -68,10 +68,10 @@ func CreateWebhookResultsForGroups(ctx context.Context, opts WebhookResultCreate
 
 	dramaInfoJSON, _ := fetchDramaInfoJSONByBookID(ctx, client, firstNonEmpty(opts.DramaBitableURL, taskagent.EnvString("DRAMA_BITABLE_URL", "")), bookID)
 	day := dayString(opts.ParentDatetime, opts.ParentDatetimeRaw)
-	var createAtMs int64
+	var dateMs int64
 	if strings.TrimSpace(day) != "" {
 		if dayTime, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(day), time.Local); err == nil {
-			createAtMs = dayTime.UTC().UnixMilli()
+			dateMs = dayTime.UTC().UnixMilli()
 		}
 	}
 
@@ -99,11 +99,11 @@ func CreateWebhookResultsForGroups(ctx context.Context, opts WebhookResultCreate
 		allTaskIDs = uniqueInt64(allTaskIDs)
 
 		if _, err := store.createPending(ctx, webhookResultCreateInput{
-			BizType:    WebhookBizTypePiracyGeneralSearch,
-			GroupID:    groupID,
-			TaskIDs:    allTaskIDs,
-			DramaInfo:  dramaInfoJSON,
-			CreateAtMs: createAtMs,
+			BizType:   WebhookBizTypePiracyGeneralSearch,
+			GroupID:   groupID,
+			TaskIDs:   allTaskIDs,
+			DramaInfo: dramaInfoJSON,
+			DateMs:    dateMs,
 		}); err != nil {
 			return err
 		}
@@ -481,12 +481,20 @@ func (c *WebhookResultCreator) processOnceVideoScreenCapture(ctx context.Context
 			skipped++
 			continue
 		}
+		day := dayString(t.Datetime, t.DatetimeRaw)
+		var dateMs int64
+		if strings.TrimSpace(day) != "" {
+			if dayTime, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(day), time.Local); err == nil {
+				dateMs = dayTime.UTC().UnixMilli()
+			}
+		}
 		groupID := strings.TrimSpace(t.GroupID)
 		if _, err := c.store.createPending(ctx, webhookResultCreateInput{
 			BizType:   WebhookBizTypeVideoScreenCapture,
 			GroupID:   groupID,
 			TaskIDs:   []int64{t.TaskID},
 			DramaInfo: "{}",
+			DateMs:    dateMs,
 		}); err != nil {
 			errs = append(errs, fmt.Sprintf("task %d: %v", t.TaskID, err))
 			continue
@@ -747,11 +755,18 @@ func (c *WebhookResultCreator) createSingleURLCaptureWebhookResults(ctx context.
 			return created, updated, skipped, err
 		}
 		if existing == nil || strings.TrimSpace(existing.RecordID) == "" {
+			var dateMs int64
+			if strings.TrimSpace(cand.Day) != "" {
+				if dayTime, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(cand.Day), time.Local); err == nil {
+					dateMs = dayTime.UTC().UnixMilli()
+				}
+			}
 			if _, err := c.store.createPending(ctx, webhookResultCreateInput{
 				BizType:   WebhookBizTypeSingleURLCapture,
 				GroupID:   cand.GroupID,
 				TaskIDs:   taskIDs,
 				DramaInfo: dramaInfo,
+				DateMs:    dateMs,
 			}); err != nil {
 				return created, updated, skipped, err
 			}

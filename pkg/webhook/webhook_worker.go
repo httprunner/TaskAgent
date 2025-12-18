@@ -208,8 +208,8 @@ func webhookResultCooldownKey(row webhookResultRow) string {
 	}
 	if biz == WebhookBizTypePiracyGeneralSearch {
 		day := ""
-		if row.CreateAtMs > 0 {
-			t := time.UnixMilli(row.CreateAtMs).In(time.Local)
+		if row.DateMs > 0 {
+			t := time.UnixMilli(row.DateMs).In(time.Local)
 			day = t.Format("2006-01-02")
 		}
 		return fmt.Sprintf("%s|%s|%s", day, strings.TrimSpace(row.GroupID), biz)
@@ -329,7 +329,7 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 	var records []CaptureRecordPayload
 	switch bizType {
 	case WebhookBizTypePiracyGeneralSearch:
-		records, err = w.fetchPiracyGeneralSearchRecords(ctx, row, meta, dramaRaw, taskIDs)
+		records, err = w.fetchPiracyGeneralSearchRecords(ctx, row, meta, dramaRaw, tasks, taskIDs)
 		if err != nil {
 			return w.markFailed(ctx, row, err)
 		}
@@ -355,20 +355,16 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 			return nil
 		}
 		task := pickVideoScreenCaptureTask(tasks)
-		if strings.TrimSpace(task.ItemID) == "" {
-			return w.markFailed(ctx, row, fmt.Errorf("video screen capture task missing item id, task_id=%d", task.TaskID))
-		}
-		query := recordQuery{
-			App:          strings.TrimSpace(task.App),
-			Scene:        strings.TrimSpace(task.Scene),
-			ItemID:       strings.TrimSpace(task.ItemID),
-			Limit:        1,
-			PreferLatest: true,
-		}
-		records, err = fetchCaptureRecordsByQuery(ctx, query)
+		groupUserID := strings.TrimSpace(task.UserID)
+
+		records, err = fetchCaptureRecordsByTaskIDs(ctx, taskIDs)
 		if err != nil {
 			return w.markFailed(ctx, row, err)
 		}
+		if len(records) == 0 {
+			return w.markFailed(ctx, row, ErrNoCaptureRecords)
+		}
+		records = filterRecordsByUser(records, tasks, groupUserID)
 		if len(records) == 0 {
 			return w.markFailed(ctx, row, ErrNoCaptureRecords)
 		}
@@ -377,6 +373,12 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 		if err != nil {
 			return w.markFailed(ctx, row, err)
 		}
+		if len(records) == 0 {
+			return w.markFailed(ctx, row, ErrNoCaptureRecords)
+		}
+
+		groupUserID := strings.TrimSpace(meta.UserID)
+		records = filterRecordsByUser(records, tasks, groupUserID)
 		if len(records) == 0 {
 			return w.markFailed(ctx, row, ErrNoCaptureRecords)
 		}
@@ -787,7 +789,7 @@ func (w *WebhookResultWorker) shouldHandleVideoScreenCapture(taskIDs []int64) bo
 
 func (w *WebhookResultWorker) fetchPiracyGeneralSearchRecords(
 	ctx context.Context, row webhookResultRow, meta taskMeta,
-	dramaRaw map[string]any, taskIDs []int64) ([]CaptureRecordPayload, error) {
+	dramaRaw map[string]any, tasks []taskagent.FeishuTaskRow, taskIDs []int64) ([]CaptureRecordPayload, error) {
 
 	records, err := fetchCaptureRecordsByTaskIDs(ctx, taskIDs)
 	if err != nil {
@@ -797,40 +799,62 @@ func (w *WebhookResultWorker) fetchPiracyGeneralSearchRecords(
 		return records, nil
 	}
 
-	bookID := ""
-	if dramaRaw != nil {
-		if v, ok := dramaRaw["DramaID"]; ok {
-			bookID = strings.TrimSpace(fmt.Sprint(v))
-		}
-	}
-	app := strings.TrimSpace(meta.App)
 	userID := strings.TrimSpace(meta.UserID)
-	if bookID == "" || app == "" || userID == "" {
-		return records, nil
+	filtered := filterRecordsByUser(records, tasks, userID)
+	return filtered, nil
+}
+
+func filterRecordsByUser(
+	records []CaptureRecordPayload,
+	tasks []taskagent.FeishuTaskRow,
+	userID string,
+) []CaptureRecordPayload {
+	if len(records) == 0 {
+		return records
 	}
 
-	generalRecords, err := fetchCaptureRecordsByQuery(ctx, recordQuery{
-		App:    app,
-		UserID: userID,
-		Scene:  taskagent.SceneGeneralSearch,
-	})
-	if err != nil {
-		log.Warn().
-			Err(err).
-			Str("group_id", strings.TrimSpace(row.GroupID)).
-			Str("book_id", bookID).
-			Str("app", app).
-			Str("user_id", userID).
-			Msg("webhook: fetch general search records for piracy group failed; continue with child task records only")
-		return records, nil
-	}
-	if len(generalRecords) == 0 {
-		return records, nil
+	userID = strings.TrimSpace(userID)
+
+	// When we have no task rows or no user hint, just de-duplicate by RecordID.
+	if len(tasks) == 0 || userID == "" {
+		seen := make(map[string]struct{}, len(records))
+		out := make([]CaptureRecordPayload, 0, len(records))
+		for _, rec := range records {
+			id := strings.TrimSpace(rec.RecordID)
+			if id == "" {
+				id = fmt.Sprintf("%v", rec.Fields["id"])
+			}
+			if id != "" {
+				if _, ok := seen[id]; ok {
+					continue
+				}
+				seen[id] = struct{}{}
+			}
+			out = append(out, rec)
+		}
+		return out
 	}
 
-	merged := make([]CaptureRecordPayload, 0, len(records)+len(generalRecords))
-	seen := make(map[string]struct{}, len(records)+len(generalRecords))
-	for _, rec := range append(records, generalRecords...) {
+	// Build a quick lookup from TaskID to the corresponding task row so we can
+	// enforce App/BookID/UserID consistency for each capture record.
+	taskByID := make(map[int64]taskagent.FeishuTaskRow, len(tasks))
+	for _, t := range tasks {
+		if t.TaskID == 0 {
+			continue
+		}
+		taskByID[t.TaskID] = t
+	}
+	if len(taskByID) == 0 {
+		return records
+	}
+
+	resultFields := taskagent.DefaultResultFields()
+	rawTaskIDField := strings.TrimSpace(resultFields.TaskID)
+
+	filtered := make([]CaptureRecordPayload, 0, len(records))
+	seen := make(map[string]struct{}, len(records))
+
+	for _, rec := range records {
 		id := strings.TrimSpace(rec.RecordID)
 		if id == "" {
 			id = fmt.Sprintf("%v", rec.Fields["id"])
@@ -841,9 +865,33 @@ func (w *WebhookResultWorker) fetchPiracyGeneralSearchRecords(
 			}
 			seen[id] = struct{}{}
 		}
-		merged = append(merged, rec)
+
+		// Resolve TaskID from the record so we can look up the originating task row.
+		taskIDStr := strings.TrimSpace(getString(rec.Fields, "TaskID"))
+		if taskIDStr == "" && rawTaskIDField != "" {
+			taskIDStr = strings.TrimSpace(getString(rec.Fields, rawTaskIDField))
+		}
+		if taskIDStr == "" {
+			continue
+		}
+		taskID, err := strconv.ParseInt(taskIDStr, 10, 64)
+		if err != nil || taskID <= 0 {
+			continue
+		}
+		task, ok := taskByID[taskID]
+		if !ok {
+			continue
+		}
+
+		// Enforce UserID consistency per TaskID.
+		if userID != "" && !strings.EqualFold(strings.TrimSpace(task.UserID), userID) {
+			continue
+		}
+
+		filtered = append(filtered, rec)
 	}
-	return merged, nil
+
+	return filtered
 }
 
 func (w *WebhookResultWorker) fetchTasksByIDs(ctx context.Context, taskIDs []int64) ([]taskagent.FeishuTaskRow, error) {

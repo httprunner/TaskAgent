@@ -71,6 +71,7 @@ TaskAgent exposes per-table override knobs so you can align with custom schemas 
 | `WEBHOOK_FIELD_DRAMAINFO` | `DramaInfo` | Raw drama row fields JSON (text). |
 | `WEBHOOK_FIELD_USERINFO` | `UserInfo` | Reserved user info JSON (text). |
 | `WEBHOOK_FIELD_RECORDS` | `Records` | Flattened capture records JSON (text). |
+| `WEBHOOK_FIELD_DATE` | `Date` | Logical task date (ExactDate from task `Datetime`, used for dedup/filtering). |
 | `WEBHOOK_FIELD_CREATEAT` | `CreateAt` | Creation time (date). |
 | `WEBHOOK_FIELD_STARTAT` | `StartAt` | First processing time (date). |
 | `WEBHOOK_FIELD_ENDAT` | `EndAt` | Last processing time (date). |

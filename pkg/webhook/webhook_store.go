@@ -21,6 +21,7 @@ type webhookResultRow struct {
 	DramaInfo  string
 	UserInfo   string
 	Records    string
+	DateMs     int64
 	CreateAtMs int64
 	StartAtMs  int64
 	EndAtMs    int64
@@ -35,10 +36,15 @@ type webhookResultStore struct {
 }
 
 type webhookResultCreateInput struct {
-	BizType    string
-	GroupID    string
-	TaskIDs    []int64
-	DramaInfo  string
+	BizType   string
+	GroupID   string
+	TaskIDs   []int64
+	DramaInfo string
+	// DateMs stores the logical task day in unix ms (UTC),
+	// typically derived from the task Datetime field (ExactDate).
+	DateMs int64
+	// CreateAtMs stores the physical creation timestamp for the webhook
+	// result row in unix ms (UTC). When zero, it is filled with time.Now().
 	CreateAtMs int64
 }
 
@@ -66,9 +72,9 @@ func (s *webhookResultStore) table() string {
 }
 
 // getExistingByBizGroupAndDay returns the first webhook result row that matches
-// the given biz type, group id and day (derived from CreateAt field).
-// This is the preferred uniqueness check for piracy webhook groups where
-// <BizType, GroupID, Date> should correspond to a single webhook plan.
+// the given biz type, group id and logical task day (Date field).
+// This is the preferred uniqueness check for piracy/SingleURL webhook groups
+// where <BizType, GroupID, Date> should correspond to a single webhook plan.
 func (s *webhookResultStore) getExistingByBizGroupAndDay(ctx context.Context, bizType, groupID, day string) (*webhookResultRow, error) {
 	if s == nil || s.client == nil || strings.TrimSpace(s.tableURL) == "" {
 		return nil, nil
@@ -85,7 +91,8 @@ func (s *webhookResultStore) getExistingByBizGroupAndDay(ctx context.Context, bi
 		filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(field, "is", gid))
 	}
 	trimmedDay := strings.TrimSpace(day)
-	if field := strings.TrimSpace(s.fields.CreateAt); field != "" && trimmedDay != "" {
+	// Date is the canonical logical day field for webhook rows.
+	if field := strings.TrimSpace(s.fields.Date); field != "" && trimmedDay != "" {
 		if dayTime, err := time.ParseInLocation("2006-01-02", trimmedDay, time.Local); err == nil {
 			tsMs := strconv.FormatInt(dayTime.UnixMilli(), 10)
 			filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(field, "is", "ExactDate", tsMs))
@@ -135,6 +142,9 @@ func (s *webhookResultStore) createPending(ctx context.Context, input webhookRes
 	}
 	if field := strings.TrimSpace(s.fields.Records); field != "" {
 		fields[field] = "[]"
+	}
+	if field := strings.TrimSpace(s.fields.Date); field != "" && input.DateMs > 0 {
+		fields[field] = input.DateMs
 	}
 	if field := strings.TrimSpace(s.fields.CreateAt); field != "" {
 		now := input.CreateAtMs
@@ -256,6 +266,7 @@ func decodeWebhookResultRow(row taskagent.BitableRow, fields webhookResultFields
 	out.DramaInfo = strings.TrimSpace(toJSONString(row.Fields[fields.DramaInfo]))
 	out.UserInfo = strings.TrimSpace(toJSONString(row.Fields[fields.UserInfo]))
 	out.Records = strings.TrimSpace(toJSONString(row.Fields[fields.Records]))
+	out.DateMs = toInt64(row.Fields[fields.Date])
 	out.CreateAtMs = toInt64(row.Fields[fields.CreateAt])
 	out.StartAtMs = toInt64(row.Fields[fields.StartAt])
 	out.EndAtMs = toInt64(row.Fields[fields.EndAt])

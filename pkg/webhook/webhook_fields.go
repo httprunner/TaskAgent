@@ -26,11 +26,14 @@ type webhookResultFields struct {
 	DramaInfo    string
 	UserInfo     string
 	Records      string
-	CreateAt     string
-	StartAt      string
-	EndAt        string
-	RetryCount   string
-	LastError    string
+	// Date stores the logical task date used for deduplication
+	// and day-based filtering (derived from task Datetime).
+	Date       string
+	CreateAt   string
+	StartAt    string
+	EndAt      string
+	RetryCount string
+	LastError  string
 }
 
 func defaultWebhookResultFields() webhookResultFields {
@@ -43,6 +46,7 @@ func defaultWebhookResultFields() webhookResultFields {
 		DramaInfo:    "DramaInfo",
 		UserInfo:     "UserInfo",
 		Records:      "Records",
+		Date:         "Date",
 		CreateAt:     "CreateAt",
 		StartAt:      "StartAt",
 		EndAt:        "EndAt",
@@ -59,6 +63,7 @@ func defaultWebhookResultFields() webhookResultFields {
 	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_DRAMAINFO", "PUSH_RESULT_FIELD_DRAMAINFO"}, &fields.DramaInfo)
 	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_USERINFO", "PUSH_RESULT_FIELD_USERINFO"}, &fields.UserInfo)
 	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_RECORDS", "PUSH_RESULT_FIELD_RECORDS"}, &fields.Records)
+	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_DATE"}, &fields.Date)
 	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_CREATEAT", "PUSH_RESULT_FIELD_CREATEAT"}, &fields.CreateAt)
 	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_STARTAT", "PUSH_RESULT_FIELD_STARTAT"}, &fields.StartAt)
 	overrideFieldFromEnvs([]string{"WEBHOOK_FIELD_ENDAT", "PUSH_RESULT_FIELD_ENDAT"}, &fields.EndAt)
