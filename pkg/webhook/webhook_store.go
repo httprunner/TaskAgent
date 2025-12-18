@@ -13,20 +13,19 @@ import (
 )
 
 type webhookResultRow struct {
-	RecordID     string
-	BizType      string
-	ParentTaskID int64
-	GroupID      string
-	Status       string
-	TaskIDs      []int64
-	DramaInfo    string
-	UserInfo     string
-	Records      string
-	CreateAtMs   int64
-	StartAtMs    int64
-	EndAtMs      int64
-	RetryCount   int
-	LastError    string
+	RecordID   string
+	BizType    string
+	GroupID    string
+	Status     string
+	TaskIDs    []int64
+	DramaInfo  string
+	UserInfo   string
+	Records    string
+	CreateAtMs int64
+	StartAtMs  int64
+	EndAtMs    int64
+	RetryCount int
+	LastError  string
 }
 
 type webhookResultStore struct {
@@ -36,11 +35,10 @@ type webhookResultStore struct {
 }
 
 type webhookResultCreateInput struct {
-	BizType      string
-	ParentTaskID int64
-	GroupID      string
-	TaskIDs      []int64
-	DramaInfo    string
+	BizType   string
+	GroupID   string
+	TaskIDs   []int64
+	DramaInfo string
 }
 
 func newWebhookResultStore(tableURL string) (*webhookResultStore, error) {
@@ -66,23 +64,31 @@ func (s *webhookResultStore) table() string {
 	return s.tableURL
 }
 
-func (s *webhookResultStore) getExistingByParentAndGroup(ctx context.Context, bizType string, parentTaskID int64, groupID string) (*webhookResultRow, error) {
+// getExistingByBizGroupAndDay returns the first webhook result row that matches
+// the given biz type, group id and day (derived from CreateAt field).
+// This is the preferred uniqueness check for piracy webhook groups where
+// <BizType, GroupID, Date> should correspond to a single webhook plan.
+func (s *webhookResultStore) getExistingByBizGroupAndDay(ctx context.Context, bizType, groupID, day string) (*webhookResultRow, error) {
 	if s == nil || s.client == nil || strings.TrimSpace(s.tableURL) == "" {
 		return nil, nil
 	}
 	gid := strings.TrimSpace(groupID)
-	if parentTaskID <= 0 || gid == "" {
+	if gid == "" {
 		return nil, nil
 	}
 	filter := taskagent.NewFeishuFilterInfo("and")
 	if field := strings.TrimSpace(s.fields.BizType); field != "" && strings.TrimSpace(bizType) != "" {
 		filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(field, "is", strings.TrimSpace(bizType)))
 	}
-	if field := strings.TrimSpace(s.fields.ParentTaskID); field != "" {
-		filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(field, "is", fmt.Sprintf("%d", parentTaskID)))
-	}
 	if field := strings.TrimSpace(s.fields.GroupID); field != "" {
 		filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(field, "is", gid))
+	}
+	trimmedDay := strings.TrimSpace(day)
+	if field := strings.TrimSpace(s.fields.CreateAt); field != "" && trimmedDay != "" {
+		if dayTime, err := time.ParseInLocation("2006-01-02", trimmedDay, time.Local); err == nil {
+			tsMs := strconv.FormatInt(dayTime.UnixMilli(), 10)
+			filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(field, "is", "ExactDate", tsMs))
+		}
 	}
 	rows, err := s.client.FetchBitableRows(ctx, s.tableURL, &taskagent.FeishuTaskQueryOptions{
 		Filter:     filter,
@@ -111,13 +117,9 @@ func (s *webhookResultStore) createPending(ctx context.Context, input webhookRes
 	if statusField == "" {
 		return "", errors.New("webhook result table status field is not configured")
 	}
-	now := time.Now().UTC().UnixMilli()
 	fields := map[string]any{statusField: WebhookResultPending}
 	if field := strings.TrimSpace(s.fields.BizType); field != "" && biz != "" {
 		fields[field] = biz
-	}
-	if field := strings.TrimSpace(s.fields.ParentTaskID); field != "" && input.ParentTaskID > 0 {
-		fields[field] = fmt.Sprintf("%d", input.ParentTaskID)
 	}
 	if field := strings.TrimSpace(s.fields.GroupID); field != "" {
 		if gid := strings.TrimSpace(input.GroupID); gid != "" {
@@ -134,6 +136,7 @@ func (s *webhookResultStore) createPending(ctx context.Context, input webhookRes
 		fields[field] = "[]"
 	}
 	if field := strings.TrimSpace(s.fields.CreateAt); field != "" {
+		now := time.Now().UTC().UnixMilli()
 		fields[field] = now
 	}
 	if field := strings.TrimSpace(s.fields.RetryCount); field != "" {
@@ -243,7 +246,6 @@ func decodeWebhookResultRow(row taskagent.BitableRow, fields webhookResultFields
 		return out
 	}
 	out.BizType = strings.TrimSpace(toString(row.Fields[fields.BizType]))
-	out.ParentTaskID = toInt64(row.Fields[fields.ParentTaskID])
 	out.GroupID = strings.TrimSpace(toString(row.Fields[fields.GroupID]))
 	out.Status = strings.ToLower(strings.TrimSpace(toString(row.Fields[fields.Status])))
 	out.TaskIDs = parseTaskIDs(row.Fields[fields.TaskIDs])

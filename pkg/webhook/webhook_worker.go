@@ -207,7 +207,12 @@ func webhookResultCooldownKey(row webhookResultRow) string {
 		biz = WebhookBizTypePiracyGeneralSearch
 	}
 	if biz == WebhookBizTypePiracyGeneralSearch {
-		return fmt.Sprintf("%d|%s|%s", row.ParentTaskID, strings.TrimSpace(row.GroupID), biz)
+		day := ""
+		if row.CreateAtMs > 0 {
+			t := time.UnixMilli(row.CreateAtMs).In(time.Local)
+			day = t.Format("2006-01-02")
+		}
+		return fmt.Sprintf("%s|%s|%s", day, strings.TrimSpace(row.GroupID), biz)
 	}
 	return fmt.Sprintf("%s|%s", strings.TrimSpace(row.RecordID), biz)
 }
@@ -271,7 +276,6 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 	log.Debug().
 		Str("record_id", strings.TrimSpace(row.RecordID)).
 		Str("biz_type", strings.TrimSpace(row.BizType)).
-		Int64("parent_task_id", row.ParentTaskID).
 		Str("group_id", strings.TrimSpace(row.GroupID)).
 		Int("task_id_count", len(taskIDs)).
 		Int("fetched_tasks", len(tasks)).

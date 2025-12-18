@@ -48,11 +48,11 @@ Webhook 结果表用于存储 webhook 的关联信息和推送结果，核心字
 上游在“综合页搜索任务成功完成并创建子任务之后”，按 GroupID 维度创建 webhook 结果表记录：
 
 - 入口：`pkg/webhook.CreateWebhookResultsForGroups`
-- 去重键：`(ParentTaskID, GroupID)`；若已存在同键记录则跳过创建
+- 去重键：`<BizType, GroupID, CreateAt(日)>`；若已存在同键记录则跳过创建
 - 写入内容：
   - `BizType=piracy_general_search`
   - `Status=pending`
-  - `TaskIDs`：该组所有需要聚合的子任务 TaskID（1-N）
+  - `TaskIDs`：该组所有需要聚合的子任务 TaskID（1-N）**以及**同一 BookID + 当日下所有「综合页搜索」父任务的 TaskID，去重后写入
   - `DramaInfo`：按 `BookID` 从剧单表查询整行 fields 后序列化写入
   - `CreateAt`：创建时间
 

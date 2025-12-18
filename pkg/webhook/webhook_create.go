@@ -20,12 +20,12 @@ type WebhookResultCreateOptions struct {
 	WebhookBitableURL string
 	DramaBitableURL   string
 
-	ParentTaskID      int64
 	ParentDatetime    *time.Time
 	ParentDatetimeRaw string
 
-	BookID   string
-	GroupIDs []string
+	BookID       string
+	GroupIDs     []string
+	ExtraTaskIDs []int64
 }
 
 const (
@@ -46,9 +46,6 @@ func CreateWebhookResultsForGroups(ctx context.Context, opts WebhookResultCreate
 	if store == nil || strings.TrimSpace(store.table()) == "" {
 		log.Debug().Msg("webhook result table not configured; skip creating webhook result rows")
 		return nil
-	}
-	if opts.ParentTaskID <= 0 {
-		return errors.New("parent task id is required")
 	}
 	bookID := strings.TrimSpace(opts.BookID)
 	if bookID == "" {
@@ -73,7 +70,7 @@ func CreateWebhookResultsForGroups(ctx context.Context, opts WebhookResultCreate
 	day := dayString(opts.ParentDatetime, opts.ParentDatetimeRaw)
 
 	for _, groupID := range groupIDs {
-		existing, err := store.getExistingByParentAndGroup(ctx, WebhookBizTypePiracyGeneralSearch, opts.ParentTaskID, groupID)
+		existing, err := store.getExistingByBizGroupAndDay(ctx, WebhookBizTypePiracyGeneralSearch, groupID, day)
 		if err != nil {
 			return err
 		}
@@ -88,16 +85,18 @@ func CreateWebhookResultsForGroups(ctx context.Context, opts WebhookResultCreate
 		if len(taskIDs) == 0 {
 			log.Warn().
 				Str("group_id", groupID).
-				Int64("parent_task_id", opts.ParentTaskID).
 				Msg("webhook result: group has no child tasks; skip creating row")
 			continue
 		}
+
+		allTaskIDs := append(taskIDs, opts.ExtraTaskIDs...)
+		allTaskIDs = uniqueInt64(allTaskIDs)
+
 		if _, err := store.createPending(ctx, webhookResultCreateInput{
-			BizType:      WebhookBizTypePiracyGeneralSearch,
-			ParentTaskID: opts.ParentTaskID,
-			GroupID:      groupID,
-			TaskIDs:      taskIDs,
-			DramaInfo:    dramaInfoJSON,
+			BizType:   WebhookBizTypePiracyGeneralSearch,
+			GroupID:   groupID,
+			TaskIDs:   allTaskIDs,
+			DramaInfo: dramaInfoJSON,
 		}); err != nil {
 			return err
 		}
@@ -535,17 +534,16 @@ func (c *WebhookResultCreator) createSingleURLCaptureWebhookResults(ctx context.
 			}
 		}
 
-		existing, err := c.store.getExistingByParentAndGroup(ctx, WebhookBizTypeSingleURLCapture, cand.DayKey, cand.GroupID)
+		existing, err := c.store.getExistingByBizGroupAndDay(ctx, WebhookBizTypeSingleURLCapture, cand.GroupID, cand.Day)
 		if err != nil {
 			return created, updated, skipped, err
 		}
 		if existing == nil || strings.TrimSpace(existing.RecordID) == "" {
 			if _, err := c.store.createPending(ctx, webhookResultCreateInput{
-				BizType:      WebhookBizTypeSingleURLCapture,
-				ParentTaskID: cand.DayKey,
-				GroupID:      cand.GroupID,
-				TaskIDs:      taskIDs,
-				DramaInfo:    dramaInfo,
+				BizType:   WebhookBizTypeSingleURLCapture,
+				GroupID:   cand.GroupID,
+				TaskIDs:   taskIDs,
+				DramaInfo: dramaInfo,
 			}); err != nil {
 				return created, updated, skipped, err
 			}
