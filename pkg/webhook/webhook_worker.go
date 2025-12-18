@@ -333,16 +333,6 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 		if err != nil {
 			return w.markFailed(ctx, row, err)
 		}
-		if len(records) == 0 {
-			// Keep behavior aligned with legacy group worker: no records -> treat as done to avoid infinite retries.
-			state := WebhookResultSuccess
-			empty := ""
-			return w.store.update(ctx, row.RecordID, webhookResultUpdate{
-				Status:    &state,
-				EndAtMs:   &nowMs,
-				LastError: &empty,
-			})
-		}
 	case WebhookBizTypeVideoScreenCapture:
 		if !w.shouldHandleVideoScreenCapture(taskIDs) {
 			log.Debug().
