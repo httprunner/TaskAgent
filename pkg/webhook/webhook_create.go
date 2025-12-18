@@ -68,6 +68,12 @@ func CreateWebhookResultsForGroups(ctx context.Context, opts WebhookResultCreate
 
 	dramaInfoJSON, _ := fetchDramaInfoJSONByBookID(ctx, client, firstNonEmpty(opts.DramaBitableURL, taskagent.EnvString("DRAMA_BITABLE_URL", "")), bookID)
 	day := dayString(opts.ParentDatetime, opts.ParentDatetimeRaw)
+	var createAtMs int64
+	if strings.TrimSpace(day) != "" {
+		if dayTime, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(day), time.Local); err == nil {
+			createAtMs = dayTime.UTC().UnixMilli()
+		}
+	}
 
 	for _, groupID := range groupIDs {
 		existing, err := store.getExistingByBizGroupAndDay(ctx, WebhookBizTypePiracyGeneralSearch, groupID, day)
@@ -93,10 +99,11 @@ func CreateWebhookResultsForGroups(ctx context.Context, opts WebhookResultCreate
 		allTaskIDs = uniqueInt64(allTaskIDs)
 
 		if _, err := store.createPending(ctx, webhookResultCreateInput{
-			BizType:   WebhookBizTypePiracyGeneralSearch,
-			GroupID:   groupID,
-			TaskIDs:   allTaskIDs,
-			DramaInfo: dramaInfoJSON,
+			BizType:    WebhookBizTypePiracyGeneralSearch,
+			GroupID:    groupID,
+			TaskIDs:    allTaskIDs,
+			DramaInfo:  dramaInfoJSON,
+			CreateAtMs: createAtMs,
 		}); err != nil {
 			return err
 		}

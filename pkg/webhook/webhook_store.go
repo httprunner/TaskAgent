@@ -35,10 +35,11 @@ type webhookResultStore struct {
 }
 
 type webhookResultCreateInput struct {
-	BizType   string
-	GroupID   string
-	TaskIDs   []int64
-	DramaInfo string
+	BizType    string
+	GroupID    string
+	TaskIDs    []int64
+	DramaInfo  string
+	CreateAtMs int64
 }
 
 func newWebhookResultStore(tableURL string) (*webhookResultStore, error) {
@@ -136,7 +137,10 @@ func (s *webhookResultStore) createPending(ctx context.Context, input webhookRes
 		fields[field] = "[]"
 	}
 	if field := strings.TrimSpace(s.fields.CreateAt); field != "" {
-		now := time.Now().UTC().UnixMilli()
+		now := input.CreateAtMs
+		if now <= 0 {
+			now = time.Now().UTC().UnixMilli()
+		}
 		fields[field] = now
 	}
 	if field := strings.TrimSpace(s.fields.RetryCount); field != "" {
