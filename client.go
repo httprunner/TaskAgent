@@ -1000,7 +1000,9 @@ func UpdateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 					task.ElapsedSeconds = secs
 				}
 			}
-			if itemsCollectedField != "" && task.ItemsCollected > 0 {
+			if itemsCollectedField != "" {
+				// Always persist ItemsCollected so Bitables can distinguish
+				// between "no items collected" (0) and "not reported" (empty).
 				fields[itemsCollectedField] = task.ItemsCollected
 			}
 			if logsField != "" && logsValue != "" {
