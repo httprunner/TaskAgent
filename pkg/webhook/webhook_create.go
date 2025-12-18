@@ -517,7 +517,7 @@ func (c *WebhookResultCreator) processOncePiracyGroups(ctx context.Context) erro
 		return errors.New("webhook result creator is nil or task client is nil")
 	}
 
-	rows, err := c.fetchPiracyTasksForDay(ctx, c.batchLimit)
+	rows, err := c.fetchPiracyTasksForDay(ctx)
 	if err != nil {
 		return err
 	}
@@ -801,12 +801,9 @@ func (c *WebhookResultCreator) fetchVideoScreenCaptureTasks(ctx context.Context,
 	return table.Rows, nil
 }
 
-func (c *WebhookResultCreator) fetchPiracyTasksForDay(ctx context.Context, limit int) ([]taskagent.FeishuTaskRow, error) {
+func (c *WebhookResultCreator) fetchPiracyTasksForDay(ctx context.Context) ([]taskagent.FeishuTaskRow, error) {
 	if c == nil || c.taskClient == nil {
 		return nil, errors.New("task client is nil")
-	}
-	if limit <= 0 {
-		limit = 50
 	}
 	fields := taskagent.DefaultTaskFields()
 	sceneField := strings.TrimSpace(fields.Scene)
@@ -835,7 +832,7 @@ func (c *WebhookResultCreator) fetchPiracyTasksForDay(ctx context.Context, limit
 
 	table, err := c.taskClient.FetchTaskTableWithOptions(ctx, c.taskTableURL, nil, &taskagent.FeishuTaskQueryOptions{
 		Filter:     filter,
-		Limit:      limit,
+		Limit:      0, // no explicit limit; fetch all matching rows for the day
 		IgnoreView: true,
 	})
 	if err != nil {
