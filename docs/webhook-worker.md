@@ -130,7 +130,11 @@ worker 定时轮询 webhook 结果表：
 
 TaskAgent CLI（可选）：
 
-- `go run ./cmd webhook-worker --task-url "$TASK_BITABLE_URL" --webhook-bitable-url "$WEBHOOK_BITABLE_URL" --webhook-url "$SUMMARY_WEBHOOK_URL"`
+- `go run ./cmd webhook-worker --task-url "$TASK_BITABLE_URL" --webhook-bitable-url "$WEBHOOK_BITABLE_URL" --webhook-url "$SUMMARY_WEBHOOK_URL"`：默认轮询 `WEBHOOK_BITABLE_URL` 中 `Status in (pending, failed)` 的结果行。
+  - 支持定向调试：
+    - `--group-id "<GroupID>"`：仅处理指定 `GroupID` 的结果行；
+    - `--date "2025-12-17"`：仅处理逻辑日期为 `2025-12-17` 的结果行（对应结果表的 `Date` 字段，按本地时区格式化为 `YYYY-MM-DD`）。
+    - 任一参数非空时 **仅执行单次扫描**，不会进入轮询，用于线上按 Group/日期精准复现问题。
 - `go run ./cmd webhook-creator --task-url "$TASK_BITABLE_URL" --webhook-bitable-url "$WEBHOOK_BITABLE_URL" --app kwai`（默认单次执行；如需轮询加 `--poll-interval 30s`）
 
 ## 故障排查速查表
