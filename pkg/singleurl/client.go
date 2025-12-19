@@ -90,6 +90,7 @@ func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, cook
 		return "", errors.Wrap(err, "encode create task payload")
 	}
 	endpoint := fmt.Sprintf("%s/download/tasks", c.baseURL)
+	log.Debug().Str("url", endpoint).Any("payload", payload).Msg("create task request to crawler")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return "", errors.Wrap(err, "build create task request")
@@ -118,6 +119,7 @@ func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, cook
 func (c *restCrawlerTaskClient) GetTask(ctx context.Context, jobID string) (*crawlerTaskStatus, error) {
 	log.Debug().Str("job_id", jobID).Msg("getting crawler task status")
 	endpoint := fmt.Sprintf("%s/download/tasks/%s", c.baseURL, strings.TrimSpace(jobID))
+	log.Debug().Str("url", endpoint).Str("jobID", jobID).Msg("get task job from crawler")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "build get task request")
@@ -174,6 +176,7 @@ func (c *restCrawlerTaskClient) SendTaskSummary(ctx context.Context, payload Tas
 		return errors.Wrap(err, "encode task summary payload")
 	}
 	endpoint := fmt.Sprintf("%s/download/tasks/finish", c.baseURL)
+	log.Debug().Str("url", endpoint).Any("payload", normalized).Msg("send task summary request to crawler")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return errors.Wrap(err, "build task summary request")
@@ -188,6 +191,22 @@ func (c *restCrawlerTaskClient) SendTaskSummary(ctx context.Context, payload Tas
 		return c.errorFromResponse(resp)
 	}
 	return nil
+}
+
+// SendTaskSummaryToCrawler is a convenience wrapper that normalizes the
+// given payload and forwards it to the downloader service's
+// /download/tasks/finish endpoint using a short‑lived REST client. It is
+// intended for grouped single_url_capture flows driven by webhook workers.
+func SendTaskSummaryToCrawler(ctx context.Context, baseURL string, payload TaskSummaryPayload) error {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return errors.New("crawler base url is empty")
+	}
+	client, err := newRESTCrawlerTaskClient(baseURL, nil)
+	if err != nil {
+		return err
+	}
+	return client.SendTaskSummary(ctx, payload)
 }
 
 func normalizeCookies(values []string) []string {

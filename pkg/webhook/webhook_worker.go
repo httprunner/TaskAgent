@@ -11,6 +11,8 @@ import (
 	"time"
 
 	taskagent "github.com/httprunner/TaskAgent"
+	"github.com/httprunner/TaskAgent/internal/env"
+	"github.com/httprunner/TaskAgent/pkg/singleurl"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 )
@@ -404,6 +406,17 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 		return w.markFailed(ctx, row, fmt.Errorf("unknown biz type: %s", bizType))
 	}
 
+	// For single_url_capture webhook groups, also emit a grouped summary
+	// to the downloader service so external consumers can track per-group
+	// completion alongside the summary webhook payload.
+	if bizType == WebhookBizTypeSingleURLCapture {
+		if summary := buildSingleURLGroupSummary(row, tasks, taskIDs); summary != nil {
+			if err := sendSingleURLGroupSummary(ctx, summary); err != nil {
+				return w.markFailed(ctx, row, err)
+			}
+		}
+	}
+
 	payload := buildWebhookResultPayload(dramaRaw, records)
 	if val, ok := payload["DramaName"]; !ok || strings.TrimSpace(fmt.Sprint(val)) == "" {
 		payload["DramaName"] = strings.TrimSpace(meta.Params)
@@ -526,6 +539,114 @@ func buildTaskItemsByTaskID(records []CaptureRecordPayload, taskIDs []int64) map
 		result[taskID] = group
 	}
 	return result
+}
+
+// singleURLGroupSummary captures the aggregated state for a single
+// single_url_capture webhook group, which is forwarded to the downloader
+// service's /download/tasks/finish endpoint.
+type singleURLGroupSummary struct {
+	TaskID             string
+	Total              int
+	Done               int
+	UniqueCombinations []singleurl.TaskSummaryCombination
+}
+
+func buildSingleURLGroupSummary(row webhookResultRow, tasks []taskagent.FeishuTaskRow, taskIDs []int64) *singleURLGroupSummary {
+	groupID := strings.TrimSpace(row.GroupID)
+	if groupID == "" || len(taskIDs) == 0 || len(tasks) == 0 {
+		return nil
+	}
+
+	byID := make(map[int64]taskagent.FeishuTaskRow, len(tasks))
+	for _, t := range tasks {
+		if t.TaskID <= 0 {
+			continue
+		}
+		byID[t.TaskID] = t
+	}
+
+	total := 0
+	done := 0
+	seenCombo := make(map[string]struct{})
+	combinations := make([]singleurl.TaskSummaryCombination, 0, len(taskIDs))
+
+	for _, id := range taskIDs {
+		if id <= 0 {
+			continue
+		}
+		task, ok := byID[id]
+		if !ok {
+			continue
+		}
+		total++
+
+		status := strings.ToLower(strings.TrimSpace(task.Status))
+		if status == taskagent.StatusSuccess {
+			done++
+		}
+
+		bid := strings.TrimSpace(task.BookID)
+		accountID := strings.TrimSpace(task.UserID)
+		if bid == "" || accountID == "" {
+			continue
+		}
+		key := bid + "|" + accountID
+		if _, exists := seenCombo[key]; exists {
+			continue
+		}
+		seenCombo[key] = struct{}{}
+		combinations = append(combinations, singleurl.TaskSummaryCombination{
+			Bid:       bid,
+			AccountID: accountID,
+		})
+	}
+
+	if total == 0 {
+		return nil
+	}
+
+	return &singleURLGroupSummary{
+		TaskID:             groupID,
+		Total:              total,
+		Done:               done,
+		UniqueCombinations: combinations,
+	}
+}
+
+func sendSingleURLGroupSummary(ctx context.Context, summary *singleURLGroupSummary) error {
+	if summary == nil {
+		return nil
+	}
+
+	baseURL := strings.TrimSpace(taskagent.EnvString("CRAWLER_SERVICE_BASE_URL", ""))
+	if baseURL == "" {
+		// Downloader integration is optional; skip when base URL is not configured.
+		return nil
+	}
+
+	taskID := strings.TrimSpace(summary.TaskID)
+	if taskID == "" {
+		return errors.New("single_url_capture summary missing task_id (group id)")
+	}
+
+	payload := singleurl.TaskSummaryPayload{
+		TaskID:             taskID,
+		Total:              summary.Total,
+		Done:               summary.Done,
+		UniqueCombinations: summary.UniqueCombinations,
+		Email:              env.String("SUMMARY_WEBHOOK_EMAIL", ""),
+	}
+	if err := singleurl.SendTaskSummaryToCrawler(ctx, baseURL, payload); err != nil {
+		return err
+	}
+
+	log.Info().
+		Str("task_id", taskID).
+		Int("total", summary.Total).
+		Int("done", summary.Done).
+		Int("unique_count", len(summary.UniqueCombinations)).
+		Msg("single_url_capture group summary sent to crawler")
+	return nil
 }
 
 // buildSingleURLCaptureRecordsFromTasks builds synthetic capture records for single_url_capture

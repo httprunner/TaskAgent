@@ -120,6 +120,38 @@ func TestBuildTaskItemsByTaskID(t *testing.T) {
 	assertGroup("9999", 1, []string{"x"})
 }
 
+func TestBuildSingleURLGroupSummary(t *testing.T) {
+	groupID := "app_B001_U001"
+	row := webhookResultRow{GroupID: groupID}
+	tasks := []taskagent.FeishuTaskRow{
+		{TaskID: 1, Status: taskagent.StatusSuccess, BookID: "B001", UserID: "U001"},
+		{TaskID: 2, Status: taskagent.StatusFailed, BookID: "B001", UserID: "U001"},
+		{TaskID: 3, Status: taskagent.StatusSuccess, BookID: "B001", UserID: "U001"},
+		{TaskID: 4, Status: taskagent.StatusSuccess, BookID: "", UserID: "U002"},
+	}
+	taskIDs := []int64{1, 2, 3, 4}
+
+	summary := buildSingleURLGroupSummary(row, tasks, taskIDs)
+	if summary == nil {
+		t.Fatalf("expected non-nil summary")
+	}
+	if summary.TaskID != groupID {
+		t.Fatalf("task_id mismatch: got=%q want=%q", summary.TaskID, groupID)
+	}
+	if summary.Total != 4 {
+		t.Fatalf("total mismatch: got=%d want=%d", summary.Total, 4)
+	}
+	if summary.Done != 3 {
+		t.Fatalf("done mismatch: got=%d want=%d", summary.Done, 3)
+	}
+	if len(summary.UniqueCombinations) != 1 {
+		t.Fatalf("unique_combinations length mismatch: got=%d want=%d", len(summary.UniqueCombinations), 1)
+	}
+	if combo := summary.UniqueCombinations[0]; combo.Bid != "B001" || combo.AccountID != "U001" {
+		t.Fatalf("unexpected combination: %#v", combo)
+	}
+}
+
 func TestFilterRecordsByTaskAndUser(t *testing.T) {
 	type args struct {
 		records []CaptureRecordPayload
