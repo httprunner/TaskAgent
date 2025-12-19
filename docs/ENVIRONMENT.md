@@ -54,8 +54,8 @@ TaskAgent exposes per-table override knobs so you can align with custom schemas 
 | `TASK_FIELD_USERID` | `UserID` | User identifier. |
 | `TASK_FIELD_USERNAME` | `UserName` | User display name. |
 | `TASK_FIELD_DATETIME` | `Datetime` | Optional scheduling field. |
-| `TASK_FIELD_STATUS` | `Status` | Task lifecycle status (pending/queued/dispatched/running/success/failed). |
-| `TASK_FIELD_GROUPID` | `GroupID` | Piracy group-task identifier. |
+| `TASK_FIELD_STATUS` | `Status` | Task lifecycle status (pending/queued/dispatched/running/success/failed/error). |
+| `TASK_FIELD_GROUPID` | `GroupID` | Piracy/SingleURL group-task identifier. |
 | `TASK_FIELD_DEVICE_SERIAL` | `DeviceSerial` | Target device serial (optional pre-allocation). |
 | `TASK_FIELD_DISPATCHED_DEVICE` | `DispatchedDevice` | Actual device used. |
 | `TASK_FIELD_DISPATCHED_AT` | `DispatchedAt` | Dispatch timestamp. |

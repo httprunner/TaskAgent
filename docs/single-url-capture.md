@@ -42,11 +42,7 @@
 | `done` | `success` | 写入 `vid` 到 `Extra`（`{"job_id":"...","vid":"..."}`），并把 `EndAt`/`ElapsedSeconds` 补齐。 |
 | `failed` / 404 | `failed` | 将失败原因附加到 `Extra`，同时保留 `job_id` 方便排查。 |
 
-这样即可形成 `pending → queued → running → success/failed` 的闭环，无需人工介入。
-
-当同一 `GroupID`（即 `BookID_UserID`）下的所有单链任务都已成功且尚未触发 Webhook 时，`SingleURLWorker` 会自动调用下载服务的 `POST /download/tasks/finish` 接口，同步一次批量 “task” Kafka 消息，消息体与下载服务内部 `finish_message` 保持一致（包含 `task_id/groupID`、`total/done`、`unique_combinations` 等字段）。发送成功后，整组任务的 `Webhook` 字段会被写成 `success`，后续即可跳过重复推送。
-
-> **状态存储在哪里？** 下载服务通过 `models/redis/job_status.JobStatusManager` 把 job 元信息写入 Redis，`SingleURLWorker` 只负责调用 HTTP 接口获取/落盘，不会把状态保留在内存中。
+这样即可形成 `pending → queued → running → success/failed` 的闭环，无需人工介入。单链任务完成后的汇总推送与 `Webhook` 字段更新不再由 `SingleURLWorker` 直接触发，而是统一交给 `pkg/webhook` 中的 `WebhookResultCreator/Worker` 通过「推送结果表」驱动。
 
 ## foxagent 入口
 

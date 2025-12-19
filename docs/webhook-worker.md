@@ -2,7 +2,7 @@
 
 TaskAgent webhook 推送机制统一为「Webhook 结果表」：
 
-- **统一机制（推荐/目标）**：Webhook 结果表（`WEBHOOK_BITABLE_URL`）+ `WebhookResultWorker`
+- **统一机制**：Webhook 结果表（`WEBHOOK_BITABLE_URL`）+ `WebhookResultWorker`
   - 以结果表行的 `Status in {pending, failed}` 作为触发器；
   - 以结果表行的 `TaskIDs`（1-N）作为就绪判定与数据汇总主键；
   - 通过 `BizType` 区分不同业务的汇总策略（例如：综合页搜索→盗版筛查的 Group 聚合、视频录屏采集的 Single 任务）。
@@ -12,6 +12,7 @@ TaskAgent webhook 推送机制统一为「Webhook 结果表」：
 说明：
 - `BizType=piracy_general_search`（综合页搜索→盗版筛查，Group 聚合推送）。
 - `BizType=video_screen_capture`（视频录屏采集，Single 推送）及其 Creator/回填器（外部系统创建任务时需要）。
+- `BizType=single_url_capture`（单个链接采集），由 `WebhookResultCreator` 从任务表聚合 TaskIDs，`WebhookResultWorker` 直接基于任务状态构造 payload 并推送。
 
 ### 表定义（Feishu 多维表格）
 
@@ -35,6 +36,7 @@ Webhook 结果表用于存储 webhook 的关联信息和推送结果，核心字
 字段含义补充（按 BizType）：
 - `BizType=piracy_general_search`：`ParentTaskID`、`GroupID` 必填，用于确定“同一父任务下的同一组”。
 - `BizType=video_screen_capture`：当前只强依赖 `TaskIDs=[TaskID]`；`ParentTaskID/GroupID/DramaInfo` 可先为空（后续 BookID 修复后再补齐）。
+- `BizType=single_url_capture`：`TaskIDs` 按 `(GroupID, Date)` 聚合单链任务 ID 列表；`GroupID` 与 SingleURLWorker 中的 group 规则保持一致。
 
 环境变量：
 - `WEBHOOK_BITABLE_URL`：Webhook 结果表链接

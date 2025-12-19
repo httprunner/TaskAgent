@@ -396,12 +396,7 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 			return w.markFailed(ctx, row, ErrNoCaptureRecords)
 		}
 	case WebhookBizTypeSingleURLCapture:
-		groupUserID := strings.TrimSpace(meta.UserID)
-
-		records, err = fetchCaptureRecordsByTaskIDs(ctx, taskIDs, groupUserID)
-		if err != nil {
-			return w.markFailed(ctx, row, err)
-		}
+		records = buildSingleURLCaptureRecordsFromTasks(tasks, taskIDs)
 		if len(records) == 0 {
 			return w.markFailed(ctx, row, ErrNoCaptureRecords)
 		}
@@ -531,6 +526,78 @@ func buildTaskItemsByTaskID(records []CaptureRecordPayload, taskIDs []int64) map
 		result[taskID] = group
 	}
 	return result
+}
+
+// buildSingleURLCaptureRecordsFromTasks builds synthetic capture records for single_url_capture
+// webhook payloads directly from task rows, without relying on SQLite or the capture result table.
+// Each ready task in taskIDs contributes at most one record.
+func buildSingleURLCaptureRecordsFromTasks(tasks []taskagent.FeishuTaskRow, taskIDs []int64) []CaptureRecordPayload {
+	if len(tasks) == 0 || len(taskIDs) == 0 {
+		return nil
+	}
+	allowed := make(map[int64]struct{}, len(taskIDs))
+	for _, id := range taskIDs {
+		if id <= 0 {
+			continue
+		}
+		allowed[id] = struct{}{}
+	}
+	fields := taskagent.DefaultResultFields()
+
+	out := make([]CaptureRecordPayload, 0, len(taskIDs))
+	for _, t := range tasks {
+		if t.TaskID <= 0 {
+			continue
+		}
+		if _, ok := allowed[t.TaskID]; !ok {
+			continue
+		}
+		status := strings.ToLower(strings.TrimSpace(t.Status))
+		if status != taskagent.StatusSuccess && status != taskagent.StatusError {
+			continue
+		}
+
+		recordFields := make(map[string]any)
+		if key := strings.TrimSpace(fields.TaskID); key != "" {
+			recordFields[key] = fmt.Sprintf("%d", t.TaskID)
+		}
+		if key := strings.TrimSpace(fields.App); key != "" && strings.TrimSpace(t.App) != "" {
+			recordFields[key] = strings.TrimSpace(t.App)
+		}
+		if key := strings.TrimSpace(fields.Scene); key != "" && strings.TrimSpace(t.Scene) != "" {
+			recordFields[key] = strings.TrimSpace(t.Scene)
+		}
+		if key := strings.TrimSpace(fields.Params); key != "" && strings.TrimSpace(t.Params) != "" {
+			recordFields[key] = strings.TrimSpace(t.Params)
+		}
+		if key := strings.TrimSpace(fields.ItemURL); key != "" && strings.TrimSpace(t.URL) != "" {
+			recordFields[key] = strings.TrimSpace(t.URL)
+		}
+		if key := strings.TrimSpace(fields.UserID); key != "" && strings.TrimSpace(t.UserID) != "" {
+			recordFields[key] = strings.TrimSpace(t.UserID)
+		}
+		if key := strings.TrimSpace(fields.UserName); key != "" && strings.TrimSpace(t.UserName) != "" {
+			recordFields[key] = strings.TrimSpace(t.UserName)
+		}
+		if key := strings.TrimSpace(fields.Extra); key != "" && strings.TrimSpace(t.Extra) != "" {
+			recordFields[key] = strings.TrimSpace(t.Extra)
+		}
+		// Use BookID or TaskID as a stable synthetic ItemID so downstream
+		// payloads can still leverage ItemID-based grouping when needed.
+		if key := strings.TrimSpace(fields.ItemID); key != "" {
+			val := strings.TrimSpace(t.BookID)
+			if val == "" {
+				val = fmt.Sprintf("%d", t.TaskID)
+			}
+			recordFields[key] = val
+		}
+
+		out = append(out, CaptureRecordPayload{
+			RecordID: fmt.Sprintf("%d", t.TaskID),
+			Fields:   recordFields,
+		})
+	}
+	return out
 }
 
 func pickFirstNonEmptyCaptureFieldByTaskIDs(

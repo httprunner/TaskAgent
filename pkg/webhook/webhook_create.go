@@ -11,6 +11,7 @@ import (
 	"time"
 
 	taskagent "github.com/httprunner/TaskAgent"
+	"github.com/httprunner/TaskAgent/internal/feishusdk"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 )
@@ -357,6 +358,12 @@ func NewWebhookResultCreator(cfg WebhookResultCreatorConfig) (*WebhookResultCrea
 	}
 	scanDate := strings.TrimSpace(cfg.ScanDate)
 	bizType := strings.TrimSpace(cfg.BizType)
+
+	enableSU := cfg.EnableSingleURLCapture
+	if bizType == WebhookBizTypeSingleURLCapture {
+		enableSU = true
+	}
+
 	return &WebhookResultCreator{
 		store:        store,
 		taskClient:   client,
@@ -365,7 +372,7 @@ func NewWebhookResultCreator(cfg WebhookResultCreatorConfig) (*WebhookResultCrea
 		interval:     interval,
 		batchLimit:   batch,
 		scanDate:     scanDate,
-		enableSU:     cfg.EnableSingleURLCapture,
+		enableSU:     enableSU,
 		bizType:      bizType,
 		skipExisting: cfg.SkipExisting,
 		seen:         make(map[int64]time.Time),
@@ -441,7 +448,16 @@ func (c *WebhookResultCreator) processOnce(ctx context.Context) error {
 	case WebhookBizTypeVideoScreenCapture:
 		return c.processOnceVideoScreenCapture(ctx)
 	case WebhookBizTypeSingleURLCapture:
-		_, _, _, err := c.createSingleURLCaptureWebhookResults(ctx)
+		created, updated, skipped, err := c.createSingleURLCaptureWebhookResults(ctx)
+		if created > 0 || updated > 0 || skipped > 0 {
+			log.Info().
+				Int("created", created).
+				Int("updated", updated).
+				Int("skipped", skipped).
+				Str("scan_date", c.scanDate).
+				Str("app_filter", c.appFilter).
+				Msg("single_url_capture creator iteration completed")
+		}
 		return err
 	default:
 		// process video_screen_capture tasks and,
@@ -450,7 +466,16 @@ func (c *WebhookResultCreator) processOnce(ctx context.Context) error {
 			return err
 		}
 		if c.enableSU {
-			_, _, _, err := c.createSingleURLCaptureWebhookResults(ctx)
+			created, updated, skipped, err := c.createSingleURLCaptureWebhookResults(ctx)
+			if created > 0 || updated > 0 || skipped > 0 {
+				log.Info().
+					Int("created", created).
+					Int("updated", updated).
+					Int("skipped", skipped).
+					Str("scan_date", c.scanDate).
+					Str("app_filter", c.appFilter).
+					Msg("single_url_capture creator iteration completed")
+			}
 			return err
 		}
 		return nil
@@ -683,25 +708,52 @@ type singleURLCaptureGroupCandidate struct {
 	Day     string
 	DayKey  int64
 	BookID  string
+	TaskIDs []int64
 }
 
 func (c *WebhookResultCreator) createSingleURLCaptureWebhookResults(ctx context.Context) (created, updated, skipped int, retErr error) {
-	rows, err := c.fetchSingleURLCaptureTasks(ctx, c.batchLimit)
+	rows, err := c.fetchSingleURLCaptureTasks(ctx, 0)
 	if err != nil {
 		return 0, 0, 0, err
 	}
 	if len(rows) == 0 {
+		log.Warn().
+			Str("scan_date", c.scanDate).
+			Str("app_filter", c.appFilter).
+			Msg("single_url_capture creator: no tasks found for date")
 		return 0, 0, 0, nil
 	}
 
 	candidates := make(map[string]singleURLCaptureGroupCandidate, len(rows))
 	for _, row := range rows {
-		groupID := strings.TrimSpace(row.GroupID)
-		if groupID == "" {
+		if strings.TrimSpace(row.Scene) != taskagent.SceneSingleURLCapture {
 			skipped++
 			continue
 		}
-		day := dayString(row.Datetime, row.DatetimeRaw)
+		if row.TaskID <= 0 {
+			skipped++
+			continue
+		}
+		groupID := strings.TrimSpace(row.GroupID)
+		if groupID == "" {
+			mappedApp := feishusdk.MapAppValue(strings.TrimSpace(row.App))
+			if mappedApp == "" {
+				mappedApp = strings.TrimSpace(row.App)
+			}
+			trimmedBook := strings.TrimSpace(row.BookID)
+			if trimmedBook == "" {
+				trimmedBook = "unknown_book"
+			}
+			trimmedUser := strings.TrimSpace(row.UserID)
+			if trimmedUser == "" {
+				trimmedUser = "unknown_user"
+			}
+			groupID = fmt.Sprintf("%s_%s_%s", mappedApp, trimmedBook, trimmedUser)
+		}
+		day := strings.TrimSpace(c.scanDate)
+		if day == "" {
+			day = dayString(row.Datetime, row.DatetimeRaw)
+		}
 		if strings.TrimSpace(day) == "" {
 			skipped++
 			continue
@@ -723,19 +775,21 @@ func (c *WebhookResultCreator) createSingleURLCaptureWebhookResults(ctx context.
 		} else if cand.BookID == "" {
 			cand.BookID = strings.TrimSpace(row.BookID)
 		}
+		cand.TaskIDs = append(cand.TaskIDs, row.TaskID)
 		candidates[key] = cand
 	}
 
 	if len(candidates) == 0 {
+		log.Warn().
+			Int("skipped", skipped).
+			Str("scan_date", c.scanDate).
+			Str("app_filter", c.appFilter).
+			Msg("single_url_capture creator: no candidates with valid group/day found")
 		return 0, 0, skipped, nil
 	}
 
 	for _, cand := range candidates {
-		taskIDs, err := fetchGroupTaskIDs(ctx, c.taskClient, c.taskTableURL, cand.GroupID, cand.Day)
-		if err != nil {
-			return created, updated, skipped, err
-		}
-		taskIDs = uniqueInt64(taskIDs)
+		taskIDs := uniqueInt64(cand.TaskIDs)
 		sort.Slice(taskIDs, func(i, j int) bool { return taskIDs[i] < taskIDs[j] })
 		if len(taskIDs) == 0 {
 			skipped++
@@ -803,7 +857,13 @@ func (c *WebhookResultCreator) createSingleURLCaptureWebhookResults(ctx context.
 		}
 		updated++
 	}
-
+	log.Info().
+		Int("created", created).
+		Int("updated", updated).
+		Int("skipped", skipped).
+		Str("scan_date", c.scanDate).
+		Str("app_filter", c.appFilter).
+		Msg("single_url_capture creator: processed single_url_capture tasks")
 	return created, updated, skipped, nil
 }
 
@@ -914,8 +974,9 @@ func (c *WebhookResultCreator) fetchSingleURLCaptureTasks(ctx context.Context, l
 	if c == nil || c.taskClient == nil {
 		return nil, errors.New("task client is nil")
 	}
-	if limit <= 0 {
-		limit = 50
+	// limit <= 0 means no explicit limit (fetch all matching rows).
+	if limit < 0 {
+		limit = 0
 	}
 	fields := taskagent.DefaultTaskFields()
 	sceneField := strings.TrimSpace(fields.Scene)

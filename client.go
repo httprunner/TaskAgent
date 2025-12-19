@@ -324,17 +324,6 @@ func (c *FeishuTaskClient) UpdateTaskExtras(ctx context.Context, updates []TaskE
 	return c.syncTaskMirror(touched)
 }
 
-// UpdateTaskWebhooks updates the webhook column for the provided tasks.
-func (c *FeishuTaskClient) UpdateTaskWebhooks(ctx context.Context, tasks []*FeishuTask, webhookStatus string) error {
-	if c == nil {
-		return errors.New("feishusdk: task client is nil")
-	}
-	if err := UpdateFeishuTaskWebhooks(ctx, tasks, webhookStatus); err != nil {
-		return err
-	}
-	return c.syncTaskMirror(tasks)
-}
-
 func (c *FeishuTaskClient) statusUpdateMeta(status string) *TaskStatusMeta {
 	if c == nil {
 		return nil
@@ -1076,42 +1065,6 @@ func compressImageIfNeeded(raw []byte) ([]byte, string) {
 		return raw, ".png"
 	}
 	return buf.Bytes(), ".jpg"
-}
-
-func UpdateFeishuTaskWebhooks(ctx context.Context, tasks []*FeishuTask, webhookStatus string) error {
-	if len(tasks) == 0 {
-		return nil
-	}
-	trimmed := strings.TrimSpace(webhookStatus)
-	if trimmed == "" {
-		return errors.New("feishusdk: webhook status is empty")
-	}
-	grouped := make(map[*feishuTaskSource][]*FeishuTask, len(tasks))
-	for _, task := range tasks {
-		if task == nil || task.source == nil || task.source.client == nil || task.source.table == nil {
-			return errors.New("feishusdk: task missing source context for webhook update")
-		}
-		grouped[task.source] = append(grouped[task.source], task)
-	}
-	var errs []string
-	for source, subset := range grouped {
-		field := strings.TrimSpace(source.table.Fields.Webhook)
-		if field == "" {
-			return errors.New("feishusdk: webhook field is not configured in task table")
-		}
-		payload := map[string]any{field: trimmed}
-		for _, task := range subset {
-			if err := source.client.UpdateTaskFields(ctx, source.table, task.TaskID, payload); err != nil {
-				errs = append(errs, fmt.Sprintf("task %d: %v", task.TaskID, err))
-				continue
-			}
-			task.Webhook = trimmed
-		}
-	}
-	if len(errs) > 0 {
-		return errors.New(strings.Join(errs, "; "))
-	}
-	return nil
 }
 
 func filterTasksForStatusOverride(tasks []*FeishuTask, newStatus string) []*FeishuTask {

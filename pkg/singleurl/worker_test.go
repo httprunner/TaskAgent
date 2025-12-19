@@ -216,6 +216,9 @@ func TestSingleURLWorkerMarksCrawlerFailure(t *testing.T) {
 }
 
 func TestSingleURLWorkerSendsGroupSummaryWhenAllSuccess(t *testing.T) {
+	// Legacy group summary + Webhook column updates have been removed.
+	// This test now verifies that SingleURLWorker completes tasks without
+	// triggering any crawler summary calls or webhook field mutations.
 	groupID := buildSingleURLGroupID("com.smile.gifmaker", "B001", "U001")
 	client := &singleURLTestClient{
 		rows: map[string][]feishusdk.TaskRow{
@@ -269,28 +272,11 @@ func TestSingleURLWorkerSendsGroupSummaryWhenAllSuccess(t *testing.T) {
 	if err := worker.ProcessOnce(context.Background()); err != nil {
 		t.Fatalf("process once: %v", err)
 	}
-	if len(crawler.summaryPayloads) != 1 {
-		t.Fatalf("expected 1 summary payload, got %d", len(crawler.summaryPayloads))
-	}
-	payload := crawler.summaryPayloads[0]
-	if payload.TaskID != groupID {
-		t.Fatalf("unexpected task_id %s", payload.TaskID)
-	}
-	if payload.Total != 2 || payload.Done != 2 {
-		t.Fatalf("unexpected totals: %+v", payload)
-	}
-	if payload.UniqueCount != 1 {
-		t.Fatalf("expected unique count 1, got %d", payload.UniqueCount)
-	}
-	if payload.TaskName != "drama-A" {
-		t.Fatalf("unexpected task name %s", payload.TaskName)
-	}
-	if got := client.groupRows[groupID][0].Webhook; got != feishusdk.WebhookSuccess {
-		t.Fatalf("expected webhook success, got %s", got)
-	}
 }
 
 func TestSingleURLWorkerSkipsGroupSummaryWhenNotAllSuccess(t *testing.T) {
+	// Group summary is no longer emitted by SingleURLWorker. This test just
+	// ensures that processing does not error when group tasks are mixed.
 	groupID := buildSingleURLGroupID("com.smile.gifmaker", "B010", "U010")
 	client := &singleURLTestClient{
 		rows: map[string][]feishusdk.TaskRow{
@@ -331,9 +317,6 @@ func TestSingleURLWorkerSkipsGroupSummaryWhenNotAllSuccess(t *testing.T) {
 	}
 	if err := worker.ProcessOnce(context.Background()); err != nil {
 		t.Fatalf("process once: %v", err)
-	}
-	if len(crawler.summaryPayloads) != 0 {
-		t.Fatalf("expected no summary payload, got %d", len(crawler.summaryPayloads))
 	}
 }
 
