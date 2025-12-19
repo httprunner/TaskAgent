@@ -81,9 +81,9 @@ func TestSingleURLWorkerQueuesTaskAfterCreatingCrawlerJob(t *testing.T) {
 	if status := last.fields[feishusdk.DefaultTaskFields.Status]; status != singleURLStatusQueued {
 		t.Fatalf("expected status queued, got %#v", status)
 	}
-	extra := last.fields[feishusdk.DefaultTaskFields.Extra]
-	if extraStr, _ := extra.(string); extraStr == "" || !strings.Contains(extraStr, "job-123") {
-		t.Fatalf("extra missing job id: %v", extra)
+	logsVal := last.fields[feishusdk.DefaultTaskFields.Logs]
+	if logsStr, _ := logsVal.(string); logsStr == "" || !strings.Contains(logsStr, "job-123") {
+		t.Fatalf("logs missing job id: %v", logsVal)
 	}
 }
 
@@ -144,7 +144,7 @@ func TestSingleURLWorkerPollsSuccessAndWritesVid(t *testing.T) {
 					BookID: "B002",
 					UserID: "U002",
 					URL:    "https://example.com/video2",
-					Extra:  encodeSingleURLMetadata(meta),
+					Logs:   encodeSingleURLMetadata(meta),
 				},
 			},
 		},
@@ -171,9 +171,9 @@ func TestSingleURLWorkerPollsSuccessAndWritesVid(t *testing.T) {
 	if len(client.updateCalls) < 2 {
 		t.Fatalf("expected at least 2 updates, got %d", len(client.updateCalls))
 	}
-	extraUpdated := client.updateCalls[len(client.updateCalls)-2]
-	if extraStr, _ := extraUpdated.fields[feishusdk.DefaultTaskFields.Extra].(string); !strings.Contains(extraStr, "vid-999") {
-		t.Fatalf("vid missing in extra: %v", extraStr)
+	logsUpdated := client.updateCalls[len(client.updateCalls)-2]
+	if logsStr, _ := logsUpdated.fields[feishusdk.DefaultTaskFields.Logs].(string); !strings.Contains(logsStr, "vid-999") {
+		t.Fatalf("vid missing in logs: %v", logsStr)
 	}
 	statusUpdate := client.updateCalls[len(client.updateCalls)-1]
 	if statusUpdate.fields[feishusdk.DefaultTaskFields.Status] != feishusdk.StatusSuccess {
@@ -210,8 +210,10 @@ func TestSingleURLWorkerMarksCrawlerFailure(t *testing.T) {
 	if call.fields[feishusdk.DefaultTaskFields.Status] != feishusdk.StatusFailed {
 		t.Fatalf("expected failed status, got %#v", call.fields)
 	}
-	if extraStr, _ := call.fields[feishusdk.DefaultTaskFields.Extra].(string); !strings.Contains(extraStr, "boom") {
-		t.Fatalf("missing error in extra: %v", extraStr)
+	logsField := feishusdk.DefaultTaskFields.Logs
+	logsStr, _ := call.fields[logsField].(string)
+	if !strings.Contains(logsStr, "boom") {
+		t.Fatalf("missing error in logs: %v", logsStr)
 	}
 }
 
@@ -231,7 +233,7 @@ func TestSingleURLWorkerSendsGroupSummaryWhenAllSuccess(t *testing.T) {
 					BookID:  "B001",
 					UserID:  "U001",
 					GroupID: groupID,
-					Extra:   encodeSingleURLMetadata(singleURLMetadata{Attempts: []singleURLAttempt{{JobID: "job-sum-1"}}}),
+					Logs:    encodeSingleURLMetadata(singleURLMetadata{Attempts: []singleURLAttempt{{JobID: "job-sum-1"}}}),
 				},
 				{
 					TaskID:  21,
@@ -241,7 +243,7 @@ func TestSingleURLWorkerSendsGroupSummaryWhenAllSuccess(t *testing.T) {
 					BookID:  "B001",
 					UserID:  "U001",
 					GroupID: groupID,
-					Extra:   encodeSingleURLMetadata(singleURLMetadata{Attempts: []singleURLAttempt{{JobID: "job-sum-2"}}}),
+					Logs:    encodeSingleURLMetadata(singleURLMetadata{Attempts: []singleURLAttempt{{JobID: "job-sum-2"}}}),
 				},
 			},
 		},
@@ -289,7 +291,7 @@ func TestSingleURLWorkerSkipsGroupSummaryWhenNotAllSuccess(t *testing.T) {
 					BookID:  "B010",
 					UserID:  "U010",
 					GroupID: groupID,
-					Extra:   encodeSingleURLMetadata(singleURLMetadata{Attempts: []singleURLAttempt{{JobID: "job-mixed"}}}),
+					Logs:    encodeSingleURLMetadata(singleURLMetadata{Attempts: []singleURLAttempt{{JobID: "job-mixed"}}}),
 				},
 			},
 		},
@@ -321,20 +323,20 @@ func TestSingleURLWorkerSkipsGroupSummaryWhenNotAllSuccess(t *testing.T) {
 }
 
 func TestSingleURLWorkerRetriesFailedTaskWithExistingJobID(t *testing.T) {
-	legacyExtra := `{"job_id":"job-old","error":"boom"}`
-	client := &singleURLTestClient{
-		rows: map[string][]feishusdk.TaskRow{
-			feishusdk.StatusFailed: {
-				{
-					TaskID: 40,
-					Scene:  SceneSingleURLCapture,
-					Status: feishusdk.StatusFailed,
-					Params: "capture",
-					BookID: "B040",
-					UserID: "U040",
-					URL:    "https://example.com/retry",
-					Extra:  legacyExtra,
-				},
+	legacyMeta := `{"job_id":"job-old","error":"boom"}`
+	client := &singleURLTestClient{}
+	// Seed the initial failed task row with legacy metadata in Logs.
+	client.rows = map[string][]feishusdk.TaskRow{
+		feishusdk.StatusFailed: {
+			{
+				TaskID: 40,
+				Scene:  SceneSingleURLCapture,
+				Status: feishusdk.StatusFailed,
+				Params: "capture",
+				BookID: "B040",
+				UserID: "U040",
+				URL:    "https://example.com/retry",
+				Logs:   legacyMeta,
 			},
 		},
 	}
@@ -358,7 +360,7 @@ func TestSingleURLWorkerRetriesFailedTaskWithExistingJobID(t *testing.T) {
 	}
 	var encoded string
 	for _, call := range client.updateCalls {
-		if val, ok := call.fields[feishusdk.DefaultTaskFields.Extra]; ok {
+		if val, ok := call.fields[feishusdk.DefaultTaskFields.Logs]; ok {
 			if s, ok := val.(string); ok {
 				encoded = s
 			}
@@ -389,7 +391,7 @@ func TestSingleURLWorkerStopsAfterMaxAttempts(t *testing.T) {
 					BookID: "B070",
 					UserID: "U070",
 					URL:    "https://example.com/stop",
-					Extra:  encodeSingleURLMetadata(meta),
+					Logs:   encodeSingleURLMetadata(meta),
 				},
 			},
 		},
@@ -414,7 +416,7 @@ func TestSingleURLWorkerStopsAfterMaxAttempts(t *testing.T) {
 	}
 	var encoded string
 	for _, call := range client.updateCalls {
-		if val, ok := call.fields[feishusdk.DefaultTaskFields.Extra]; ok {
+		if val, ok := call.fields[feishusdk.DefaultTaskFields.Logs]; ok {
 			if s, ok := val.(string); ok {
 				encoded = s
 			}
@@ -492,9 +494,9 @@ func (c *singleURLTestClient) applyFieldUpdates(taskID int64, fields map[string]
 					rows[idx].Status = fmt.Sprint(value)
 				case feishusdk.DefaultTaskFields.Webhook:
 					rows[idx].Webhook = fmt.Sprint(value)
-				case feishusdk.DefaultTaskFields.Extra:
+				case feishusdk.DefaultTaskFields.Logs:
 					if str, ok := value.(string); ok {
-						rows[idx].Extra = str
+						rows[idx].Logs = str
 					}
 				case feishusdk.DefaultTaskFields.GroupID:
 					rows[idx].GroupID = fmt.Sprint(value)

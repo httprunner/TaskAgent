@@ -363,7 +363,8 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 		reason := fmt.Sprintf("missing fields: %s", strings.Join(missingFields, ","))
 		return w.failSingleURLTask(ctx, task, reason, nil)
 	}
-	meta := decodeSingleURLMetadata(task.Extra)
+	// Metadata for single_url_capture tasks is stored in Logs.
+	meta := decodeSingleURLMetadata(task.Logs)
 	if meta.reachedRetryCap(singleURLMaxAttempts) {
 		reason := fmt.Sprintf("retry limit reached after %d attempts", meta.attemptsWithJobID())
 		if latest := meta.latestAttempt(); latest != nil {
@@ -430,7 +431,7 @@ func (w *SingleURLWorker) reconcileSingleURLTask(ctx context.Context, task *Feis
 	if task == nil {
 		return errors.New("single url worker: nil task")
 	}
-	meta := decodeSingleURLMetadata(task.Extra)
+	meta := decodeSingleURLMetadata(task.Logs)
 	jobID := meta.latestJobID()
 	if jobID == "" {
 		return w.failSingleURLTask(ctx, task, "missing job_id for queued task", nil)
@@ -488,16 +489,16 @@ func (w *SingleURLWorker) updateTaskExtra(ctx context.Context, task *FeishuTask,
 	if err != nil {
 		return err
 	}
-	extraField := strings.TrimSpace(table.Fields.Extra)
-	if extraField == "" {
+	logsField := strings.TrimSpace(table.Fields.Logs)
+	if logsField == "" {
 		return nil
 	}
 	encoded := encodeSingleURLMetadata(meta)
-	payload := map[string]any{extraField: encoded}
+	payload := map[string]any{logsField: encoded}
 	if err := taskagent.UpdateTaskFields(ctx, task, payload); err != nil {
 		return err
 	}
-	task.Extra = encoded
+	task.Logs = encoded
 	return nil
 }
 
@@ -511,11 +512,15 @@ func (w *SingleURLWorker) failSingleURLTask(ctx context.Context, task *FeishuTas
 	if statusField != "" {
 		fields[statusField] = feishusdk.StatusFailed
 	}
-	if extraField := strings.TrimSpace(table.Fields.Extra); extraField != "" {
+	if logsField := strings.TrimSpace(table.Fields.Logs); logsField != "" {
+		encoded := ""
 		if meta != nil {
-			fields[extraField] = encodeSingleURLMetadata(*meta)
+			encoded = encodeSingleURLMetadata(*meta)
 		} else {
-			fields[extraField] = reason
+			encoded = strings.TrimSpace(reason)
+		}
+		if encoded != "" {
+			fields[logsField] = encoded
 		}
 	}
 	if len(fields) == 0 {
@@ -525,10 +530,10 @@ func (w *SingleURLWorker) failSingleURLTask(ctx context.Context, task *FeishuTas
 		return err
 	}
 	task.Status = feishusdk.StatusFailed
-	if extra, ok := fields[strings.TrimSpace(table.Fields.Extra)].(string); ok {
-		task.Extra = extra
-	} else {
-		task.Extra = reason
+	if logsField := strings.TrimSpace(table.Fields.Logs); logsField != "" {
+		if logs, ok := fields[logsField].(string); ok {
+			task.Logs = logs
+		}
 	}
 	return nil
 }
@@ -543,8 +548,8 @@ func (w *SingleURLWorker) markSingleURLTaskError(ctx context.Context, task *Feis
 	if statusField != "" {
 		fields[statusField] = feishusdk.StatusError
 	}
-	if extraField := strings.TrimSpace(table.Fields.Extra); extraField != "" {
-		fields[extraField] = encodeSingleURLMetadata(meta)
+	if logsField := strings.TrimSpace(table.Fields.Logs); logsField != "" {
+		fields[logsField] = encodeSingleURLMetadata(meta)
 	}
 	if len(fields) == 0 {
 		return errors.New("single url worker: no fields to update for error state")
@@ -553,9 +558,9 @@ func (w *SingleURLWorker) markSingleURLTaskError(ctx context.Context, task *Feis
 		return err
 	}
 	task.Status = feishusdk.StatusError
-	if extraField := strings.TrimSpace(table.Fields.Extra); extraField != "" {
-		if val, ok := fields[extraField].(string); ok {
-			task.Extra = val
+	if logsField := strings.TrimSpace(table.Fields.Logs); logsField != "" {
+		if val, ok := fields[logsField].(string); ok {
+			task.Logs = val
 		}
 	}
 	return nil
@@ -579,8 +584,8 @@ func (w *SingleURLWorker) markSingleURLTaskQueued(ctx context.Context, task *Fei
 	if groupField := strings.TrimSpace(table.Fields.GroupID); groupField != "" && strings.TrimSpace(groupID) != "" {
 		fields[groupField] = groupID
 	}
-	if extraField := strings.TrimSpace(table.Fields.Extra); extraField != "" {
-		fields[extraField] = encodeSingleURLMetadata(meta)
+	if logsField := strings.TrimSpace(table.Fields.Logs); logsField != "" {
+		fields[logsField] = encodeSingleURLMetadata(meta)
 	}
 	if dispatchedField := strings.TrimSpace(table.Fields.DispatchedAt); dispatchedField != "" {
 		fields[dispatchedField] = nowMillis
@@ -598,8 +603,10 @@ func (w *SingleURLWorker) markSingleURLTaskQueued(ctx context.Context, task *Fei
 	if strings.TrimSpace(groupID) != "" {
 		task.GroupID = groupID
 	}
-	if extra, ok := fields[strings.TrimSpace(table.Fields.Extra)].(string); ok {
-		task.Extra = extra
+	if logsField := strings.TrimSpace(table.Fields.Logs); logsField != "" {
+		if logs, ok := fields[logsField].(string); ok {
+			task.Logs = logs
+		}
 	}
 	updateTimestampFields(task, now, nowMillis)
 	return nil

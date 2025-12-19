@@ -579,8 +579,8 @@ func buildSingleURLCaptureRecordsFromTasks(tasks []taskagent.FeishuTaskRow, task
 		if key := strings.TrimSpace(fields.UserName); key != "" && strings.TrimSpace(t.UserName) != "" {
 			recordFields[key] = strings.TrimSpace(t.UserName)
 		}
-		if key := strings.TrimSpace(fields.Extra); key != "" && strings.TrimSpace(t.Extra) != "" {
-			recordFields[key] = strings.TrimSpace(t.Extra)
+		if key := strings.TrimSpace(fields.Extra); key != "" && strings.TrimSpace(t.Logs) != "" {
+			recordFields[key] = strings.TrimSpace(t.Logs)
 		}
 		// Use BookID or TaskID as a stable synthetic ItemID so downstream
 		// payloads can still leverage ItemID-based grouping when needed.

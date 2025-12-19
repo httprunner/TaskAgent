@@ -681,6 +681,7 @@ func FetchFeishuTasksWithFilter(ctx context.Context, client TargetTableClient, b
 			OriginalStatus:   row.Status,
 			Webhook:          row.Webhook,
 			Extra:            row.Extra,
+			Logs:             row.Logs,
 			DeviceSerial:     row.DeviceSerial,
 			DispatchedDevice: row.DispatchedDevice,
 			StartAt:          row.StartAt,

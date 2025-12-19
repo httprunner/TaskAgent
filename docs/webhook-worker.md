@@ -106,6 +106,9 @@ worker 定时轮询 webhook 结果表：
      - 结果表仅提供单个 TaskID（写入 `TaskIDs` 文本字段）；worker 需要回查任务表拿到该 TaskID 的 `App/Scene/Params/ItemID/...`
      - `Records`：按 “`Scene=视频录屏采集` + `ItemID`” 查询采集结果表，仅取最新 1 条
      - `Drama`：可先为空或由 Params 兜底（当前 BookID 为空，暂不强依赖剧单表）
+   - `BizType=single_url_capture`：
+     - 直接使用任务表中的行构造 capture records；
+     - 单链任务的内部日志从任务表 `Logs` 字段读取，并写入 webhook payload 中 `records[*].Extra` 字段，作为下游 webhook 的日志来源。
 4. 状态回写：
    - 首次开始处理：写 `StartAt`（后续重试不更新）
    - 每次处理结束：更新 `EndAt`、`LastError`
