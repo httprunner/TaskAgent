@@ -967,35 +967,73 @@ func (w *WebhookResultWorker) fetchTasksByIDs(ctx context.Context, taskIDs []int
 	if taskIDField == "" {
 		return nil, errors.New("task table TaskID field mapping is empty")
 	}
-	filter := taskagent.NewFeishuFilterInfo("or")
+	// Feishu 限制 filter.conditions 最大长度为 50（错误码 99992402，field_violations.filter.conditions），
+	// 因此需要按 TaskID 分片查询，再在客户端聚合结果。
+	seen := make(map[int64]struct{}, len(taskIDs))
+	unique := make([]int64, 0, len(taskIDs))
 	for _, id := range taskIDs {
 		if id <= 0 {
 			continue
 		}
-		filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(taskIDField, "is", fmt.Sprintf("%d", id)))
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
 	}
-	if len(filter.Conditions) == 0 {
+	if len(unique) == 0 {
 		return nil, nil
 	}
-	limit := len(filter.Conditions) * 200
-	if limit < 200 {
-		limit = 200
+
+	const maxConditions = 50
+	result := make([]taskagent.FeishuTaskRow, 0, len(unique))
+	resultByID := make(map[int64]taskagent.FeishuTaskRow, len(unique))
+
+	for start := 0; start < len(unique); start += maxConditions {
+		end := start + maxConditions
+		if end > len(unique) {
+			end = len(unique)
+		}
+		chunk := unique[start:end]
+
+		filter := taskagent.NewFeishuFilterInfo("or")
+		for _, id := range chunk {
+			filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(taskIDField, "is", fmt.Sprintf("%d", id)))
+		}
+		if len(filter.Conditions) == 0 {
+			continue
+		}
+
+		limit := len(filter.Conditions) * 200
+		if limit < 200 {
+			limit = 200
+		}
+		if limit > 2000 {
+			limit = 2000
+		}
+		table, err := w.taskClient.FetchTaskTableWithOptions(ctx, w.taskTableURL, nil, &taskagent.FeishuTaskQueryOptions{
+			Filter:     filter,
+			Limit:      limit,
+			IgnoreView: true,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if table == nil || len(table.Rows) == 0 {
+			continue
+		}
+		for _, row := range table.Rows {
+			if row.TaskID <= 0 {
+				continue
+			}
+			if _, ok := resultByID[row.TaskID]; ok {
+				continue
+			}
+			resultByID[row.TaskID] = row
+			result = append(result, row)
+		}
 	}
-	if limit > 2000 {
-		limit = 2000
-	}
-	table, err := w.taskClient.FetchTaskTableWithOptions(ctx, w.taskTableURL, nil, &taskagent.FeishuTaskQueryOptions{
-		Filter:     filter,
-		Limit:      limit,
-		IgnoreView: true,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if table == nil {
-		return nil, nil
-	}
-	return table.Rows, nil
+	return result, nil
 }
 
 func ptrString(v string) *string { return &v }
