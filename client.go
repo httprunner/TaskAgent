@@ -23,6 +23,19 @@ import (
 // FeishuTaskClientOptions customizes Feishu task fetching behavior.
 type FeishuTaskClientOptions struct {
 	AllowedScenes []string
+	DatePolicy    TaskDatePolicy
+}
+
+const (
+	TaskDateToday     = "Today"
+	TaskDateYesterday = "Yesterday"
+)
+
+// TaskDatePolicy controls how Feishu tasks are fetched by date preset.
+// Primary is attempted first; Fallback presets are tried in order only if Primary yields no tasks.
+type TaskDatePolicy struct {
+	Primary  string
+	Fallback []string
 }
 
 // NewFeishuTaskClient constructs a reusable client for fetching and updating Feishu tasks.
@@ -49,6 +62,7 @@ func NewFeishuTaskClientWithOptions(bitableURL string, opts FeishuTaskClientOpti
 		bitableURL:    bitableURL,
 		mirror:        mirror,
 		allowedScenes: normalizeAllowedScenes(opts.AllowedScenes),
+		datePolicy:    normalizeDatePolicy(opts.DatePolicy),
 	}, nil
 }
 
@@ -58,6 +72,7 @@ type FeishuTaskClient struct {
 	clock         func() time.Time
 	mirror        *storage.TaskMirror
 	allowedScenes map[string]struct{}
+	datePolicy    TaskDatePolicy
 }
 
 func buildSceneSet(scenes []string) map[string]struct{} {
@@ -85,10 +100,33 @@ func normalizeAllowedScenes(scenes []string) map[string]struct{} {
 	return buildSceneSet(scenes)
 }
 
+func normalizeDatePolicy(policy TaskDatePolicy) TaskDatePolicy {
+	if strings.TrimSpace(policy.Primary) == "" {
+		policy.Primary = TaskDateToday
+	}
+	return policy
+}
+
 func (c *FeishuTaskClient) FetchAvailableTasks(ctx context.Context, app string, limit int) ([]*Task, error) {
-	feishuTasks, err := fetchTodayPendingFeishuTasks(ctx, c.client, c.bitableURL, app, limit, c.allowedScenes)
+	feishuTasks, err := fetchPendingFeishuTasksByDatePreset(
+		ctx, c.client, c.bitableURL, app, limit, c.allowedScenes, c.datePolicy.Primary)
 	if err != nil {
 		return nil, err
+	}
+	if len(feishuTasks) == 0 && len(c.datePolicy.Fallback) > 0 {
+		for _, preset := range c.datePolicy.Fallback {
+			if strings.TrimSpace(preset) == "" {
+				continue
+			}
+			feishuTasks, err = fetchPendingFeishuTasksByDatePreset(
+				ctx, c.client, c.bitableURL, app, limit, c.allowedScenes, preset)
+			if err != nil {
+				return nil, err
+			}
+			if len(feishuTasks) > 0 {
+				break
+			}
+		}
 	}
 	if err := c.syncTaskMirror(feishuTasks); err != nil {
 		return nil, err
@@ -496,6 +534,10 @@ var defaultDeviceScenes = []string{
 }
 
 func fetchTodayPendingFeishuTasks(ctx context.Context, client TargetTableClient, bitableURL, app string, limit int, allowedScenes map[string]struct{}) ([]*FeishuTask, error) {
+	return fetchPendingFeishuTasksByDatePreset(ctx, client, bitableURL, app, limit, allowedScenes, TaskDateToday)
+}
+
+func fetchPendingFeishuTasksByDatePreset(ctx context.Context, client TargetTableClient, bitableURL, app string, limit int, allowedScenes map[string]struct{}, datePreset string) ([]*FeishuTask, error) {
 	if client == nil {
 		return nil, errors.New("feishusdk: client is nil")
 	}
@@ -550,7 +592,7 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client TargetTableClient,
 				break
 			}
 		}
-		batch, err := FetchFeishuTasksWithStrategy(ctx, client, bitableURL, fields, app, []string{combo.status}, remaining, combo.scene)
+		batch, err := FetchFeishuTasksWithStrategy(ctx, client, bitableURL, fields, app, []string{combo.status}, remaining, combo.scene, datePreset)
 		if err != nil {
 			log.Warn().Err(err).Str("scene", combo.scene).Msg("fetch feishusdk tasks failed for scene; skipping")
 			continue
@@ -605,7 +647,7 @@ func fetchTodayPendingFeishuTasks(ctx context.Context, client TargetTableClient,
 	return result, nil
 }
 
-func FetchFeishuTasksWithStrategy(ctx context.Context, client TargetTableClient, bitableURL string, fields feishusdk.TaskFields, app string, statuses []string, limit int, scene string) ([]*FeishuTask, error) {
+func FetchFeishuTasksWithStrategy(ctx context.Context, client TargetTableClient, bitableURL string, fields feishusdk.TaskFields, app string, statuses []string, limit int, scene, datePreset string) ([]*FeishuTask, error) {
 	if len(statuses) == 0 {
 		return nil, nil
 	}
@@ -614,7 +656,7 @@ func FetchFeishuTasksWithStrategy(ctx context.Context, client TargetTableClient,
 		fetchLimit = maxFeishuTasksPerApp
 	}
 
-	filter := buildFeishuFilterInfo(fields, app, statuses, scene)
+	filter := buildFeishuFilterInfo(fields, app, statuses, scene, datePreset)
 	log.Debug().
 		Str("app", app).
 		Strs("statuses", statuses).
@@ -712,8 +754,8 @@ func FetchFeishuTasksWithFilter(ctx context.Context, client TargetTableClient, b
 	return tasks, nil
 }
 
-func buildFeishuFilterInfo(fields feishusdk.TaskFields, app string, statuses []string, scene string) *feishusdk.FilterInfo {
-	baseSpecs := buildFeishuBaseConditionSpecs(fields, app, scene)
+func buildFeishuFilterInfo(fields feishusdk.TaskFields, app string, statuses []string, scene, datePreset string) *feishusdk.FilterInfo {
+	baseSpecs := buildFeishuBaseConditionSpecs(fields, app, scene, datePreset)
 	statusChildren := buildFeishuStatusChildren(fields, statuses, baseSpecs)
 	if len(statusChildren) > 0 {
 		filter := feishusdk.NewFilterInfo("or")
@@ -816,7 +858,7 @@ func appendConditionsFromSpecs(dst []*feishusdk.Condition, specs []*feishuCondit
 	return dst
 }
 
-func buildFeishuBaseConditionSpecs(fields feishusdk.TaskFields, app, scene string) []*feishuConditionSpec {
+func buildFeishuBaseConditionSpecs(fields feishusdk.TaskFields, app, scene, datePreset string) []*feishuConditionSpec {
 	specs := make([]*feishuConditionSpec, 0, 3)
 	if field := strings.TrimSpace(fields.App); field != "" && strings.TrimSpace(app) != "" {
 		specs = append(specs, newFeishuConditionSpec(field, "is", strings.TrimSpace(app)))
@@ -825,7 +867,11 @@ func buildFeishuBaseConditionSpecs(fields feishusdk.TaskFields, app, scene strin
 		specs = append(specs, newFeishuConditionSpec(field, "is", strings.TrimSpace(scene)))
 	}
 	if field := strings.TrimSpace(fields.Datetime); field != "" {
-		specs = append(specs, newFeishuConditionSpec(field, "is", "Today"))
+		preset := strings.TrimSpace(datePreset)
+		if preset == "" {
+			preset = TaskDateToday
+		}
+		specs = append(specs, newFeishuConditionSpec(field, "is", preset))
 	}
 	return specs
 }

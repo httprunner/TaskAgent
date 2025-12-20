@@ -330,7 +330,9 @@ func (w *SingleURLWorker) fetchSingleURLTasks(ctx context.Context, statuses []st
 				break
 			}
 		}
-		subset, err := taskagent.FetchFeishuTasksWithStrategy(ctx, w.client, w.bitableURL, fields, "", []string{status}, remaining, taskagent.SceneSingleURLCapture)
+		subset, err := taskagent.FetchFeishuTasksWithStrategy(
+			ctx, w.client, w.bitableURL, fields, "", []string{status},
+			remaining, taskagent.SceneSingleURLCapture, taskagent.TaskDateToday)
 		if err != nil {
 			log.Warn().Err(err).
 				Str("status", status).

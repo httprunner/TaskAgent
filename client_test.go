@@ -32,7 +32,7 @@ func TestFetchFeishuTasksWithStrategyFiltersInvalidTasks(t *testing.T) {
 		},
 	}
 
-	tasks, err := FetchFeishuTasksWithStrategy(ctx, client, "https://example.com/bitable/abc", feishusdk.DefaultTaskFields, "com.app", []string{""}, 5, "")
+	tasks, err := FetchFeishuTasksWithStrategy(ctx, client, "https://example.com/bitable/abc", feishusdk.DefaultTaskFields, "com.app", []string{""}, 5, "", TaskDateToday)
 	if err != nil {
 		t.Fatalf("fetchFeishuTasksWithStrategy returned error: %v", err)
 	}
@@ -385,7 +385,7 @@ func (c *appendScreenshotClient) BatchGetBitableRows(ctx context.Context, ref fe
 
 func TestBuildFeishuFilterInfoWithStatusesEmbedsBaseConditions(t *testing.T) {
 	fields := feishusdk.DefaultTaskFields
-	filter := buildFeishuFilterInfo(fields, "com.app", []string{feishusdk.StatusPending, feishusdk.StatusPending}, SceneSingleURLCapture)
+	filter := buildFeishuFilterInfo(fields, "com.app", []string{feishusdk.StatusPending, feishusdk.StatusPending}, SceneSingleURLCapture, TaskDateToday)
 	if filter == nil {
 		t.Fatalf("expected filter, got nil")
 	}
@@ -398,13 +398,13 @@ func TestBuildFeishuFilterInfoWithStatusesEmbedsBaseConditions(t *testing.T) {
 	child := filter.Children[0]
 	assertConditionValue(t, child.Conditions, fields.App, "com.app")
 	assertConditionValue(t, child.Conditions, fields.Scene, SceneSingleURLCapture)
-	assertConditionValue(t, child.Conditions, fields.Datetime, "Today")
+	assertConditionValue(t, child.Conditions, fields.Datetime, TaskDateToday)
 	assertConditionValue(t, child.Conditions, fields.Status, feishusdk.StatusPending)
 }
 
 func TestBuildFeishuFilterInfoBlankStatusAddsVariants(t *testing.T) {
 	fields := feishusdk.DefaultTaskFields
-	filter := buildFeishuFilterInfo(fields, "", []string{""}, SceneSingleURLCapture)
+	filter := buildFeishuFilterInfo(fields, "", []string{""}, SceneSingleURLCapture, TaskDateToday)
 	if filter == nil {
 		t.Fatalf("expected filter, got nil")
 	}
@@ -423,7 +423,7 @@ func TestBuildFeishuFilterInfoBlankStatusAddsVariants(t *testing.T) {
 			opSeen[strings.ToLower(strings.TrimSpace(*cond.Operator))] = struct{}{}
 		}
 		assertConditionValue(t, child.Conditions, fields.Scene, SceneSingleURLCapture)
-		assertConditionValue(t, child.Conditions, fields.Datetime, "Today")
+		assertConditionValue(t, child.Conditions, fields.Datetime, TaskDateToday)
 	}
 	if len(opSeen) != 2 {
 		t.Fatalf("expected both isEmpty and is operators, got %v", opSeen)
@@ -438,7 +438,7 @@ func TestBuildFeishuFilterInfoBlankStatusAddsVariants(t *testing.T) {
 
 func TestBuildFeishuFilterInfoWithoutStatusesUsesBaseConditions(t *testing.T) {
 	fields := feishusdk.DefaultTaskFields
-	filter := buildFeishuFilterInfo(fields, "com.app", nil, SceneSingleURLCapture)
+	filter := buildFeishuFilterInfo(fields, "com.app", nil, SceneSingleURLCapture, TaskDateToday)
 	if filter == nil {
 		t.Fatalf("expected filter, got nil")
 	}
@@ -450,7 +450,7 @@ func TestBuildFeishuFilterInfoWithoutStatusesUsesBaseConditions(t *testing.T) {
 	}
 	assertConditionValue(t, filter.Conditions, fields.App, "com.app")
 	assertConditionValue(t, filter.Conditions, fields.Scene, SceneSingleURLCapture)
-	assertConditionValue(t, filter.Conditions, fields.Datetime, "Today")
+	assertConditionValue(t, filter.Conditions, fields.Datetime, TaskDateToday)
 }
 
 func assertConditionValue(t *testing.T, conds []*feishusdk.Condition, field, want string) {
