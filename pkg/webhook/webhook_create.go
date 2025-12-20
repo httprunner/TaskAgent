@@ -765,9 +765,9 @@ func (c *WebhookResultCreator) createSingleURLCaptureWebhookResults(ctx context.
 			}
 			groupID = fmt.Sprintf("%s_%s_%s", mappedApp, trimmedBook, trimmedUser)
 		}
-		day := strings.TrimSpace(c.scanDate)
+		day := dayString(row.Datetime, row.DatetimeRaw)
 		if day == "" {
-			day = dayString(row.Datetime, row.DatetimeRaw)
+			day = strings.TrimSpace(c.scanDate)
 		}
 		if strings.TrimSpace(day) == "" {
 			skipped++
