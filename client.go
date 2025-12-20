@@ -467,6 +467,14 @@ type TargetTableClient interface {
 	UpdateTaskFields(ctx context.Context, table *feishusdk.TaskTable, taskID int64, fields map[string]any) error
 }
 
+type bitableMediaUploader interface {
+	UploadBitableMedia(ctx context.Context, appToken string, fileName string, content []byte, asImage bool) (string, error)
+}
+
+type bitableAttachmentFetcher interface {
+	BatchGetBitableRows(ctx context.Context, ref feishusdk.BitableRef, recordIDs []string, userIDType string) ([]feishusdk.BitableRow, error)
+}
+
 const (
 	maxFeishuTasksPerApp    = 5
 	SceneGeneralSearch      = "综合页搜索"
@@ -912,7 +920,6 @@ func UpdateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 			return errors.New("feishusdk: status field is not configured in task table")
 		}
 		dispatchedField := strings.TrimSpace(source.table.Fields.DispatchedDevice)
-		updateSerial := deviceSerial != "" && dispatchedField != ""
 		if deviceSerial != "" && dispatchedField == "" {
 			log.Warn().Msg("feishusdk task table missing DispatchedDevice column; skip binding device serial")
 		}
@@ -924,16 +931,17 @@ func UpdateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 		logsField := strings.TrimSpace(source.table.Fields.Logs)
 		retryField := strings.TrimSpace(source.table.Fields.RetryCount)
 		lastScreenshotField := strings.TrimSpace(source.table.Fields.LastScreenShot)
-		type bitableMediaUploader interface {
-			UploadBitableMedia(ctx context.Context, appToken string, fileName string, content []byte, asImage bool) (string, error)
-		}
-		uploader, canUploadScreenshot := source.client.(bitableMediaUploader)
 		var logsValue string
 		if meta != nil {
 			logsValue = strings.TrimSpace(meta.Logs)
 		}
 
+		updateSerial := strings.TrimSpace(deviceSerial) != "" && dispatchedField != ""
+		updatedTasks := make([]*FeishuTask, 0, len(subset))
 		for _, task := range subset {
+			if task == nil {
+				continue
+			}
 			fields := map[string]any{
 				statusField: status,
 			}
@@ -978,33 +986,143 @@ func UpdateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 				errs = append(errs, fmt.Sprintf("task %d: %v", task.TaskID, err))
 				continue
 			}
+			updatedTasks = append(updatedTasks, task)
+		}
 
-			if lastScreenshotField == "" || !canUploadScreenshot || task == nil || task.TaskRef == nil {
+		if lastScreenshotField == "" || len(updatedTasks) == 0 {
+			continue
+		}
+
+		handleTaskScreenshotsForSource(ctx, source, updatedTasks, lastScreenshotField)
+	}
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func readAndUploadScreenshot(
+	ctx context.Context,
+	uploader bitableMediaUploader,
+	appToken string,
+	taskID int64,
+	path string,
+) (string, string, bool) {
+	raw, readErr := os.ReadFile(path)
+	if readErr != nil {
+		log.Warn().Err(readErr).Str("path", path).Msg("read last screenshot failed; skip reporting")
+		return "", "", false
+	}
+	content, ext := compressImageIfNeeded(raw)
+	fileName := fmt.Sprintf("last_screenshot_task_%d%s", taskID, ext)
+	fileToken, uploadErr := uploader.UploadBitableMedia(ctx, appToken, fileName, content, true)
+	if uploadErr != nil {
+		log.Warn().Err(uploadErr).Str("path", path).Msg("upload last screenshot failed; skip reporting")
+		return "", "", false
+	}
+	token := strings.TrimSpace(fileToken)
+	if token == "" {
+		return "", "", false
+	}
+	return token, fileName, true
+}
+
+func lookupTaskRecordID(table *feishusdk.TaskTable, taskID int64) string {
+	if table == nil || taskID <= 0 {
+		return ""
+	}
+	if recordID, ok := table.RecordIDByTaskID(taskID); ok && strings.TrimSpace(recordID) != "" {
+		return strings.TrimSpace(recordID)
+	}
+	for _, row := range table.Rows {
+		if row.TaskID == taskID {
+			return strings.TrimSpace(row.RecordID)
+		}
+	}
+	return ""
+}
+
+func normalizeAttachmentList(value any) []map[string]any {
+	if value == nil {
+		return nil
+	}
+	switch v := value.(type) {
+	case []map[string]any:
+		out := make([]map[string]any, 0, len(v))
+		for _, item := range v {
+			if item == nil {
 				continue
 			}
-			path := strings.TrimSpace(task.TaskRef.LastScreenShotPath)
-			if path == "" {
+			token := item["file_token"]
+			if strings.TrimSpace(fmt.Sprint(token)) == "" {
 				continue
 			}
-			raw, readErr := os.ReadFile(path)
-			if readErr != nil {
-				log.Warn().Err(readErr).Str("path", path).Msg("read last screenshot failed; skip reporting")
+			out = append(out, item)
+		}
+		return out
+	case []interface{}:
+		out := make([]map[string]any, 0, len(v))
+		for _, item := range v {
+			m, ok := item.(map[string]any)
+			if !ok || m == nil {
 				continue
 			}
-			content, ext := compressImageIfNeeded(raw)
-			fileName := fmt.Sprintf("last_screenshot_task_%d%s", task.TaskID, ext)
-			fileToken, uploadErr := uploader.UploadBitableMedia(ctx, source.table.Ref.AppToken, fileName, content, true)
-			if uploadErr != nil {
-				log.Warn().Err(uploadErr).Str("path", path).Msg("upload last screenshot failed; skip reporting")
+			token := m["file_token"]
+			tokenStr := strings.TrimSpace(fmt.Sprint(token))
+			if tokenStr == "" {
 				continue
 			}
-			if strings.TrimSpace(fileToken) == "" {
-				continue
+			name := ""
+			if rawName, ok := m["name"]; ok {
+				name = fmt.Sprint(rawName)
 			}
+			out = append(out, map[string]any{
+				"file_token": tokenStr,
+				"name":       name,
+			})
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func handleTaskScreenshotsForSource(
+	ctx context.Context,
+	source *feishuTaskSource,
+	tasks []*FeishuTask,
+	lastScreenshotField string,
+) {
+	if source == nil || source.client == nil || source.table == nil || len(tasks) == 0 {
+		return
+	}
+
+	uploader, ok := source.client.(bitableMediaUploader)
+	if !ok {
+		return
+	}
+	fetcher, _ := source.client.(bitableAttachmentFetcher)
+
+	// First-run tasks: upload and overwrite; retries: fetch existing attachments then append.
+	for _, task := range tasks {
+		if task == nil || task.TaskRef == nil {
+			continue
+		}
+		path := strings.TrimSpace(task.TaskRef.LastScreenShotPath)
+		if path == "" {
+			continue
+		}
+
+		token, fileName, ok := readAndUploadScreenshot(ctx, uploader, source.table.Ref.AppToken, task.TaskID, path)
+		if !ok {
+			continue
+		}
+
+		if task.RetryCount <= 0 {
 			if err := source.client.UpdateTaskFields(ctx, source.table, task.TaskID, map[string]any{
 				lastScreenshotField: []map[string]any{
 					{
-						"file_token": strings.TrimSpace(fileToken),
+						"file_token": token,
 						"name":       filepath.Base(fileName),
 					},
 				},
@@ -1013,12 +1131,40 @@ func UpdateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 					Int64("task_id", task.TaskID).
 					Msg("update LastScreenShot field failed; skip reporting")
 			}
+			continue
+		}
+
+		// Retry: optionally fetch existing attachments for this task, then append.
+		var attachments []map[string]any
+		if fetcher != nil {
+			recordID := lookupTaskRecordID(source.table, task.TaskID)
+			if recordID == "" {
+				log.Warn().Int64("task_id", task.TaskID).
+					Msg("record id not found for task; upload screenshot without appending")
+			} else {
+				rows, err := fetcher.BatchGetBitableRows(ctx, source.table.Ref, []string{recordID}, "")
+				if err != nil {
+					log.Warn().Err(err).
+						Int64("task_id", task.TaskID).
+						Msg("fetch existing screenshot attachments failed; fallback to overwrite mode")
+				} else if len(rows) > 0 {
+					raw := rows[0].Fields[lastScreenshotField]
+					attachments = normalizeAttachmentList(raw)
+				}
+			}
+		}
+		attachments = append(attachments, map[string]any{
+			"file_token": token,
+			"name":       filepath.Base(fileName),
+		})
+		if err := source.client.UpdateTaskFields(ctx, source.table, task.TaskID, map[string]any{
+			lastScreenshotField: attachments,
+		}); err != nil {
+			log.Warn().Err(err).
+				Int64("task_id", task.TaskID).
+				Msg("update LastScreenShot field failed; skip reporting")
 		}
 	}
-	if len(errs) > 0 {
-		return errors.New(strings.Join(errs, "; "))
-	}
-	return nil
 }
 
 func compressImageIfNeeded(raw []byte) ([]byte, string) {

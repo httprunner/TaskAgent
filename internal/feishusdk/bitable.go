@@ -1360,6 +1360,23 @@ type BitableRow struct {
 	Fields   map[string]any
 }
 
+// BatchGetBitableRows wraps BatchGetBitableRecords and exposes BitableRow so
+// external packages can inspect arbitrary columns for a given record id set.
+func (c *Client) BatchGetBitableRows(ctx context.Context, ref BitableRef, recordIDs []string, userIDType string) ([]BitableRow, error) {
+	records, err := c.BatchGetBitableRecords(ctx, ref, recordIDs, userIDType)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]BitableRow, 0, len(records))
+	for _, rec := range records {
+		rows = append(rows, BitableRow{
+			RecordID: rec.RecordID,
+			Fields:   rec.Fields,
+		})
+	}
+	return rows, nil
+}
+
 func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSize int, opts *TaskQueryOptions) ([]bitableRecord, error) {
 	if strings.TrimSpace(ref.AppToken) == "" {
 		return nil, errors.New("feishu: bitable app token is empty")

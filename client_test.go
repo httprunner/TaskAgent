@@ -361,6 +361,28 @@ func (r *recordingTargetClient) UploadBitableMedia(ctx context.Context, appToken
 	return "file-token-123", nil
 }
 
+type appendScreenshotClient struct {
+	recordingTargetClient
+}
+
+func (c *appendScreenshotClient) BatchGetBitableRows(ctx context.Context, ref feishusdk.BitableRef, recordIDs []string, userIDType string) ([]feishusdk.BitableRow, error) {
+	rows := make([]feishusdk.BitableRow, 0, len(recordIDs))
+	for _, id := range recordIDs {
+		rows = append(rows, feishusdk.BitableRow{
+			RecordID: id,
+			Fields: map[string]any{
+				feishusdk.DefaultTaskFields.LastScreenShot: []map[string]any{
+					{
+						"file_token": "old-file-token",
+						"name":       "old.png",
+					},
+				},
+			},
+		})
+	}
+	return rows, nil
+}
+
 func TestBuildFeishuFilterInfoWithStatusesEmbedsBaseConditions(t *testing.T) {
 	fields := feishusdk.DefaultTaskFields
 	filter := buildFeishuFilterInfo(fields, "com.app", []string{feishusdk.StatusPending, feishusdk.StatusPending}, SceneSingleURLCapture)
@@ -574,8 +596,10 @@ func TestUpdateFeishuTaskStatusesAssignsLastScreenShot(t *testing.T) {
 
 	client := &recordingTargetClient{}
 	table := &feishusdk.TaskTable{
-		Ref:    feishusdk.BitableRef{AppToken: "app", TableID: "tbl"},
-		Fields: feishusdk.DefaultTaskFields,
+		Ref:     feishusdk.BitableRef{AppToken: "app", TableID: "tbl"},
+		Fields:  feishusdk.DefaultTaskFields,
+		Rows:    []feishusdk.TaskRow{{RecordID: "rec-4", TaskID: 4, Status: feishusdk.StatusPending}},
+		Invalid: nil,
 	}
 	dir := t.TempDir()
 	screenshotPath := filepath.Join(dir, "last.png")
@@ -611,6 +635,60 @@ func TestUpdateFeishuTaskStatusesAssignsLastScreenShot(t *testing.T) {
 			}
 			found = true
 		}
+	}
+	if !found {
+		t.Fatalf("expected update payload to contain %s", lastField)
+	}
+}
+
+func TestUpdateFeishuTaskStatusesAppendsLastScreenShotOnRetry(t *testing.T) {
+	t.Setenv("SCREENSHOT_COMPRESS_MIN_BYTES", "1")
+
+	client := &appendScreenshotClient{}
+	table := &feishusdk.TaskTable{
+		Ref:    feishusdk.BitableRef{AppToken: "app", TableID: "tbl"},
+		Fields: feishusdk.DefaultTaskFields,
+		Rows:   []feishusdk.TaskRow{{RecordID: "rec-5", TaskID: 5, Status: feishusdk.StatusPending}},
+	}
+	dir := t.TempDir()
+	screenshotPath := filepath.Join(dir, "last.png")
+	if err := os.WriteFile(screenshotPath, []byte("pngdata"), 0o644); err != nil {
+		t.Fatalf("write screenshot file failed: %v", err)
+	}
+
+	task := &FeishuTask{
+		TaskID:     5,
+		RetryCount: 1,
+		TaskRef: &Task{
+			LastScreenShotPath: screenshotPath,
+		},
+		source: &feishuTaskSource{
+			client: client,
+			table:  table,
+		},
+	}
+	if err := UpdateFeishuTaskStatuses(context.Background(), []*FeishuTask{task}, feishusdk.StatusSuccess, "", nil); err != nil {
+		t.Fatalf("updateFeishuTaskStatuses returned error: %v", err)
+	}
+
+	lastField := feishusdk.DefaultTaskFields.LastScreenShot
+	var found bool
+	for _, upd := range client.updates {
+		v, ok := upd[lastField]
+		if !ok {
+			continue
+		}
+		list, ok := v.([]map[string]any)
+		if !ok || len(list) != 2 {
+			t.Fatalf("expected screenshot field to be attachment list with 2 items, got %T=%v", v, v)
+		}
+		if got := list[0]["file_token"]; got != "old-file-token" {
+			t.Fatalf("expected first file_token to be %q, got %v", "old-file-token", got)
+		}
+		if got := list[1]["file_token"]; got != "file-token-123" {
+			t.Fatalf("expected second file_token to be %q, got %v", "file-token-123", got)
+		}
+		found = true
 	}
 	if !found {
 		t.Fatalf("expected update payload to contain %s", lastField)
