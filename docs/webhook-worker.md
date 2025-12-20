@@ -88,6 +88,9 @@ Webhook 结果表用于存储 webhook 的关联信息和推送结果，核心字
 - `Datetime is ExactDate(YYYY-MM-DD)`（若配置了 `ScanDate`）
 - `Status in {"success","failed","error"}`（通过 `children(or)` 组合实现）
 
+如果希望常驻进程**仅扫描当天任务**，可配置 `WebhookResultCreatorConfig.ScanDateToday=true`。
+creator 会在每轮扫描前把 `ScanDate` 更新为本地当天日期，从而只拉取当天的单链任务。
+
 注意：若任务表中 `Scene`/`Status` 是单选（枚举）字段，且其选项里不包含上述 value（最常见是 `Status` 没有 `error` 选项），Feishu 会返回 `code=1254018 msg=InvalidFilter`，导致本轮扫描失败。此时请在任务表中补齐对应枚举选项（确保 `Scene`/`Status` 的选项包含筛选值），再开启该功能。
 
 ### 轮询/处理逻辑（WebhookResultWorker）

@@ -290,6 +290,9 @@ type WebhookResultCreatorConfig struct {
 	// ScanDate applies Datetime=ExactDate(YYYY-MM-DD, local time) filter when querying Feishu.
 	// When empty, no Datetime filter is applied.
 	ScanDate string
+	// ScanDateToday overwrites ScanDate with today's local date on each iteration.
+	// When true, the creator only scans tasks for the current day.
+	ScanDateToday bool
 
 	// EnableSingleURLCapture enables creating rows for Scene=单个链接采集
 	// (BizType=single_url_capture). Rows are keyed by (GroupID, DatetimeDay).
@@ -329,6 +332,7 @@ type WebhookResultCreator struct {
 	enableSU     bool
 	bizType      string
 	skipExisting bool
+	scanDateToday bool
 
 	// seen avoids creating duplicate webhook result rows for the same TaskID
 	// within a single long-running creator process.
@@ -375,6 +379,7 @@ func NewWebhookResultCreator(cfg WebhookResultCreatorConfig) (*WebhookResultCrea
 		enableSU:     enableSU,
 		bizType:      bizType,
 		skipExisting: cfg.SkipExisting,
+		scanDateToday: cfg.ScanDateToday,
 		seen:         make(map[int64]time.Time),
 	}, nil
 }
@@ -401,6 +406,7 @@ func (c *WebhookResultCreator) Run(ctx context.Context) error {
 		Bool("enable_single_url_capture", c.enableSU).
 		Msg("webhook result creator started")
 
+	c.refreshScanDate()
 	if err := c.processOnce(ctx); err != nil {
 		log.Error().Err(err).Msg("webhook result creator scan failed")
 	}
@@ -413,6 +419,7 @@ func (c *WebhookResultCreator) Run(ctx context.Context) error {
 			log.Info().Msg("webhook result creator stopped")
 			return ctx.Err()
 		case <-ticker.C:
+			c.refreshScanDate()
 			if err := c.processOnce(ctx); err != nil {
 				log.Error().Err(err).Msg("webhook result creator scan failed")
 			}
@@ -437,7 +444,15 @@ func (c *WebhookResultCreator) RunOnce(ctx context.Context) error {
 		Bool("enable_single_url_capture", c.enableSU).
 		Bool("run_once", true).
 		Msg("webhook result creator started")
+	c.refreshScanDate()
 	return c.processOnce(ctx)
+}
+
+func (c *WebhookResultCreator) refreshScanDate() {
+	if c == nil || !c.scanDateToday {
+		return
+	}
+	c.scanDate = time.Now().In(time.Local).Format("2006-01-02")
 }
 
 func (c *WebhookResultCreator) processOnce(ctx context.Context) error {
