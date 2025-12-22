@@ -2,11 +2,13 @@ package webhook
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"time"
 
 	taskagent "github.com/httprunner/TaskAgent"
+	"github.com/rs/zerolog/log"
 )
 
 // WebhookTaskPrioritizer caches TaskIDs from pending/failed webhook rows.
@@ -40,15 +42,17 @@ func NewWebhookTaskPrioritizer(tableURL string, batchLimit int, ttl time.Duratio
 // When limit > 0, it truncates the list to the given size.
 func (p *WebhookTaskPrioritizer) ListTaskIDs(ctx context.Context, limit int) ([]int64, error) {
 	if p == nil || strings.TrimSpace(p.tableURL) == "" {
-		return nil, nil
+		return nil, errors.New("webhook task prioritizer is not configured")
 	}
 	ordered, err := p.snapshot(ctx)
 	if len(ordered) == 0 {
+		log.Warn().Msg("no webhook tasks available for prioritization")
 		return ordered, err
 	}
 	if limit > 0 && len(ordered) > limit {
 		ordered = ordered[:limit]
 	}
+	log.Info().Ints64("tasks", ordered).Msg("fetched webhook prioritized task IDs")
 	return ordered, err
 }
 
