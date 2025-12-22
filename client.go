@@ -24,11 +24,15 @@ import (
 type FeishuTaskClientOptions struct {
 	AllowedScenes []string
 	DatePolicy    TaskDatePolicy
+	NodeIndex     int
+	NodeTotal     int
 }
 
 const (
 	TaskDateToday     = "Today"
 	TaskDateYesterday = "Yesterday"
+	// TaskDateAny means no date constraint; used when callers pass explicit TaskIDs.
+	TaskDateAny = "Any"
 )
 
 // TaskDatePolicy controls how Feishu tasks are fetched by date preset.
@@ -57,12 +61,15 @@ func NewFeishuTaskClientWithOptions(bitableURL string, opts FeishuTaskClientOpti
 	if err != nil {
 		return nil, err
 	}
+	nodeIndex, nodeTotal := NormalizeShardConfig(opts.NodeIndex, opts.NodeTotal)
 	return &FeishuTaskClient{
 		client:        client,
 		bitableURL:    bitableURL,
 		mirror:        mirror,
 		allowedScenes: normalizeAllowedScenes(opts.AllowedScenes),
 		datePolicy:    normalizeDatePolicy(opts.DatePolicy),
+		nodeIndex:     nodeIndex,
+		nodeTotal:     nodeTotal,
 	}, nil
 }
 
@@ -73,6 +80,8 @@ type FeishuTaskClient struct {
 	mirror        *storage.TaskMirror
 	allowedScenes map[string]struct{}
 	datePolicy    TaskDatePolicy
+	nodeIndex     int
+	nodeTotal     int
 }
 
 func buildSceneSet(scenes []string) map[string]struct{} {
@@ -107,9 +116,24 @@ func normalizeDatePolicy(policy TaskDatePolicy) TaskDatePolicy {
 	return policy
 }
 
+// ShardConfig returns the shard config and whether sharding is enabled.
+func (c *FeishuTaskClient) ShardConfig() (int, int, bool) {
+	if c == nil || c.nodeTotal <= 1 {
+		return 0, 1, false
+	}
+	return c.nodeIndex, c.nodeTotal, true
+}
+
 func (c *FeishuTaskClient) FetchAvailableTasks(ctx context.Context, app string, limit int) ([]*Task, error) {
+	fetchLimit := limit
+	if c != nil && c.nodeTotal > 1 && limit > 0 {
+		fetchLimit = limit * c.nodeTotal
+		if fetchLimit < limit {
+			fetchLimit = limit
+		}
+	}
 	feishuTasks, err := fetchPendingFeishuTasksByDatePreset(
-		ctx, c.client, c.bitableURL, app, limit, c.allowedScenes, c.datePolicy.Primary)
+		ctx, c.client, c.bitableURL, app, fetchLimit, c.allowedScenes, c.datePolicy.Primary)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +143,7 @@ func (c *FeishuTaskClient) FetchAvailableTasks(ctx context.Context, app string, 
 				continue
 			}
 			feishuTasks, err = fetchPendingFeishuTasksByDatePreset(
-				ctx, c.client, c.bitableURL, app, limit, c.allowedScenes, preset)
+				ctx, c.client, c.bitableURL, app, fetchLimit, c.allowedScenes, preset)
 			if err != nil {
 				return nil, err
 			}
@@ -138,6 +162,9 @@ func (c *FeishuTaskClient) FetchAvailableTasks(ctx context.Context, app string, 
 			Payload:      t,
 			DeviceSerial: strings.TrimSpace(t.DeviceSerial),
 		})
+	}
+	if c != nil && c.nodeTotal > 1 {
+		return FilterTasksByShard(result, c.nodeIndex, c.nodeTotal, limit), nil
 	}
 	return result, nil
 }
@@ -868,10 +895,14 @@ func buildFeishuBaseConditionSpecs(fields feishusdk.TaskFields, app, scene, date
 	}
 	if field := strings.TrimSpace(fields.Datetime); field != "" {
 		preset := strings.TrimSpace(datePreset)
-		if preset == "" {
+		if strings.EqualFold(preset, TaskDateAny) {
+			// Skip date constraint for explicit TaskID queries.
+		} else if preset == "" {
 			preset = TaskDateToday
 		}
-		specs = append(specs, newFeishuConditionSpec(field, "is", preset))
+		if preset != "" {
+			specs = append(specs, newFeishuConditionSpec(field, "is", preset))
+		}
 	}
 	return specs
 }

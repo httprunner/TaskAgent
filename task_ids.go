@@ -7,15 +7,19 @@ import (
 
 	"github.com/httprunner/TaskAgent/internal/feishusdk"
 	"github.com/pkg/errors"
+	"github.com/rs/zerolog/log"
 )
 
-// FetchTasksByIDs returns tasks matched by TaskIDs, filtered by app/date policy and status.
+// FetchTasksByIDs returns tasks matched by TaskIDs, filtered by app and status.
 // Status filtering is limited to pending/failed to align with dispatch requirements.
 func (c *FeishuTaskClient) FetchTasksByIDs(ctx context.Context, app string, taskIDs []int64, limit int) ([]*Task, error) {
 	if c == nil {
 		return nil, errors.New("feishusdk: task client is nil")
 	}
-	feishuTasks, err := fetchFeishuTasksByIDsWithDatePolicy(ctx, c.client, c.bitableURL, app, taskIDs, limit, c.datePolicy)
+	log.Info().Str("app", app).Ints64("task_ids", taskIDs).Int("limit", limit).Msg("fetching tasks by IDs")
+
+	// Explicit TaskID queries should not be constrained by date presets
+	feishuTasks, err := fetchFeishuTasksByIDsWithDatePreset(ctx, c.client, c.bitableURL, app, taskIDs, limit, TaskDateAny)
 	if err != nil {
 		return nil, err
 	}
@@ -47,32 +51,6 @@ func (c *FeishuTaskClient) FetchTasksByIDs(ctx context.Context, app string, task
 		})
 	}
 	return result, nil
-}
-
-func fetchFeishuTasksByIDsWithDatePolicy(ctx context.Context, client TargetTableClient, bitableURL, app string, taskIDs []int64, limit int, policy TaskDatePolicy) ([]*FeishuTask, error) {
-	preset := strings.TrimSpace(policy.Primary)
-	if preset == "" {
-		preset = TaskDateToday
-	}
-	tasks, err := fetchFeishuTasksByIDsWithDatePreset(ctx, client, bitableURL, app, taskIDs, limit, preset)
-	if err != nil {
-		return nil, err
-	}
-	if len(tasks) == 0 && len(policy.Fallback) > 0 {
-		for _, fallback := range policy.Fallback {
-			if strings.TrimSpace(fallback) == "" {
-				continue
-			}
-			tasks, err = fetchFeishuTasksByIDsWithDatePreset(ctx, client, bitableURL, app, taskIDs, limit, fallback)
-			if err != nil {
-				return nil, err
-			}
-			if len(tasks) > 0 {
-				break
-			}
-		}
-	}
-	return tasks, nil
 }
 
 func fetchFeishuTasksByIDsWithDatePreset(ctx context.Context, client TargetTableClient, bitableURL, app string, taskIDs []int64, limit int, datePreset string) ([]*FeishuTask, error) {
