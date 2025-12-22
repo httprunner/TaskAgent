@@ -24,4 +24,3 @@ func TestEncodeTaskIDsForFeishu(t *testing.T) {
 		})
 	}
 }
-

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -520,38 +521,46 @@ func (a *DevicePoolAgent) handleTaskStarted(ctx context.Context, serial string, 
 	if a.deviceManager != nil {
 		meta = a.deviceManager.Meta(serial)
 	}
-	if a.deviceManager != nil {
-		a.deviceManager.MarkRunning(serial)
-	}
 	running := firstTaskID(job.tasks)
-	if running == "" && strings.TrimSpace(task.ID) != "" {
+	if running == "" {
 		running = strings.TrimSpace(task.ID)
 	}
-	if strings.TrimSpace(running) != "" {
+	if running == "" {
+		if ft, ok := task.Payload.(*FeishuTask); ok && ft != nil && ft.TaskID > 0 {
+			running = strconv.FormatInt(ft.TaskID, 10)
+		}
+	}
+	shouldUpdateDevice := strings.TrimSpace(running) != ""
+	if !shouldUpdateDevice {
+		log.Warn().Str("serial", serial).Msg("task started without valid task id; keep dispatched status")
+	} else {
 		job.started = true
 		job.runningTask = running
-	}
-	pending := remainingTaskIDs(job.tasks)
+		if a.deviceManager != nil {
+			a.deviceManager.MarkRunning(serial)
+		}
+		pending := remainingTaskIDs(job.tasks)
 
-	if a.recorder != nil {
-		if err := a.recorder.UpsertDevices(ctx, []DeviceInfoUpdate{{
-			DeviceSerial: serial,
-			Status:       string(statusRunning),
-			OSType:       meta.OSType,
-			OSVersion:    meta.OSVersion,
-			IsRoot:       meta.IsRoot,
-			ProviderUUID: meta.ProviderUUID,
-			AgentVersion: a.cfg.AgentVersion,
-			LastSeenAt:   now,
-			RunningTask:  running,
-			PendingTasks: pending,
-		}}); err != nil {
-			log.Error().
-				Err(err).
-				Str("serial", serial).
-				Str("running_task", running).
-				Strs("pending_tasks", pending).
-				Msg("device recorder update running task failed")
+		if a.recorder != nil {
+			if err := a.recorder.UpsertDevices(ctx, []DeviceInfoUpdate{{
+				DeviceSerial: serial,
+				Status:       string(statusRunning),
+				OSType:       meta.OSType,
+				OSVersion:    meta.OSVersion,
+				IsRoot:       meta.IsRoot,
+				ProviderUUID: meta.ProviderUUID,
+				AgentVersion: a.cfg.AgentVersion,
+				LastSeenAt:   now,
+				RunningTask:  running,
+				PendingTasks: pending,
+			}}); err != nil {
+				log.Error().
+					Err(err).
+					Str("serial", serial).
+					Str("running_task", running).
+					Strs("pending_tasks", pending).
+					Msg("device recorder update running task failed")
+			}
 		}
 	}
 	if notifier, ok := a.taskManager.(TaskStartNotifier); ok && notifier != nil {

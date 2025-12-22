@@ -325,13 +325,13 @@ type WebhookResultCreator struct {
 	taskClient   *taskagent.FeishuClient
 	taskTableURL string
 
-	appFilter    string
-	interval     time.Duration
-	batchLimit   int
-	scanDate     string
-	enableSU     bool
-	bizType      string
-	skipExisting bool
+	appFilter     string
+	interval      time.Duration
+	batchLimit    int
+	scanDate      string
+	enableSU      bool
+	bizType       string
+	skipExisting  bool
 	scanDateToday bool
 
 	// seen avoids creating duplicate webhook result rows for the same TaskID
@@ -369,18 +369,18 @@ func NewWebhookResultCreator(cfg WebhookResultCreatorConfig) (*WebhookResultCrea
 	}
 
 	return &WebhookResultCreator{
-		store:        store,
-		taskClient:   client,
-		taskTableURL: taskURL,
-		appFilter:    strings.TrimSpace(cfg.AppFilter),
-		interval:     interval,
-		batchLimit:   batch,
-		scanDate:     scanDate,
-		enableSU:     enableSU,
-		bizType:      bizType,
-		skipExisting: cfg.SkipExisting,
+		store:         store,
+		taskClient:    client,
+		taskTableURL:  taskURL,
+		appFilter:     strings.TrimSpace(cfg.AppFilter),
+		interval:      interval,
+		batchLimit:    batch,
+		scanDate:      scanDate,
+		enableSU:      enableSU,
+		bizType:       bizType,
+		skipExisting:  cfg.SkipExisting,
 		scanDateToday: cfg.ScanDateToday,
-		seen:         make(map[int64]time.Time),
+		seen:          make(map[int64]time.Time),
 	}, nil
 }
 
