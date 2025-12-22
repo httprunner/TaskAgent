@@ -81,8 +81,9 @@ type DeviceInfoUpdate struct {
 type deviceStatus string
 
 const (
-	deviceStatusIdle    deviceStatus = "idle"
-	deviceStatusRunning deviceStatus = "running"
+	deviceStatusIdle       deviceStatus = "idle"
+	deviceStatusDispatched deviceStatus = "dispatched"
+	deviceStatusRunning    deviceStatus = "running"
 )
 
 // deviceMeta 保存设备的静态信息。

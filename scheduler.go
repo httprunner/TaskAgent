@@ -47,8 +47,9 @@ type DevicePoolAgent struct {
 }
 
 const (
-	statusIdle    deviceStatus = deviceStatusIdle
-	statusRunning deviceStatus = deviceStatusRunning
+	statusIdle       deviceStatus = deviceStatusIdle
+	statusDispatched deviceStatus = deviceStatusDispatched
+	statusRunning    deviceStatus = deviceStatusRunning
 )
 
 type deviceJob struct {
@@ -57,6 +58,8 @@ type deviceJob struct {
 	cancel       context.CancelFunc
 	startAt      time.Time
 	lifecycle    *TaskLifecycle
+	runningTask  string
+	started      bool
 }
 
 type noopRecorder struct{}
@@ -313,7 +316,7 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 		pending := extractTaskIDs(assignment.tasks)
 		if err := a.recorder.UpsertDevices(ctx, []DeviceInfoUpdate{{
 			DeviceSerial: serial,
-			Status:       string(statusRunning),
+			Status:       string(statusDispatched),
 			OSType:       assignment.meta.OSType,
 			OSVersion:    assignment.meta.OSVersion,
 			IsRoot:       assignment.meta.IsRoot,
@@ -323,7 +326,7 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 			RunningTask:  "",
 			PendingTasks: pending,
 		}}); err != nil {
-			log.Error().Err(err).Str("serial", serial).Msg("device recorder update running state failed")
+			log.Error().Err(err).Str("serial", serial).Msg("device recorder update dispatch state failed")
 		}
 		log.Info().
 			Str("serial", serial).
@@ -348,9 +351,15 @@ func (a *DevicePoolAgent) snapshotJobTasks(serial string) (string, []string) {
 	if job == nil {
 		return "", nil
 	}
-	running := firstTaskID(job.tasks)
-	pending := remainingTaskIDs(job.tasks)
-	return running, pending
+	if job.started {
+		running := strings.TrimSpace(job.runningTask)
+		if running == "" {
+			running = firstTaskID(job.tasks)
+		}
+		pending := remainingTaskIDs(job.tasks)
+		return running, pending
+	}
+	return "", extractTaskIDs(job.tasks)
 }
 
 func (a *DevicePoolAgent) startDeviceJob(ctx context.Context, serial string, tasks []*Task) {
@@ -368,7 +377,7 @@ func (a *DevicePoolAgent) startDeviceJob(ctx context.Context, serial string, tas
 	a.jobsMu.Unlock()
 
 	if a.deviceManager != nil {
-		a.deviceManager.MarkRunning(serial)
+		a.deviceManager.MarkDispatched(serial)
 	}
 
 	a.backgroundGroup.Add(1)
@@ -511,9 +520,16 @@ func (a *DevicePoolAgent) handleTaskStarted(ctx context.Context, serial string, 
 	if a.deviceManager != nil {
 		meta = a.deviceManager.Meta(serial)
 	}
+	if a.deviceManager != nil {
+		a.deviceManager.MarkRunning(serial)
+	}
 	running := firstTaskID(job.tasks)
 	if running == "" && strings.TrimSpace(task.ID) != "" {
 		running = strings.TrimSpace(task.ID)
+	}
+	if strings.TrimSpace(running) != "" {
+		job.started = true
+		job.runningTask = running
 	}
 	pending := remainingTaskIDs(job.tasks)
 

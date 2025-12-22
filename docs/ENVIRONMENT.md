@@ -126,7 +126,7 @@ TaskAgent exposes per-table override knobs so you can align with custom schemas 
 | `DEVICE_FIELD_ISROOT` | `IsRoot` | Rooted flag. |
 | `DEVICE_FIELD_PROVIDERUUID` | `ProviderUUID` | Provider identifier when multiple pools share a table. |
 | `DEVICE_FIELD_AGENT_VERSION` | `AgentVersion` | Agent build string propagated via `Config.AgentVersion`. |
-| `DEVICE_FIELD_STATUS` | `Status` | idle/running/offline. |
+| `DEVICE_FIELD_STATUS` | `Status` | idle/dispatched/running/offline. |
 | `DEVICE_FIELD_LAST_SEEN_AT` / `DEVICE_FIELD_LAST_ERROR` | `LastSeenAt` / `LastError` | Health data. |
 | `DEVICE_FIELD_TAGS` | `Tags` | Optional labels. |
 | `DEVICE_FIELD_RUNNING_TASK` / `DEVICE_FIELD_PENDING_TASKS` | `RunningTask` / `PendingTasks` | Live task snapshot. `RunningTask` is stored as plain text; `PendingTasks` is stored as a comma-separated string in a text column (for example: `"44007,44008,44009"`).

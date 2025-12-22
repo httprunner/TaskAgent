@@ -88,12 +88,18 @@ func (m *deviceManager) Refresh(ctx context.Context, fetchMeta func(serial strin
 			log.Info().Str("serial", serial).Msg("device connected")
 		}
 		running, pending := "", ([]string)(nil)
+		reportStatus := string(dev.status)
 		if inspect != nil {
 			running, pending = inspect(serial)
+			if strings.TrimSpace(running) != "" {
+				reportStatus = string(deviceStatusRunning)
+			} else if len(pending) > 0 {
+				reportStatus = string(deviceStatusDispatched)
+			}
 		}
 		updates = append(updates, DeviceInfoUpdate{
 			DeviceSerial: serial,
-			Status:       string(dev.status),
+			Status:       reportStatus,
 			OSType:       dev.meta.OSType,
 			OSVersion:    dev.meta.OSVersion,
 			IsRoot:       dev.meta.IsRoot,
@@ -155,6 +161,15 @@ func (m *deviceManager) IdleDevices() []string {
 		}
 	}
 	return result
+}
+
+// MarkDispatched sets the device to dispatched state.
+func (m *deviceManager) MarkDispatched(serial string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if dev, ok := m.devices[serial]; ok {
+		dev.status = deviceStatusDispatched
+	}
 }
 
 // MarkRunning 将设备置为运行状态。
