@@ -55,8 +55,8 @@ func NewShardedTaskManagerWithOptions(bitableURL string, opts ShardedTaskManager
 		nodeIndex = feishuOpts.NodeIndex
 		nodeTotal = feishuOpts.NodeTotal
 	}
-	if provider, ok := base.(shardConfigProvider); ok {
-		if idx, total, enabled := provider.ShardConfig(); enabled {
+	if base != nil {
+		if idx, total, enabled := base.ShardConfig(); enabled {
 			nodeIndex = idx
 			nodeTotal = total
 		}
