@@ -40,14 +40,10 @@ func FilterTasksByShard(tasks []*Task, nodeIndex, nodeTotal, limit int) []*Task 
 			continue
 		}
 
-		taskNumericID := resolveTaskShardID(task, ft, nodeTotal)
-		if taskNumericID < 0 {
+		shardKey := ResolveShardIDForTaskRow(FeishuTaskRow{BookID: ft.BookID, App: ft.App})
+		shard := int(shardKey % int64(nodeTotal))
+		if shard == nodeIndex {
 			filtered = append(filtered, task)
-		} else {
-			shard := int(taskNumericID % int64(nodeTotal))
-			if shard == nodeIndex {
-				filtered = append(filtered, task)
-			}
 		}
 
 		if limit > 0 && len(filtered) >= limit {
@@ -58,31 +54,13 @@ func FilterTasksByShard(tasks []*Task, nodeIndex, nodeTotal, limit int) []*Task 
 	return filtered
 }
 
-func resolveTaskShardID(task *Task, ft *FeishuTask, nodeTotal int) int64 {
-	if nodeTotal > 1 && ft != nil {
-		bookID := strings.TrimSpace(ft.BookID)
-		app := strings.TrimSpace(ft.App)
-		if bookID != "" && app != "" {
-			key := bookID + "|" + app
-			hasher := fnv.New32a()
-			_, _ = hasher.Write([]byte(key))
-			return int64(hasher.Sum32())
-		}
-	}
-	return resolveTaskNumericID(task, ft)
-}
-
-func resolveTaskNumericID(task *Task, ft *FeishuTask) int64 {
-	if ft != nil && ft.TaskID > 0 {
-		return ft.TaskID
-	}
-	if task != nil {
-		id := strings.TrimSpace(task.ID)
-		if id != "" {
-			h := fnv.New32a()
-			_, _ = h.Write([]byte(id))
-			return int64(h.Sum32())
-		}
-	}
-	return -1
+// ResolveShardIDForTaskRow returns a stable shard key for webhook task rows.
+// It uses BookID+App as the sole sharding key.
+func ResolveShardIDForTaskRow(row FeishuTaskRow) int64 {
+	bookID := strings.TrimSpace(row.BookID)
+	app := strings.TrimSpace(row.App)
+	key := bookID + "|" + app
+	hasher := fnv.New32a()
+	_, _ = hasher.Write([]byte(key))
+	return int64(hasher.Sum32())
 }

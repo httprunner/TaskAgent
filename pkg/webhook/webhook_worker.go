@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"hash/fnv"
 	"sort"
 	"strconv"
 	"strings"
@@ -377,7 +376,8 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 			return w.markFailed(ctx, row, err)
 		}
 	case WebhookBizTypeVideoScreenCapture:
-		if !w.shouldHandleVideoScreenCapture(taskIDs) {
+		task := pickVideoScreenCaptureTask(tasks)
+		if !w.shouldHandleShard(task.BookID, task.App) {
 			log.Debug().
 				Str("record_id", strings.TrimSpace(row.RecordID)).
 				Str("group_id", strings.TrimSpace(row.GroupID)).
@@ -387,7 +387,6 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 				Msg("webhook: skip video screen capture row due to shard mismatch")
 			return nil
 		}
-		task := pickVideoScreenCaptureTask(tasks)
 		groupUserID := strings.TrimSpace(task.UserID)
 
 		records, err = fetchCaptureRecordsByTaskIDs(ctx, taskIDs, groupUserID)
@@ -965,36 +964,9 @@ func (w *WebhookResultWorker) shouldHandleShard(bookID, app string) bool {
 	if w == nil || w.nodeTotal <= 1 {
 		return true
 	}
-	bookID = strings.TrimSpace(bookID)
-	app = strings.TrimSpace(app)
-	if bookID == "" || app == "" {
-		return true
-	}
-	key := bookID + "|" + app
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(key))
-	shard := int(h.Sum32() % uint32(w.nodeTotal))
-	return shard == w.nodeIndex
-}
-
-func (w *WebhookResultWorker) shouldHandleVideoScreenCapture(taskIDs []int64) bool {
-	if w == nil || w.nodeTotal <= 1 {
-		return true
-	}
-	var keyID int64
-	for _, id := range taskIDs {
-		if id > 0 {
-			keyID = id
-			break
-		}
-	}
-	if keyID <= 0 {
-		// Fallback to no sharding when TaskIDs are empty or invalid.
-		return true
-	}
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(fmt.Sprintf("%d", keyID)))
-	shard := int(h.Sum32() % uint32(w.nodeTotal))
+	row := taskagent.FeishuTaskRow{BookID: bookID, App: app}
+	shardKey := taskagent.ResolveShardIDForTaskRow(row)
+	shard := int(shardKey % int64(w.nodeTotal))
 	return shard == w.nodeIndex
 }
 
