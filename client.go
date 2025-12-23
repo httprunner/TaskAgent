@@ -897,6 +897,7 @@ func buildFeishuBaseConditionSpecs(fields feishusdk.TaskFields, app, scene, date
 		preset := strings.TrimSpace(datePreset)
 		if strings.EqualFold(preset, TaskDateAny) {
 			// Skip date constraint for explicit TaskID queries.
+			preset = ""
 		} else if preset == "" {
 			preset = TaskDateToday
 		}

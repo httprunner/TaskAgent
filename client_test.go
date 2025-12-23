@@ -402,6 +402,22 @@ func TestBuildFeishuFilterInfoWithStatusesEmbedsBaseConditions(t *testing.T) {
 	assertConditionValue(t, child.Conditions, fields.Status, feishusdk.StatusPending)
 }
 
+func TestBuildFeishuFilterInfoTaskDateAnySkipsDatetime(t *testing.T) {
+	fields := feishusdk.DefaultTaskFields
+	filter := buildFeishuFilterInfo(fields, "com.app", []string{feishusdk.StatusPending}, SceneSingleURLCapture, TaskDateAny)
+	if filter == nil {
+		t.Fatalf("expected filter, got nil")
+	}
+	if len(filter.Children) == 0 {
+		t.Fatalf("expected status children, got none")
+	}
+	for _, child := range filter.Children {
+		if len(findConditions(child.Conditions, fields.Datetime)) != 0 {
+			t.Fatalf("expected no datetime condition when TaskDateAny is used")
+		}
+	}
+}
+
 func TestBuildFeishuFilterInfoBlankStatusAddsVariants(t *testing.T) {
 	fields := feishusdk.DefaultTaskFields
 	filter := buildFeishuFilterInfo(fields, "", []string{""}, SceneSingleURLCapture, TaskDateToday)
