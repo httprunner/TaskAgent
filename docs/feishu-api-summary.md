@@ -10,6 +10,7 @@
 ## 分页、筛选与重试策略
 - `Client.listBitableRecords` 封装了分页逻辑：传入 `page_size`（TaskAgent 默认 200）、`page_token`，并在 `has_more` 为真时继续抓取。
 - 查询接口统一支持 filter/sort/view 参数，`internal/feishusdk/filters.go` 提供了构建过滤表达式的 helpers。
+- **筛选参数填写说明（官方）**: [记录筛选参数填写说明](https://open.larkoffice.com/document/docs/bitable-v1/app-table-record/record-filter-guide)
 - 所有请求都会带上 `context.Context`，设备离线或 CLI 退出时可立即取消未完成的 HTTP 调用。
 - 网络抖动或 5xx 会由上层调用（如 `internal/storage/sqlite_reporter.go`）捕获并记录，失败记录设置 `reported=-1`，下次重试。
 
