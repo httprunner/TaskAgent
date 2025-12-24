@@ -4,7 +4,7 @@
 
 ## 鉴权与基础配置
 - TaskAgent 通过 `internal/feishusdk.Client` 统一封装鉴权，所有请求都会使用 `.env` 中的 `FEISHU_APP_ID` / `FEISHU_APP_SECRET` 获取 tenant access token，可选 `FEISHU_TENANT_KEY` / `FEISHU_BASE_URL`。
-- `internal/env.Ensure` 会自动加载 `.env`，无需在命令行手动 `export`。
+- `internal/env.Ensure` 会自动加载 `.env`，无需在命令行手动 `export`（但在 `go test` 下默认不会加载；如需在测试里启用，设置 `GOTEST_LOAD_DOTENV=1`）。
 - 结果表写入存在全局限速器（`FEISHU_REPORT_RPS`，默认 1 RPS），位于 `internal/feishusdk/storage.go`，用来避免频繁触发 99991400 频控错误。
 
 ## 分页、筛选与重试策略

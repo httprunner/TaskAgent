@@ -1,6 +1,10 @@
 # Environment Variables
 
-`internal/env.Ensure` automatically loads the first `.env` file it finds above the current working directory, so place all secrets/configuration in that file rather than exporting them manually. The tables below enumerate every environment variable TaskAgent reads via `os.Getenv`/`LookupEnv` along with defaults and consumers.
+`internal/env.Ensure` automatically loads the first `.env` file it finds above the current working directory, so place all secrets/configuration in that file rather than exporting them manually.
+
+For test runs (`go test`), TaskAgent keeps the environment hermetic by default and will **not** auto-load `.env` unless you explicitly set `GOTEST_LOAD_DOTENV=1`.
+
+The tables below enumerate every environment variable TaskAgent reads via `os.Getenv`/`LookupEnv` along with defaults and consumers.
 
 ## Feishu credentials & API endpoints
 

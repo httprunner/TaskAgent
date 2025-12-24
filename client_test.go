@@ -124,7 +124,8 @@ func TestFetchTodayPendingFeishuTasksSceneStatusPriorityStopsAfterLimit(t *testi
 		t.Fatalf("fetchTodayPendingFeishuTasks returned error: %v", err)
 	}
 	got := collectTaskIDs(tasks)
-	want := []int64{1, 11, 12}
+	// Order follows priorityCombos in client.go: video-screen -> single-url -> failed -> pending.
+	want := []int64{14, 11, 12}
 	if !equalIDs(got, want) {
 		t.Fatalf("unexpected ids: got %v, want %v", got, want)
 	}
@@ -193,7 +194,8 @@ func TestFetchTodayPendingFeishuTasksAllowedScenesOrderPreserved(t *testing.T) {
 		t.Fatalf("fetchTodayPendingFeishuTasks returned error: %v", err)
 	}
 	got := collectTaskIDs(tasks)
-	want := []int64{201, 301, 302}
+	// priorityCombos checks failed before pending within the same scene ordering.
+	want := []int64{301, 302, 201}
 	if !equalIDs(got, want) {
 		t.Fatalf("unexpected ids: got %v want %v", got, want)
 	}

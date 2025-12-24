@@ -459,8 +459,36 @@ func (w *SingleURLWorker) reconcileSingleURLTask(ctx context.Context, task *Feis
 		}
 		return taskagent.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishusdk.StatusRunning, "", nil)
 	case "done":
+		vid := strings.TrimSpace(status.VID)
+		if vid == "" {
+			// Downloader may briefly return status=done before persisting vid.
+			// Only mark success when vid is present; otherwise keep polling.
+			meta.markRunning()
+			if latest := meta.latestAttempt(); latest != nil {
+				if latest.CompletedAt != 0 {
+					latest.CompletedAt = 0
+				}
+				if strings.TrimSpace(latest.Error) == "" {
+					latest.Error = "waiting for vid"
+				}
+			}
+			log.Warn().
+				Int64("task_id", task.TaskID).
+				Str("job_id", jobID).
+				Msg("single url worker: crawler returned done but vid is empty; keep polling")
+			if err := w.updateTaskExtra(ctx, task, meta); err != nil {
+				return err
+			}
+			if task.Status != feishusdk.StatusRunning {
+				if err := taskagent.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishusdk.StatusRunning, "", nil); err != nil {
+					return err
+				}
+				task.Status = feishusdk.StatusRunning
+			}
+			return nil
+		}
 		completed := w.clock()
-		meta.markSuccess(status.VID, completed)
+		meta.markSuccess(vid, completed)
 		if err := w.updateTaskExtra(ctx, task, meta); err != nil {
 			return err
 		}

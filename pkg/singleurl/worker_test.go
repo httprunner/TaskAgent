@@ -181,6 +181,66 @@ func TestSingleURLWorkerPollsSuccessAndWritesVid(t *testing.T) {
 	}
 }
 
+func TestSingleURLWorkerDoesNotMarkSuccessWhenVidMissing(t *testing.T) {
+	meta := singleURLMetadata{Attempts: []singleURLAttempt{{JobID: "job-missing-vid"}}}
+	client := &singleURLTestClient{
+		rows: map[string][]feishusdk.TaskRow{
+			singleURLStatusQueued: {
+				{
+					TaskID: 4,
+					Scene:  SceneSingleURLCapture,
+					Status: singleURLStatusQueued,
+					Params: "capture",
+					BookID: "B004",
+					UserID: "U004",
+					URL:    "https://example.com/video4",
+					Logs:   encodeSingleURLMetadata(meta),
+				},
+			},
+		},
+	}
+	crawler := &stubCrawlerClient{
+		statuses: map[string]*crawlerTaskStatus{
+			"job-missing-vid": {JobID: "job-missing-vid", Status: "done", VID: ""},
+		},
+	}
+	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
+		Client:        client,
+		CrawlerClient: crawler,
+		BitableURL:    "https://bitable.example",
+		Limit:         5,
+		PollInterval:  time.Second,
+		Clock:         func() time.Time { return time.Unix(300, 0) },
+	})
+	if err != nil {
+		t.Fatalf("new worker: %v", err)
+	}
+	if err := worker.ProcessOnce(context.Background()); err != nil {
+		t.Fatalf("process once: %v", err)
+	}
+	if len(client.updateCalls) == 0 {
+		t.Fatalf("expected updates")
+	}
+	last := client.updateCalls[len(client.updateCalls)-1]
+	if last.fields[feishusdk.DefaultTaskFields.Status] == feishusdk.StatusSuccess {
+		t.Fatalf("should not mark success when vid missing")
+	}
+	if last.fields[feishusdk.DefaultTaskFields.Status] != feishusdk.StatusRunning {
+		t.Fatalf("expected running status when vid missing, got %#v", last.fields[feishusdk.DefaultTaskFields.Status])
+	}
+	var logsStr string
+	for _, call := range client.updateCalls {
+		if v, ok := call.fields[feishusdk.DefaultTaskFields.Logs]; ok {
+			if s, ok := v.(string); ok {
+				logsStr = s
+			}
+		}
+	}
+	if strings.Contains(logsStr, "\"vid\"") {
+		t.Fatalf("vid should not be written when missing, logs=%s", logsStr)
+	}
+}
+
 func TestSingleURLWorkerMarksCrawlerFailure(t *testing.T) {
 	crawler := &stubCrawlerClient{createErr: errors.New("boom")}
 	client := &singleURLTestClient{

@@ -95,6 +95,7 @@ Feishu Task Table ──> FeishuTaskClient (task)
    go mod download
    ```
 2. **Provide credentials** – Create a `.env` (automatically loaded by `internal/env.Ensure`) with at least `FEISHU_APP_ID`, `FEISHU_APP_SECRET`, `TASK_BITABLE_URL`, and any recorder/storage URLs. See [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) for the full matrix.
+   - Note: `go test` does **not** auto-load `.env` by default. Set `GOTEST_LOAD_DOTENV=1` if you want tests to opt-in to `.env` loading.
 3. **Validate toolchain** – Run the standard gate before making changes:
    ```bash
    go fmt ./...
