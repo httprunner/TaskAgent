@@ -1000,13 +1000,10 @@ func (c *WebhookResultCreator) fetchSingleURLCaptureTasks(ctx context.Context, l
 		return nil, errors.New("task table field mapping is missing (Scene/Status)")
 	}
 
+	// Scene == 单个链接采集 && Status isNotEmpty
 	filter := taskagent.NewFeishuFilterInfo("and")
 	filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(sceneField, "is", taskagent.SceneSingleURLCapture))
-	filter.Children = append(filter.Children, taskagent.NewFeishuChildrenFilter("or",
-		taskagent.NewFeishuCondition(statusField, "is", taskagent.StatusSuccess),
-		taskagent.NewFeishuCondition(statusField, "is", taskagent.StatusFailed),
-		taskagent.NewFeishuCondition(statusField, "is", taskagent.StatusError),
-	))
+	filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(statusField, "isNotEmpty"))
 
 	if dtField := strings.TrimSpace(fields.Datetime); dtField != "" {
 		if cond := exactDateCondition(dtField, c.scanDate); cond != nil {
