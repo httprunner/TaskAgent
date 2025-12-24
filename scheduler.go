@@ -77,6 +77,7 @@ type deviceAssignment struct {
 func defaultDeviceAllowedScenes() []string {
 	return []string{
 		SceneVideoScreenCapture,
+		SceneSingleURLCapture,
 		SceneGeneralSearch,
 		SceneProfileSearch,
 		SceneCollection,

@@ -201,13 +201,13 @@ func TestFetchTodayPendingFeishuTasksAllowedScenesOrderPreserved(t *testing.T) {
 	}
 }
 
-func TestNormalizeAllowedScenesDefaultsExcludeSingleURL(t *testing.T) {
+func TestNormalizeAllowedScenesDefaultsIncludeSingleURL(t *testing.T) {
 	set := normalizeAllowedScenes(nil)
 	if set == nil {
 		t.Fatalf("expected default scene set")
 	}
-	if _, ok := set[SceneSingleURLCapture]; ok {
-		t.Fatalf("default scenes should not include single url capture")
+	if _, ok := set[SceneSingleURLCapture]; !ok {
+		t.Fatalf("default scenes should include single url capture")
 	}
 	if len(set) != len(defaultDeviceScenes) {
 		t.Fatalf("expected %d default scenes, got %d", len(defaultDeviceScenes), len(set))

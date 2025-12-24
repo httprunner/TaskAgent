@@ -554,6 +554,7 @@ const (
 
 var defaultDeviceScenes = []string{
 	SceneVideoScreenCapture,
+	SceneSingleURLCapture,
 	SceneGeneralSearch,
 	SceneProfileSearch,
 	SceneCollection,
@@ -997,6 +998,7 @@ func UpdateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 		if statusField == "" {
 			return errors.New("feishusdk: status field is not configured in task table")
 		}
+		extraField := strings.TrimSpace(source.table.Fields.Extra)
 		dispatchedField := strings.TrimSpace(source.table.Fields.DispatchedDevice)
 		if deviceSerial != "" && dispatchedField == "" {
 			log.Warn().Msg("feishusdk task table missing DispatchedDevice column; skip binding device serial")
@@ -1015,6 +1017,7 @@ func UpdateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 		}
 
 		updateSerial := strings.TrimSpace(deviceSerial) != "" && dispatchedField != ""
+		trimmedStatus := strings.TrimSpace(status)
 		updatedTasks := make([]*FeishuTask, 0, len(subset))
 		for _, task := range subset {
 			if task == nil {
@@ -1022,6 +1025,11 @@ func UpdateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 			}
 			fields := map[string]any{
 				statusField: status,
+			}
+			if trimmedStatus == feishusdk.StatusSuccess && extraField != "" {
+				if extra := strings.TrimSpace(task.Extra); extra != "" && hasFeedURL(extra) {
+					fields[extraField] = extra
+				}
 			}
 			if updateSerial {
 				fields[dispatchedField] = deviceSerial
@@ -1103,6 +1111,26 @@ func readAndUploadScreenshot(
 		return "", "", false
 	}
 	return token, fileName, true
+}
+
+func hasFeedURL(extra string) bool {
+	trimmed := strings.TrimSpace(extra)
+	if trimmed == "" {
+		return false
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+		return false
+	}
+	v, ok := payload["feed_url"]
+	if !ok || v == nil {
+		return false
+	}
+	s, ok := v.(string)
+	if !ok {
+		return false
+	}
+	return strings.TrimSpace(s) != ""
 }
 
 func lookupTaskRecordID(table *feishusdk.TaskTable, taskID int64) string {
