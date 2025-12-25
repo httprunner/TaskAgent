@@ -266,7 +266,7 @@ func TestSingleURLWorkerDoesNotMarkSuccessWhenVidMissing(t *testing.T) {
 	if last.fields[feishusdk.DefaultTaskFields.Status] == feishusdk.StatusSuccess {
 		t.Fatalf("should not mark success when vid missing")
 	}
-	if last.fields[feishusdk.DefaultTaskFields.Status] != feishusdk.StatusProcessing {
+	if last.fields[feishusdk.DefaultTaskFields.Status] != feishusdk.StatusDownloaderProcessing {
 		t.Fatalf("expected processing status when vid missing, got %#v", last.fields[feishusdk.DefaultTaskFields.Status])
 	}
 	var logsStr string
@@ -308,7 +308,7 @@ func TestSingleURLWorkerMarksCrawlerFailure(t *testing.T) {
 		t.Fatalf("expected failure update")
 	}
 	call := client.updateCalls[len(client.updateCalls)-1]
-	if call.fields[feishusdk.DefaultTaskFields.Status] != feishusdk.StatusDownloadFailed {
+	if call.fields[feishusdk.DefaultTaskFields.Status] != feishusdk.StatusDownloaderFailed {
 		t.Fatalf("expected failed status, got %#v", call.fields)
 	}
 	logsField := feishusdk.DefaultTaskFields.Logs
@@ -399,7 +399,7 @@ func TestSingleURLWorkerSkipsGroupSummaryWhenNotAllSuccess(t *testing.T) {
 		groupRows: map[string][]feishusdk.TaskRow{
 			groupID: {
 				{TaskID: 30, Scene: SceneSingleURLCapture, Status: singleURLStatusQueued, Webhook: feishusdk.WebhookPending, BookID: "B010", UserID: "U010", GroupID: groupID, Params: "drama-B"},
-				{TaskID: 31, Scene: SceneSingleURLCapture, Status: feishusdk.StatusProcessing, Webhook: feishusdk.WebhookPending, BookID: "B010", UserID: "U010", GroupID: groupID, Params: "drama-B"},
+				{TaskID: 31, Scene: SceneSingleURLCapture, Status: feishusdk.StatusDownloaderProcessing, Webhook: feishusdk.WebhookPending, BookID: "B010", UserID: "U010", GroupID: groupID, Params: "drama-B"},
 			},
 		},
 	}

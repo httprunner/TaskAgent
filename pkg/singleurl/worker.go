@@ -16,12 +16,10 @@ import (
 )
 
 const (
-	crawlerServiceBaseURLEnv            = "CRAWLER_SERVICE_BASE_URL"
-	defaultCrawlerServiceBaseURL        = "http://localhost:8000"
-	singleURLStatusQueued               = "queued"
-	legacySingleURLStatusProcessing     = "processing"
-	legacySingleURLStatusDownloadFailed = "download-failed"
-	singleURLGroupFetchLimit            = 200
+	crawlerServiceBaseURLEnv     = "CRAWLER_SERVICE_BASE_URL"
+	defaultCrawlerServiceBaseURL = "http://localhost:8000"
+	singleURLStatusQueued        = "queued"
+	singleURLGroupFetchLimit     = 200
 	// DefaultSingleURLWorkerLimit caps each fetch cycle when no explicit limit is provided.
 	DefaultSingleURLWorkerLimit = 20
 	singleURLMaxAttempts        = 3
@@ -140,7 +138,7 @@ func (m *singleURLMetadata) markQueued(ts time.Time) {
 
 func (m *singleURLMetadata) markRunning() {
 	if latest := m.latestAttempt(); latest != nil {
-		latest.Status = feishusdk.StatusProcessing
+		latest.Status = feishusdk.StatusDownloaderProcessing
 	}
 }
 
@@ -157,7 +155,7 @@ func (m *singleURLMetadata) markSuccess(vid string, ts time.Time) {
 
 func (m *singleURLMetadata) markFailure(reason string, ts time.Time) {
 	if latest := m.latestAttempt(); latest != nil {
-		latest.Status = feishusdk.StatusDownloadFailed
+		latest.Status = feishusdk.StatusDownloaderFailed
 		latest.Error = strings.TrimSpace(reason)
 		if !ts.IsZero() {
 			latest.CompletedAt = ts.UTC().Unix()
@@ -229,13 +227,11 @@ func NewSingleURLWorker(cfg SingleURLWorkerConfig) (*SingleURLWorker, error) {
 		newTaskStatuses: []string{
 			feishusdk.StatusPending,
 			feishusdk.StatusFailed,
-			feishusdk.StatusDownloadFailed,
-			legacySingleURLStatusDownloadFailed,
+			feishusdk.StatusDownloaderFailed,
 		},
 		activeTaskStatuses: []string{
 			singleURLStatusQueued,
-			feishusdk.StatusProcessing,
-			legacySingleURLStatusProcessing,
+			feishusdk.StatusDownloaderProcessing,
 		},
 	}, nil
 }
@@ -283,8 +279,7 @@ func NewSingleURLReadyWorkerFromEnv(bitableURL string, limit int, pollInterval t
 	}
 	worker.newTaskStatuses = []string{
 		feishusdk.StatusReady,
-		feishusdk.StatusDownloadFailed,
-		legacySingleURLStatusDownloadFailed,
+		feishusdk.StatusDownloaderFailed,
 	}
 	return worker, nil
 }
@@ -422,7 +417,7 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 	}
 	retryRequired := false
 	switch strings.TrimSpace(task.Status) {
-	case feishusdk.StatusFailed, feishusdk.StatusDownloadFailed:
+	case feishusdk.StatusFailed, feishusdk.StatusDownloaderFailed:
 		retryRequired = true
 	}
 	if !retryRequired {
@@ -497,7 +492,7 @@ func (w *SingleURLWorker) reconcileSingleURLTask(ctx context.Context, task *Feis
 		if err := w.updateTaskExtra(ctx, task, meta); err != nil {
 			return err
 		}
-		return taskagent.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishusdk.StatusProcessing, "", nil)
+		return taskagent.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishusdk.StatusDownloaderProcessing, "", nil)
 	case "done":
 		vid := strings.TrimSpace(status.VID)
 		if vid == "" {
@@ -519,11 +514,11 @@ func (w *SingleURLWorker) reconcileSingleURLTask(ctx context.Context, task *Feis
 			if err := w.updateTaskExtra(ctx, task, meta); err != nil {
 				return err
 			}
-			if task.Status != feishusdk.StatusProcessing {
-				if err := taskagent.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishusdk.StatusProcessing, "", nil); err != nil {
+			if task.Status != feishusdk.StatusDownloaderProcessing {
+				if err := taskagent.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishusdk.StatusDownloaderProcessing, "", nil); err != nil {
 					return err
 				}
-				task.Status = feishusdk.StatusProcessing
+				task.Status = feishusdk.StatusDownloaderProcessing
 			}
 			return nil
 		}
@@ -612,7 +607,7 @@ func (w *SingleURLWorker) failSingleURLTask(ctx context.Context, task *FeishuTas
 	fields := map[string]any{}
 	statusField := strings.TrimSpace(table.Fields.Status)
 	if statusField != "" {
-		fields[statusField] = feishusdk.StatusDownloadFailed
+		fields[statusField] = feishusdk.StatusDownloaderFailed
 	}
 	if logsField := strings.TrimSpace(table.Fields.Logs); logsField != "" {
 		encoded := ""
@@ -631,7 +626,7 @@ func (w *SingleURLWorker) failSingleURLTask(ctx context.Context, task *FeishuTas
 	if err := taskagent.UpdateTaskFields(ctx, task, fields); err != nil {
 		return err
 	}
-	task.Status = feishusdk.StatusDownloadFailed
+	task.Status = feishusdk.StatusDownloaderFailed
 	if logsField := strings.TrimSpace(table.Fields.Logs); logsField != "" {
 		if logs, ok := fields[logsField].(string); ok {
 			task.Logs = logs

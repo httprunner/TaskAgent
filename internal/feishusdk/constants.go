@@ -31,12 +31,12 @@ const (
 	StatusSuccess = "success"
 	// StatusReady marks a task row ready for downstream processing.
 	StatusReady = "ready"
-	// StatusProcessing marks a task row being processed by the downloader stage.
-	StatusProcessing = "dl-processing"
+	// StatusDownloaderProcessing marks a task row being processed by the downloader stage.
+	StatusDownloaderProcessing = "dl-processing"
 	// StatusFailed marks a task row as failed.
 	StatusFailed = "failed"
-	// StatusDownloadFailed marks a task row failed in the downloader stage.
-	StatusDownloadFailed = "dl-failed"
+	// StatusDownloaderFailed marks a task row failed in the downloader stage.
+	StatusDownloaderFailed = "dl-failed"
 	// StatusDispatched marks a task row as dispatched.
 	StatusDispatched = "dispatched"
 	// StatusRunning marks a task row as currently executing.
