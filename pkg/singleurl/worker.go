@@ -30,7 +30,7 @@ const SceneSingleURLCapture = taskagent.SceneSingleURLCapture
 type FeishuTask = taskagent.FeishuTask
 
 type singleURLAttempt struct {
-	JobID       string `json:"job_id,omitempty"`
+	TaskID      string `json:"task_id,omitempty"`
 	VID         string `json:"vid,omitempty"`
 	Error       string `json:"error,omitempty"`
 	Status      string `json:"status,omitempty"`
@@ -54,14 +54,7 @@ func decodeSingleURLMetadata(raw string) singleURLMetadata {
 		}
 		return singleURLMetadata{}
 	}
-	var legacy singleURLAttempt
-	if err := json.Unmarshal([]byte(trimmed), &legacy); err != nil {
-		return singleURLMetadata{}
-	}
-	if strings.TrimSpace(legacy.JobID) == "" && strings.TrimSpace(legacy.VID) == "" && strings.TrimSpace(legacy.Error) == "" {
-		return singleURLMetadata{}
-	}
-	return singleURLMetadata{Attempts: []singleURLAttempt{legacy}}
+	return singleURLMetadata{}
 }
 
 func encodeSingleURLMetadata(meta singleURLMetadata) string {
@@ -82,13 +75,13 @@ func (m *singleURLMetadata) latestAttempt() *singleURLAttempt {
 	return &m.Attempts[len(m.Attempts)-1]
 }
 
-func (m *singleURLMetadata) attemptsWithJobID() int {
+func (m *singleURLMetadata) attemptsWithTaskID() int {
 	if m == nil || len(m.Attempts) == 0 {
 		return 0
 	}
 	count := 0
 	for _, attempt := range m.Attempts {
-		if strings.TrimSpace(attempt.JobID) != "" {
+		if strings.TrimSpace(attempt.TaskID) != "" {
 			count++
 		}
 	}
@@ -99,7 +92,7 @@ func (m *singleURLMetadata) reachedRetryCap(limit int) bool {
 	if limit <= 0 {
 		return false
 	}
-	return m.attemptsWithJobID() >= limit
+	return m.attemptsWithTaskID() >= limit
 }
 
 func (m *singleURLMetadata) appendAttempt(jobID string, status string, ts time.Time) *singleURLAttempt {
@@ -110,7 +103,7 @@ func (m *singleURLMetadata) appendAttempt(jobID string, status string, ts time.T
 	if trimmed == "" {
 		return nil
 	}
-	attempt := singleURLAttempt{JobID: trimmed, Status: strings.TrimSpace(status)}
+	attempt := singleURLAttempt{TaskID: trimmed, Status: strings.TrimSpace(status)}
 	if !ts.IsZero() {
 		attempt.CreatedAt = ts.UTC().Unix()
 	}
@@ -118,9 +111,9 @@ func (m *singleURLMetadata) appendAttempt(jobID string, status string, ts time.T
 	return m.latestAttempt()
 }
 
-func (m *singleURLMetadata) latestJobID() string {
+func (m *singleURLMetadata) latestTaskID() string {
 	if latest := m.latestAttempt(); latest != nil {
-		return strings.TrimSpace(latest.JobID)
+		return strings.TrimSpace(latest.TaskID)
 	}
 	return ""
 }
@@ -396,7 +389,7 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 	// Metadata for single_url_capture tasks is stored in Logs.
 	meta := decodeSingleURLMetadata(task.Logs)
 	if meta.reachedRetryCap(singleURLMaxAttempts) {
-		reason := fmt.Sprintf("retry limit reached after %d attempts", meta.attemptsWithJobID())
+		reason := fmt.Sprintf("retry limit reached after %d attempts", meta.attemptsWithTaskID())
 		if latest := meta.latestAttempt(); latest != nil {
 			latest.Error = reason
 			if latest.CompletedAt == 0 {
@@ -409,7 +402,7 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 			Int64("task_id", task.TaskID).
 			Str("book_id", bookID).
 			Str("user_id", userID).
-			Int("attempts", meta.attemptsWithJobID()).
+			Int("attempts", meta.attemptsWithTaskID()).
 			Msg("single url worker retry cap reached; marking task error")
 		return w.markSingleURLTaskError(ctx, task, meta)
 	}
@@ -419,11 +412,11 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 		retryRequired = true
 	}
 	if !retryRequired {
-		if jobID := meta.latestJobID(); jobID != "" {
+		if taskID := meta.latestTaskID(); taskID != "" {
 			log.Info().
 				Int64("task_id", task.TaskID).
-				Str("job_id", jobID).
-				Msg("single url task already has job id; skip creation")
+				Str("crawler_task_id", taskID).
+				Msg("single url task already has crawler task id; skip creation")
 			return nil
 		}
 	}
@@ -445,26 +438,26 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 	if cdnURL != "" {
 		metaPayload["cdn_url"] = cdnURL
 	}
-	jobID, err := w.crawler.CreateTask(ctx, url, cookies, metaPayload)
+	taskID, err := w.crawler.CreateTask(ctx, url, cookies, metaPayload)
 	if err != nil {
-		return w.failSingleURLTask(ctx, task, fmt.Sprintf("create job failed: %v", err), nil)
+		return w.failSingleURLTask(ctx, task, fmt.Sprintf("create crawler task failed: %v", err), nil)
 	}
 	createdAt := w.clock()
 	if createdAt.IsZero() {
 		createdAt = time.Now()
 	}
-	meta.appendAttempt(jobID, feishusdk.StatusDownloaderQueued, createdAt)
+	meta.appendAttempt(taskID, feishusdk.StatusDownloaderQueued, createdAt)
 	groupID := buildSingleURLGroupID(task.App, bookID, userID)
 	if err := w.markSingleURLTaskQueued(ctx, task, groupID, meta); err != nil {
 		return err
 	}
 	log.Info().
 		Int64("task_id", task.TaskID).
-		Str("job_id", jobID).
+		Str("crawler_task_id", taskID).
 		Str("book_id", bookID).
 		Str("user_id", userID).
 		Str("url", url).
-		Msg("single url capture job queued")
+		Msg("single url capture task queued")
 	return nil
 }
 
@@ -490,31 +483,35 @@ func (w *SingleURLWorker) reconcileSingleURLTask(ctx context.Context, task *Feis
 		return errors.New("single url worker: nil task")
 	}
 	meta := decodeSingleURLMetadata(task.Logs)
-	jobID := meta.latestJobID()
-	if jobID == "" {
-		return w.failSingleURLTask(ctx, task, "missing job_id for queued task", nil)
+	taskID := meta.latestTaskID()
+	if taskID == "" {
+		return w.failSingleURLTask(ctx, task, "missing task_id for queued task", nil)
 	}
-	status, err := w.crawler.GetTask(ctx, jobID)
+	status, err := w.crawler.GetTask(ctx, taskID)
 	if err != nil {
-		if errors.Is(err, errCrawlerJobNotFound) {
-			meta.markFailure("crawler job not found", w.clock())
-			return w.failSingleURLTask(ctx, task, "crawler job not found", &meta)
+		if errors.Is(err, errCrawlerTaskNotFound) {
+			meta.markFailure("crawler task not found", w.clock())
+			return w.failSingleURLTask(ctx, task, "crawler task not found", &meta)
 		}
 		return err
 	}
-	switch strings.ToLower(strings.TrimSpace(status.Status)) {
-	case "queued":
+	switch strings.ToUpper(strings.TrimSpace(status.Status)) {
+	case "WAITING":
 		if task.Status != feishusdk.StatusDownloaderQueued {
 			return w.markSingleURLTaskQueued(ctx, task, task.GroupID, meta)
 		}
 		return nil
-	case "running":
+	case "PROCESSING":
 		meta.markRunning()
 		if err := w.updateTaskExtra(ctx, task, meta); err != nil {
 			return err
 		}
-		return taskagent.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishusdk.StatusDownloaderProcessing, "", nil)
-	case "done":
+		if err := taskagent.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishusdk.StatusDownloaderProcessing, "", nil); err != nil {
+			return err
+		}
+		task.Status = feishusdk.StatusDownloaderProcessing
+		return nil
+	case "COMPLETED":
 		vid := strings.TrimSpace(status.VID)
 		if vid == "" {
 			// Downloader may briefly return status=done before persisting vid.
@@ -530,8 +527,8 @@ func (w *SingleURLWorker) reconcileSingleURLTask(ctx context.Context, task *Feis
 			}
 			log.Warn().
 				Int64("task_id", task.TaskID).
-				Str("job_id", jobID).
-				Msg("single url worker: crawler returned done but vid is empty; keep polling")
+				Str("crawler_task_id", taskID).
+				Msg("single url worker: crawler returned completed but vid is empty; keep polling")
 			if err := w.updateTaskExtra(ctx, task, meta); err != nil {
 				return err
 			}
@@ -553,17 +550,17 @@ func (w *SingleURLWorker) reconcileSingleURLTask(ctx context.Context, task *Feis
 		}
 		task.Status = feishusdk.StatusSuccess
 		return nil
-	case "failed":
+	case "FAILED":
 		reason := strings.TrimSpace(status.Error)
 		if reason == "" {
-			reason = "crawler job failed"
+			reason = "crawler task failed"
 		}
 		meta.markFailure(reason, w.clock())
 		return w.failSingleURLTask(ctx, task, reason, &meta)
 	default:
 		log.Warn().
 			Int64("task_id", task.TaskID).
-			Str("job_id", jobID).
+			Str("crawler_task_id", taskID).
 			Str("status", status.Status).
 			Msg("single url worker: unknown crawler status")
 		return nil

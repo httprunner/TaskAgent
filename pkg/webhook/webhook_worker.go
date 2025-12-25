@@ -623,16 +623,18 @@ func sendSingleURLGroupSummary(ctx context.Context, summary *singleURLGroupSumma
 		return nil
 	}
 
-	taskID := strings.TrimSpace(summary.TaskID)
-	if taskID == "" {
-		return errors.New("single_url_capture summary missing task_id (group id)")
+	groupID := strings.TrimSpace(summary.TaskID)
+	taskName := strings.TrimSpace(groupID)
+	if taskName != "" {
+		taskName = fmt.Sprintf("%s_%s", taskName, time.Now().Format("20060102_150405"))
 	}
 
 	payload := singleurl.TaskSummaryPayload{
-		TaskID:             taskID,
+		Status:             "finished",
 		Total:              summary.Total,
 		Done:               summary.Done,
 		UniqueCombinations: summary.UniqueCombinations,
+		TaskName:           taskName,
 		Email:              env.String("SUMMARY_WEBHOOK_EMAIL", ""),
 	}
 	if err := singleurl.SendTaskSummaryToCrawler(ctx, baseURL, payload); err != nil {
@@ -640,7 +642,7 @@ func sendSingleURLGroupSummary(ctx context.Context, summary *singleURLGroupSumma
 	}
 
 	log.Info().
-		Str("task_id", taskID).
+		Str("task_name", taskName).
 		Int("total", summary.Total).
 		Int("done", summary.Done).
 		Int("unique_count", len(summary.UniqueCombinations)).

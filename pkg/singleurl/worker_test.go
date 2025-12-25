@@ -14,7 +14,7 @@ import (
 func TestSingleURLWorkerDefaultLimit(t *testing.T) {
 	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
 		Client:        &singleURLTestClient{},
-		CrawlerClient: &stubCrawlerClient{createJobID: "noop"},
+		CrawlerClient: &stubCrawlerClient{createTaskID: "noop"},
 		BitableURL:    "https://bitable.example",
 		Limit:         0,
 	})
@@ -43,7 +43,7 @@ func TestSingleURLWorkerQueuesTaskAfterCreatingCrawlerJob(t *testing.T) {
 			},
 		},
 	}
-	crawler := &stubCrawlerClient{createJobID: "job-123"}
+	crawler := &stubCrawlerClient{createTaskID: "task-123"}
 	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
 		Client:        client,
 		CrawlerClient: crawler,
@@ -82,8 +82,8 @@ func TestSingleURLWorkerQueuesTaskAfterCreatingCrawlerJob(t *testing.T) {
 		t.Fatalf("expected status %q, got %#v", feishusdk.StatusDownloaderQueued, status)
 	}
 	logsVal := last.fields[feishusdk.DefaultTaskFields.Logs]
-	if logsStr, _ := logsVal.(string); logsStr == "" || !strings.Contains(logsStr, "job-123") {
-		t.Fatalf("logs missing job id: %v", logsVal)
+	if logsStr, _ := logsVal.(string); logsStr == "" || !strings.Contains(logsStr, "task-123") {
+		t.Fatalf("logs missing task id: %v", logsVal)
 	}
 }
 
@@ -104,7 +104,7 @@ func TestSingleURLWorkerUsesCookiesWhenAvailable(t *testing.T) {
 			},
 		},
 	}
-	crawler := &stubCrawlerClient{createJobID: "job-cookie"}
+	crawler := &stubCrawlerClient{createTaskID: "task-cookie"}
 	provider := &stubCookieProvider{
 		values: []*CookieRecord{{RecordID: "rec-1", Value: "cookie=value"}},
 	}
@@ -149,7 +149,7 @@ func TestSingleURLWorkerForwardsCDNURLFromExtra(t *testing.T) {
 			},
 		},
 	}
-	crawler := &stubCrawlerClient{createJobID: "job-cdn"}
+	crawler := &stubCrawlerClient{createTaskID: "task-cdn"}
 	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
 		Client:        client,
 		CrawlerClient: crawler,
@@ -192,7 +192,7 @@ func TestSingleURLReadyWorkerMarksFailedWhenCDNURLMissing(t *testing.T) {
 	}
 	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
 		Client:        client,
-		CrawlerClient: &stubCrawlerClient{createJobID: "noop"},
+		CrawlerClient: &stubCrawlerClient{createTaskID: "noop"},
 		BitableURL:    "https://bitable.example",
 		Limit:         5,
 		PollInterval:  time.Second,
@@ -214,7 +214,7 @@ func TestSingleURLReadyWorkerMarksFailedWhenCDNURLMissing(t *testing.T) {
 }
 
 func TestSingleURLWorkerPollsSuccessAndWritesVid(t *testing.T) {
-	meta := singleURLMetadata{Attempts: []singleURLAttempt{{JobID: "job-success"}}}
+	meta := singleURLMetadata{Attempts: []singleURLAttempt{{TaskID: "job-success"}}}
 	client := &singleURLTestClient{
 		rows: map[string][]feishusdk.TaskRow{
 			feishusdk.StatusDownloaderQueued: {
@@ -233,7 +233,7 @@ func TestSingleURLWorkerPollsSuccessAndWritesVid(t *testing.T) {
 	}
 	crawler := &stubCrawlerClient{
 		statuses: map[string]*crawlerTaskStatus{
-			"job-success": {JobID: "job-success", Status: "done", VID: "vid-999"},
+			"job-success": {TaskID: "job-success", Status: "COMPLETED", VID: "vid-999"},
 		},
 	}
 	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
@@ -264,7 +264,7 @@ func TestSingleURLWorkerPollsSuccessAndWritesVid(t *testing.T) {
 }
 
 func TestSingleURLWorkerDoesNotMarkSuccessWhenVidMissing(t *testing.T) {
-	meta := singleURLMetadata{Attempts: []singleURLAttempt{{JobID: "job-missing-vid"}}}
+	meta := singleURLMetadata{Attempts: []singleURLAttempt{{TaskID: "job-missing-vid"}}}
 	client := &singleURLTestClient{
 		rows: map[string][]feishusdk.TaskRow{
 			feishusdk.StatusDownloaderQueued: {
@@ -283,7 +283,7 @@ func TestSingleURLWorkerDoesNotMarkSuccessWhenVidMissing(t *testing.T) {
 	}
 	crawler := &stubCrawlerClient{
 		statuses: map[string]*crawlerTaskStatus{
-			"job-missing-vid": {JobID: "job-missing-vid", Status: "done", VID: ""},
+			"job-missing-vid": {TaskID: "job-missing-vid", Status: "COMPLETED", VID: ""},
 		},
 	}
 	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
@@ -375,7 +375,7 @@ func TestSingleURLWorkerSendsGroupSummaryWhenAllSuccess(t *testing.T) {
 					BookID:  "B001",
 					UserID:  "U001",
 					GroupID: groupID,
-					Logs:    encodeSingleURLMetadata(singleURLMetadata{Attempts: []singleURLAttempt{{JobID: "job-sum-1"}}}),
+					Logs:    encodeSingleURLMetadata(singleURLMetadata{Attempts: []singleURLAttempt{{TaskID: "job-sum-1"}}}),
 				},
 				{
 					TaskID:  21,
@@ -385,7 +385,7 @@ func TestSingleURLWorkerSendsGroupSummaryWhenAllSuccess(t *testing.T) {
 					BookID:  "B001",
 					UserID:  "U001",
 					GroupID: groupID,
-					Logs:    encodeSingleURLMetadata(singleURLMetadata{Attempts: []singleURLAttempt{{JobID: "job-sum-2"}}}),
+					Logs:    encodeSingleURLMetadata(singleURLMetadata{Attempts: []singleURLAttempt{{TaskID: "job-sum-2"}}}),
 				},
 			},
 		},
@@ -398,8 +398,8 @@ func TestSingleURLWorkerSendsGroupSummaryWhenAllSuccess(t *testing.T) {
 	}
 	crawler := &stubCrawlerClient{
 		statuses: map[string]*crawlerTaskStatus{
-			"job-sum-1": {JobID: "job-sum-1", Status: "done", VID: "vid-1"},
-			"job-sum-2": {JobID: "job-sum-2", Status: "done", VID: "vid-2"},
+			"job-sum-1": {TaskID: "job-sum-1", Status: "COMPLETED", VID: "vid-1"},
+			"job-sum-2": {TaskID: "job-sum-2", Status: "COMPLETED", VID: "vid-2"},
 		},
 	}
 	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
@@ -433,7 +433,7 @@ func TestSingleURLWorkerSkipsGroupSummaryWhenNotAllSuccess(t *testing.T) {
 					BookID:  "B010",
 					UserID:  "U010",
 					GroupID: groupID,
-					Logs:    encodeSingleURLMetadata(singleURLMetadata{Attempts: []singleURLAttempt{{JobID: "job-mixed"}}}),
+					Logs:    encodeSingleURLMetadata(singleURLMetadata{Attempts: []singleURLAttempt{{TaskID: "job-mixed"}}}),
 				},
 			},
 		},
@@ -446,7 +446,7 @@ func TestSingleURLWorkerSkipsGroupSummaryWhenNotAllSuccess(t *testing.T) {
 	}
 	crawler := &stubCrawlerClient{
 		statuses: map[string]*crawlerTaskStatus{
-			"job-mixed": {JobID: "job-mixed", Status: "done", VID: "vid-mixed"},
+			"job-mixed": {TaskID: "job-mixed", Status: "COMPLETED", VID: "vid-mixed"},
 		},
 	}
 	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
@@ -464,10 +464,10 @@ func TestSingleURLWorkerSkipsGroupSummaryWhenNotAllSuccess(t *testing.T) {
 	}
 }
 
-func TestSingleURLWorkerRetriesFailedTaskWithExistingJobID(t *testing.T) {
-	legacyMeta := `{"job_id":"job-old","error":"boom"}`
+func TestSingleURLWorkerRetriesFailedTaskWithExistingTaskID(t *testing.T) {
+	meta := singleURLMetadata{Attempts: []singleURLAttempt{{TaskID: "task-old", Error: "boom"}}}
 	client := &singleURLTestClient{}
-	// Seed the initial failed task row with legacy metadata in Logs.
+	// Seed the initial failed task row with metadata in Logs.
 	client.rows = map[string][]feishusdk.TaskRow{
 		feishusdk.StatusFailed: {
 			{
@@ -478,11 +478,11 @@ func TestSingleURLWorkerRetriesFailedTaskWithExistingJobID(t *testing.T) {
 				BookID: "B040",
 				UserID: "U040",
 				URL:    "https://example.com/retry",
-				Logs:   legacyMeta,
+				Logs:   encodeSingleURLMetadata(meta),
 			},
 		},
 	}
-	crawler := &stubCrawlerClient{createJobID: "job-new"}
+	crawler := &stubCrawlerClient{createTaskID: "task-new"}
 	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
 		Client:        client,
 		CrawlerClient: crawler,
@@ -498,7 +498,7 @@ func TestSingleURLWorkerRetriesFailedTaskWithExistingJobID(t *testing.T) {
 		t.Fatalf("process once: %v", err)
 	}
 	if len(crawler.createdURLs) != 1 {
-		t.Fatalf("expected retry to create crawler job, got %d", len(crawler.createdURLs))
+		t.Fatalf("expected retry to create crawler task, got %d", len(crawler.createdURLs))
 	}
 	var encoded string
 	for _, call := range client.updateCalls {
@@ -511,17 +511,17 @@ func TestSingleURLWorkerRetriesFailedTaskWithExistingJobID(t *testing.T) {
 	if encoded == "" {
 		t.Fatalf("expected extra to be updated")
 	}
-	meta := decodeSingleURLMetadata(encoded)
-	if len(meta.Attempts) != 2 {
-		t.Fatalf("expected 2 attempts recorded, got %d", len(meta.Attempts))
+	decoded := decodeSingleURLMetadata(encoded)
+	if len(decoded.Attempts) != 2 {
+		t.Fatalf("expected 2 attempts recorded, got %d", len(decoded.Attempts))
 	}
-	if meta.Attempts[0].JobID != "job-old" || meta.Attempts[1].JobID != "job-new" {
-		t.Fatalf("unexpected job history: %#v", meta.Attempts)
+	if decoded.Attempts[0].TaskID != "task-old" || decoded.Attempts[1].TaskID != "task-new" {
+		t.Fatalf("unexpected task history: %#v", decoded.Attempts)
 	}
 }
 
 func TestSingleURLWorkerStopsAfterMaxAttempts(t *testing.T) {
-	meta := singleURLMetadata{Attempts: []singleURLAttempt{{JobID: "job-1"}, {JobID: "job-2"}, {JobID: "job-3"}}}
+	meta := singleURLMetadata{Attempts: []singleURLAttempt{{TaskID: "job-1"}, {TaskID: "job-2"}, {TaskID: "job-3"}}}
 	client := &singleURLTestClient{
 		rows: map[string][]feishusdk.TaskRow{
 			feishusdk.StatusFailed: {
@@ -568,8 +568,8 @@ func TestSingleURLWorkerStopsAfterMaxAttempts(t *testing.T) {
 		t.Fatalf("expected extra to be updated")
 	}
 	decoded := decodeSingleURLMetadata(encoded)
-	if decoded.attemptsWithJobID() != singleURLMaxAttempts {
-		t.Fatalf("expected metadata to retain %d attempts, got %d", singleURLMaxAttempts, decoded.attemptsWithJobID())
+	if decoded.attemptsWithTaskID() != singleURLMaxAttempts {
+		t.Fatalf("expected metadata to retain %d attempts, got %d", singleURLMaxAttempts, decoded.attemptsWithTaskID())
 	}
 }
 
@@ -687,7 +687,7 @@ func suExtractConditionValue(filter *feishusdk.FilterInfo, field string) string 
 }
 
 type stubCrawlerClient struct {
-	createJobID     string
+	createTaskID    string
 	createErr       error
 	statuses        map[string]*crawlerTaskStatus
 	createdURLs     []string
@@ -695,7 +695,7 @@ type stubCrawlerClient struct {
 	createdMeta     []map[string]string
 	summaryPayloads []TaskSummaryPayload
 	summaryErr      error
-	queriedJobID    []string
+	queriedTaskID   []string
 }
 
 func (c *stubCrawlerClient) CreateTask(_ context.Context, url string, cookies []string, meta map[string]string) (string, error) {
@@ -710,18 +710,18 @@ func (c *stubCrawlerClient) CreateTask(_ context.Context, url string, cookies []
 	if c.createErr != nil {
 		return "", c.createErr
 	}
-	if c.createJobID == "" {
-		c.createJobID = "job-default"
+	if c.createTaskID == "" {
+		c.createTaskID = "task-default"
 	}
-	return c.createJobID, nil
+	return c.createTaskID, nil
 }
 
-func (c *stubCrawlerClient) GetTask(_ context.Context, jobID string) (*crawlerTaskStatus, error) {
-	c.queriedJobID = append(c.queriedJobID, jobID)
-	if status, ok := c.statuses[jobID]; ok {
+func (c *stubCrawlerClient) GetTask(_ context.Context, taskID string) (*crawlerTaskStatus, error) {
+	c.queriedTaskID = append(c.queriedTaskID, taskID)
+	if status, ok := c.statuses[taskID]; ok {
 		return status, nil
 	}
-	return nil, errCrawlerJobNotFound
+	return nil, errCrawlerTaskNotFound
 }
 
 func (c *stubCrawlerClient) SendTaskSummary(_ context.Context, payload TaskSummaryPayload) error {

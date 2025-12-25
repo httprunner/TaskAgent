@@ -393,7 +393,7 @@ func (c *WebhookResultCreator) Run(ctx context.Context) error {
 	}
 	interval := c.interval
 	if interval <= 0 {
-		interval = 30 * time.Second
+		interval = 5 * time.Minute
 	}
 	log.Info().
 		Str("task_bitable", c.taskTableURL).
@@ -995,26 +995,11 @@ func (c *WebhookResultCreator) fetchSingleURLCaptureTasks(ctx context.Context, l
 	}
 	fields := taskagent.DefaultTaskFields()
 	sceneField := strings.TrimSpace(fields.Scene)
-	statusField := strings.TrimSpace(fields.Status)
-	if sceneField == "" || statusField == "" {
-		return nil, errors.New("task table field mapping is missing (Scene/Status)")
+	if sceneField == "" {
+		return nil, errors.New("task table field mapping is missing (Scene)")
 	}
 
-	// Scene == 单个链接采集 && Status isNotEmpty
-	filter := taskagent.NewFeishuFilterInfo("and")
-	filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(sceneField, "is", taskagent.SceneSingleURLCapture))
-	filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(statusField, "isNotEmpty"))
-
-	if dtField := strings.TrimSpace(fields.Datetime); dtField != "" {
-		if cond := exactDateCondition(dtField, c.scanDate); cond != nil {
-			filter.Conditions = append(filter.Conditions, cond)
-		}
-	}
-	if app := strings.TrimSpace(c.appFilter); app != "" {
-		if appField := strings.TrimSpace(fields.App); appField != "" {
-			filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(appField, "is", app))
-		}
-	}
+	filter := buildSingleURLCaptureTaskFilter(fields, c.appFilter, c.scanDate)
 
 	table, err := c.taskClient.FetchTaskTableWithOptions(ctx, c.taskTableURL, nil, &taskagent.FeishuTaskQueryOptions{
 		Filter:     filter,
@@ -1027,7 +1012,24 @@ func (c *WebhookResultCreator) fetchSingleURLCaptureTasks(ctx context.Context, l
 	if table == nil {
 		return nil, nil
 	}
-	return table.Rows, nil
+	rows := table.Rows
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	targetDay := strings.TrimSpace(c.scanDate)
+	filtered := make([]taskagent.FeishuTaskRow, 0, len(rows))
+	for _, row := range rows {
+		if strings.TrimSpace(row.Status) == "" {
+			continue
+		}
+		if targetDay != "" {
+			if day := dayString(row.Datetime, row.DatetimeRaw); day != targetDay {
+				continue
+			}
+		}
+		filtered = append(filtered, row)
+	}
+	return filtered, nil
 }
 
 func (c *WebhookResultCreator) gcSeen(now time.Time) {
@@ -1041,6 +1043,25 @@ func (c *WebhookResultCreator) gcSeen(now time.Time) {
 			delete(c.seen, id)
 		}
 	}
+}
+
+func buildSingleURLCaptureTaskFilter(fields taskagent.FeishuTaskFields, appFilter, scanDate string) *taskagent.FeishuFilterInfo {
+	sceneField := strings.TrimSpace(fields.Scene)
+	filter := taskagent.NewFeishuFilterInfo("and")
+	if sceneField != "" {
+		filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(sceneField, "is", taskagent.SceneSingleURLCapture))
+	}
+	if dtField := strings.TrimSpace(fields.Datetime); dtField != "" {
+		if cond := exactDateCondition(dtField, scanDate); cond != nil {
+			filter.Conditions = append(filter.Conditions, cond)
+		}
+	}
+	if app := strings.TrimSpace(appFilter); app != "" {
+		if appField := strings.TrimSpace(fields.App); appField != "" {
+			filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(appField, "is", app))
+		}
+	}
+	return filter
 }
 
 func dayKeyYYYYMMDD(day string) int64 {

@@ -16,15 +16,19 @@ import (
 
 type crawlerTaskClient interface {
 	CreateTask(ctx context.Context, url string, cookies []string, meta map[string]string) (string, error)
-	GetTask(ctx context.Context, jobID string) (*crawlerTaskStatus, error)
+	GetTask(ctx context.Context, taskID string) (*crawlerTaskStatus, error)
 	SendTaskSummary(ctx context.Context, payload TaskSummaryPayload) error
 }
 
 type crawlerTaskStatus struct {
-	JobID  string
-	Status string
-	VID    string
-	Error  string
+	TaskID    string
+	AID       string
+	ItemID    string
+	Status    string
+	VID       string
+	Error     string
+	CreatedAt any
+	UpdatedAt any
 }
 
 // TaskSummaryCombination captures a unique bid/account pair for the finished task payload.
@@ -35,17 +39,16 @@ type TaskSummaryCombination struct {
 
 // TaskSummaryPayload mirrors the downloader service finish_message schema.
 type TaskSummaryPayload struct {
-	TaskID             string                   `json:"task_id"`
+	Status             string                   `json:"status"`
 	Total              int                      `json:"total"`
 	Done               int                      `json:"done"`
 	UniqueCombinations []TaskSummaryCombination `json:"unique_combinations"`
 	UniqueCount        int                      `json:"unique_count"`
-	CreatedAt          int64                    `json:"created_at"`
 	TaskName           string                   `json:"task_name"`
 	Email              string                   `json:"email"`
 }
 
-var errCrawlerJobNotFound = errors.New("crawler task not found")
+var errCrawlerTaskNotFound = errors.New("crawler task not found")
 
 type restCrawlerTaskClient struct {
 	baseURL    string
@@ -100,6 +103,15 @@ func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, cook
 	if payload.Platform == "" {
 		payload.Platform = defaultCookiePlatform
 	}
+	if payload.Bid == "" {
+		return "", errors.New("crawler create task payload missing bid")
+	}
+	if payload.UID == "" {
+		return "", errors.New("crawler create task payload missing uid")
+	}
+	if payload.URL == "" {
+		return "", errors.New("crawler create task payload missing url")
+	}
 	if normalized := normalizeCookies(cookies); len(normalized) > 0 {
 		payload.Extra = &requestExtra{Cookies: normalized}
 	}
@@ -123,21 +135,32 @@ func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, cook
 		return "", c.errorFromResponse(resp)
 	}
 	var parsed struct {
-		JobID string `json:"job_id"`
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			TaskID any `json:"task_id"`
+		} `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+	decoder := json.NewDecoder(resp.Body)
+	decoder.UseNumber()
+	if err := decoder.Decode(&parsed); err != nil {
 		return "", errors.Wrap(err, "decode create task response")
 	}
-	if strings.TrimSpace(parsed.JobID) == "" {
-		return "", errors.New("crawler create task returned empty job_id")
+	if parsed.Code != 0 {
+		return "", errors.Errorf("crawler create task failed: code=%d msg=%s", parsed.Code, strings.TrimSpace(parsed.Msg))
 	}
-	return parsed.JobID, nil
+	taskID := stringifyJSONID(parsed.Data.TaskID)
+	if taskID == "" {
+		return "", errors.New("crawler create task returned empty task_id")
+	}
+	return taskID, nil
 }
 
-func (c *restCrawlerTaskClient) GetTask(ctx context.Context, jobID string) (*crawlerTaskStatus, error) {
-	log.Debug().Str("job_id", jobID).Msg("getting crawler task status")
-	endpoint := fmt.Sprintf("%s/download/tasks/%s", c.baseURL, strings.TrimSpace(jobID))
-	log.Debug().Str("url", endpoint).Str("jobID", jobID).Msg("get task job from crawler")
+func (c *restCrawlerTaskClient) GetTask(ctx context.Context, taskID string) (*crawlerTaskStatus, error) {
+	requestedTaskID := strings.TrimSpace(taskID)
+	log.Debug().Str("task_id", requestedTaskID).Msg("getting crawler task status")
+	endpoint := fmt.Sprintf("%s/download/tasks/%s", c.baseURL, requestedTaskID)
+	log.Debug().Str("url", endpoint).Str("task_id", requestedTaskID).Msg("get task from crawler")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "build get task request")
@@ -148,25 +171,46 @@ func (c *restCrawlerTaskClient) GetTask(ctx context.Context, jobID string) (*cra
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, errCrawlerJobNotFound
+		return nil, errCrawlerTaskNotFound
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
 		return nil, c.errorFromResponse(resp)
 	}
 	var parsed struct {
-		JobID  string `json:"job_id"`
-		Status string `json:"status"`
-		VID    string `json:"vid"`
-		Error  string `json:"error"`
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			TaskID     any    `json:"task_id"`
+			AID        string `json:"a_id"`
+			ItemID     string `json:"item_id"`
+			TaskStatus string `json:"task_status"`
+			VID        string `json:"vid"`
+			DetailMsg  string `json:"msg"`
+			CreatedAt  any    `json:"created_at"`
+			UpdatedAt  any    `json:"updated_at"`
+		} `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+	decoder := json.NewDecoder(resp.Body)
+	decoder.UseNumber()
+	if err := decoder.Decode(&parsed); err != nil {
 		return nil, errors.Wrap(err, "decode get task response")
 	}
+	if parsed.Code != 0 {
+		return nil, errors.Errorf("crawler get task failed: code=%d msg=%s", parsed.Code, strings.TrimSpace(parsed.Msg))
+	}
+	parsedTaskID := stringifyJSONID(parsed.Data.TaskID)
+	if parsedTaskID == "" {
+		parsedTaskID = requestedTaskID
+	}
 	return &crawlerTaskStatus{
-		JobID:  jobID,
-		Status: parsed.Status,
-		VID:    parsed.VID,
-		Error:  parsed.Error,
+		TaskID:    parsedTaskID,
+		AID:       strings.TrimSpace(parsed.Data.AID),
+		ItemID:    strings.TrimSpace(parsed.Data.ItemID),
+		Status:    strings.TrimSpace(parsed.Data.TaskStatus),
+		VID:       strings.TrimSpace(parsed.Data.VID),
+		Error:     strings.TrimSpace(parsed.Data.DetailMsg),
+		CreatedAt: parsed.Data.CreatedAt,
+		UpdatedAt: parsed.Data.UpdatedAt,
 	}, nil
 }
 
@@ -179,12 +223,13 @@ func (c *restCrawlerTaskClient) SendTaskSummary(ctx context.Context, payload Tas
 	if c == nil {
 		return errors.New("crawler client is nil")
 	}
-	normalized, err := normalizeTaskSummaryPayload(payload, time.Now())
+	normalized, err := normalizeTaskSummaryPayload(payload)
 	if err != nil {
 		return err
 	}
 	log.Debug().
-		Str("task_id", normalized.TaskID).
+		Str("status", normalized.Status).
+		Str("task_name", normalized.TaskName).
 		Int("total", normalized.Total).
 		Int("done", normalized.Done).
 		Int("unique_count", normalized.UniqueCount).
@@ -207,6 +252,18 @@ func (c *restCrawlerTaskClient) SendTaskSummary(ctx context.Context, payload Tas
 	defer resp.Body.Close()
 	if resp.StatusCode >= http.StatusBadRequest {
 		return c.errorFromResponse(resp)
+	}
+	var parsed struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	decoder := json.NewDecoder(resp.Body)
+	decoder.UseNumber()
+	if err := decoder.Decode(&parsed); err != nil && !errors.Is(err, io.EOF) {
+		return errors.Wrap(err, "decode task summary response")
+	}
+	if parsed.Code != 0 {
+		return errors.Errorf("crawler task summary failed: code=%d msg=%s", parsed.Code, strings.TrimSpace(parsed.Msg))
 	}
 	return nil
 }
@@ -240,11 +297,11 @@ func normalizeCookies(values []string) []string {
 	return out
 }
 
-func normalizeTaskSummaryPayload(payload TaskSummaryPayload, now time.Time) (TaskSummaryPayload, error) {
+func normalizeTaskSummaryPayload(payload TaskSummaryPayload) (TaskSummaryPayload, error) {
 	normalized := payload
-	normalized.TaskID = strings.TrimSpace(normalized.TaskID)
-	if normalized.TaskID == "" {
-		return TaskSummaryPayload{}, errors.New("task summary payload missing task_id")
+	normalized.Status = strings.TrimSpace(normalized.Status)
+	if normalized.Status == "" {
+		normalized.Status = "finished"
 	}
 	normalized.TaskName = strings.TrimSpace(normalized.TaskName)
 	normalized.Email = strings.TrimSpace(normalized.Email)
@@ -256,9 +313,6 @@ func normalizeTaskSummaryPayload(payload TaskSummaryPayload, now time.Time) (Tas
 	}
 	if normalized.Done == 0 && normalized.Total > 0 {
 		normalized.Done = normalized.Total
-	}
-	if normalized.CreatedAt <= 0 {
-		normalized.CreatedAt = now.UTC().Unix()
 	}
 	normalized.UniqueCombinations = sanitizeSummaryCombinations(normalized.UniqueCombinations)
 	if normalized.UniqueCount <= 0 {
@@ -287,4 +341,28 @@ func sanitizeSummaryCombinations(combos []TaskSummaryCombination) []TaskSummaryC
 		result = append(result, TaskSummaryCombination{Bid: bid, AccountID: uid})
 	}
 	return result
+}
+
+func stringifyJSONID(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(v)
+	case json.Number:
+		return strings.TrimSpace(v.String())
+	case float64:
+		if v == float64(int64(v)) {
+			return fmt.Sprintf("%d", int64(v))
+		}
+		return strings.TrimSpace(fmt.Sprintf("%v", v))
+	case int:
+		return fmt.Sprintf("%d", v)
+	case int64:
+		return fmt.Sprintf("%d", v)
+	case uint64:
+		return fmt.Sprintf("%d", v)
+	default:
+		return strings.TrimSpace(fmt.Sprintf("%v", v))
+	}
 }

@@ -40,6 +40,14 @@ func NewCondition(field, operator string, values ...string) *Condition {
 	cond := &Condition{FieldName: newStringPtr(fieldName), Operator: newStringPtr(op)}
 	if len(values) > 0 {
 		cond.Value = append([]string(nil), values...)
+		return cond
+	}
+	// Feishu Bitable filter conditions require a Value field even for certain
+	// unary operators (e.g. isNotEmpty/isEmpty). Provide an explicit empty
+	// value to avoid 400 responses like "Missing required parameter: Value".
+	switch strings.ToLower(op) {
+	case "isnotempty", "isempty":
+		cond.Value = []string{""}
 	}
 	return cond
 }
