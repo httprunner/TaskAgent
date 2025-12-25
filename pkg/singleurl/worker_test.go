@@ -78,8 +78,8 @@ func TestSingleURLWorkerQueuesTaskAfterCreatingCrawlerJob(t *testing.T) {
 		t.Fatalf("no update calls recorded")
 	}
 	last := client.updateCalls[len(client.updateCalls)-1]
-	if status := last.fields[feishusdk.DefaultTaskFields.Status]; status != singleURLStatusQueued {
-		t.Fatalf("expected status %q, got %#v", singleURLStatusQueued, status)
+	if status := last.fields[feishusdk.DefaultTaskFields.Status]; status != feishusdk.StatusDownloaderQueued {
+		t.Fatalf("expected status %q, got %#v", feishusdk.StatusDownloaderQueued, status)
 	}
 	logsVal := last.fields[feishusdk.DefaultTaskFields.Logs]
 	if logsStr, _ := logsVal.(string); logsStr == "" || !strings.Contains(logsStr, "job-123") {
@@ -217,11 +217,11 @@ func TestSingleURLWorkerPollsSuccessAndWritesVid(t *testing.T) {
 	meta := singleURLMetadata{Attempts: []singleURLAttempt{{JobID: "job-success"}}}
 	client := &singleURLTestClient{
 		rows: map[string][]feishusdk.TaskRow{
-			singleURLStatusQueued: {
+			feishusdk.StatusDownloaderQueued: {
 				{
 					TaskID: 2,
 					Scene:  SceneSingleURLCapture,
-					Status: singleURLStatusQueued,
+					Status: feishusdk.StatusDownloaderQueued,
 					Params: "capture",
 					BookID: "B002",
 					UserID: "U002",
@@ -267,11 +267,11 @@ func TestSingleURLWorkerDoesNotMarkSuccessWhenVidMissing(t *testing.T) {
 	meta := singleURLMetadata{Attempts: []singleURLAttempt{{JobID: "job-missing-vid"}}}
 	client := &singleURLTestClient{
 		rows: map[string][]feishusdk.TaskRow{
-			singleURLStatusQueued: {
+			feishusdk.StatusDownloaderQueued: {
 				{
 					TaskID: 4,
 					Scene:  SceneSingleURLCapture,
-					Status: singleURLStatusQueued,
+					Status: feishusdk.StatusDownloaderQueued,
 					Params: "capture",
 					BookID: "B004",
 					UserID: "U004",
@@ -366,11 +366,11 @@ func TestSingleURLWorkerSendsGroupSummaryWhenAllSuccess(t *testing.T) {
 	groupID := buildSingleURLGroupID("com.smile.gifmaker", "B001", "U001")
 	client := &singleURLTestClient{
 		rows: map[string][]feishusdk.TaskRow{
-			singleURLStatusQueued: {
+			feishusdk.StatusDownloaderQueued: {
 				{
 					TaskID:  20,
 					Scene:   SceneSingleURLCapture,
-					Status:  singleURLStatusQueued,
+					Status:  feishusdk.StatusDownloaderQueued,
 					Params:  "capture",
 					BookID:  "B001",
 					UserID:  "U001",
@@ -380,7 +380,7 @@ func TestSingleURLWorkerSendsGroupSummaryWhenAllSuccess(t *testing.T) {
 				{
 					TaskID:  21,
 					Scene:   SceneSingleURLCapture,
-					Status:  singleURLStatusQueued,
+					Status:  feishusdk.StatusDownloaderQueued,
 					Params:  "capture",
 					BookID:  "B001",
 					UserID:  "U001",
@@ -391,8 +391,8 @@ func TestSingleURLWorkerSendsGroupSummaryWhenAllSuccess(t *testing.T) {
 		},
 		groupRows: map[string][]feishusdk.TaskRow{
 			groupID: {
-				{TaskID: 20, Scene: SceneSingleURLCapture, Status: singleURLStatusQueued, Webhook: feishusdk.WebhookPending, BookID: "B001", UserID: "U001", GroupID: groupID, Params: "drama-A"},
-				{TaskID: 21, Scene: SceneSingleURLCapture, Status: singleURLStatusQueued, Webhook: feishusdk.WebhookPending, BookID: "B001", UserID: "U001", GroupID: groupID, Params: "drama-A"},
+				{TaskID: 20, Scene: SceneSingleURLCapture, Status: feishusdk.StatusDownloaderQueued, Webhook: feishusdk.WebhookPending, BookID: "B001", UserID: "U001", GroupID: groupID, Params: "drama-A"},
+				{TaskID: 21, Scene: SceneSingleURLCapture, Status: feishusdk.StatusDownloaderQueued, Webhook: feishusdk.WebhookPending, BookID: "B001", UserID: "U001", GroupID: groupID, Params: "drama-A"},
 			},
 		},
 	}
@@ -424,11 +424,11 @@ func TestSingleURLWorkerSkipsGroupSummaryWhenNotAllSuccess(t *testing.T) {
 	groupID := buildSingleURLGroupID("com.smile.gifmaker", "B010", "U010")
 	client := &singleURLTestClient{
 		rows: map[string][]feishusdk.TaskRow{
-			singleURLStatusQueued: {
+			feishusdk.StatusDownloaderQueued: {
 				{
 					TaskID:  30,
 					Scene:   SceneSingleURLCapture,
-					Status:  singleURLStatusQueued,
+					Status:  feishusdk.StatusDownloaderQueued,
 					Params:  "capture",
 					BookID:  "B010",
 					UserID:  "U010",
@@ -439,7 +439,7 @@ func TestSingleURLWorkerSkipsGroupSummaryWhenNotAllSuccess(t *testing.T) {
 		},
 		groupRows: map[string][]feishusdk.TaskRow{
 			groupID: {
-				{TaskID: 30, Scene: SceneSingleURLCapture, Status: singleURLStatusQueued, Webhook: feishusdk.WebhookPending, BookID: "B010", UserID: "U010", GroupID: groupID, Params: "drama-B"},
+				{TaskID: 30, Scene: SceneSingleURLCapture, Status: feishusdk.StatusDownloaderQueued, Webhook: feishusdk.WebhookPending, BookID: "B010", UserID: "U010", GroupID: groupID, Params: "drama-B"},
 				{TaskID: 31, Scene: SceneSingleURLCapture, Status: feishusdk.StatusDownloaderProcessing, Webhook: feishusdk.WebhookPending, BookID: "B010", UserID: "U010", GroupID: groupID, Params: "drama-B"},
 			},
 		},

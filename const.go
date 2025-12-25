@@ -29,6 +29,7 @@ const (
 	StatusPending        = feishusdk.StatusPending
 	StatusSuccess        = feishusdk.StatusSuccess
 	StatusReady          = feishusdk.StatusReady
+	StatusDownloadQueued = feishusdk.StatusDownloaderQueued
 	StatusProcessing     = feishusdk.StatusDownloaderProcessing
 	StatusFailed         = feishusdk.StatusFailed
 	StatusDownloadFailed = feishusdk.StatusDownloaderFailed

@@ -18,9 +18,6 @@ import (
 const (
 	crawlerServiceBaseURLEnv     = "CRAWLER_SERVICE_BASE_URL"
 	defaultCrawlerServiceBaseURL = "http://localhost:8000"
-	singleURLStatusQueued        = "dl-queued"
-	crawlerStatusQueued          = "queued"
-	singleURLGroupFetchLimit     = 200
 	// DefaultSingleURLWorkerLimit caps each fetch cycle when no explicit limit is provided.
 	DefaultSingleURLWorkerLimit = 20
 	singleURLMaxAttempts        = 3
@@ -130,7 +127,7 @@ func (m *singleURLMetadata) latestJobID() string {
 
 func (m *singleURLMetadata) markQueued(ts time.Time) {
 	if latest := m.latestAttempt(); latest != nil {
-		latest.Status = singleURLStatusQueued
+		latest.Status = feishusdk.StatusDownloaderQueued
 		if latest.CreatedAt == 0 && !ts.IsZero() {
 			latest.CreatedAt = ts.UTC().Unix()
 		}
@@ -231,7 +228,7 @@ func NewSingleURLWorker(cfg SingleURLWorkerConfig) (*SingleURLWorker, error) {
 			feishusdk.StatusDownloaderFailed,
 		},
 		activeTaskStatuses: []string{
-			singleURLStatusQueued,
+			feishusdk.StatusDownloaderQueued,
 			feishusdk.StatusDownloaderProcessing,
 		},
 	}, nil
@@ -456,7 +453,7 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 	if createdAt.IsZero() {
 		createdAt = time.Now()
 	}
-	meta.appendAttempt(jobID, singleURLStatusQueued, createdAt)
+	meta.appendAttempt(jobID, feishusdk.StatusDownloaderQueued, createdAt)
 	groupID := buildSingleURLGroupID(task.App, bookID, userID)
 	if err := w.markSingleURLTaskQueued(ctx, task, groupID, meta); err != nil {
 		return err
@@ -506,8 +503,8 @@ func (w *SingleURLWorker) reconcileSingleURLTask(ctx context.Context, task *Feis
 		return err
 	}
 	switch strings.ToLower(strings.TrimSpace(status.Status)) {
-	case "", crawlerStatusQueued:
-		if task.Status != singleURLStatusQueued {
+	case "queued":
+		if task.Status != feishusdk.StatusDownloaderQueued {
 			return w.markSingleURLTaskQueued(ctx, task, task.GroupID, meta)
 		}
 		return nil
@@ -700,7 +697,7 @@ func (w *SingleURLWorker) markSingleURLTaskQueued(ctx context.Context, task *Fei
 	meta.markQueued(now)
 	fields := map[string]any{}
 	if statusField := strings.TrimSpace(table.Fields.Status); statusField != "" {
-		fields[statusField] = singleURLStatusQueued
+		fields[statusField] = feishusdk.StatusDownloaderQueued
 	}
 	if groupField := strings.TrimSpace(table.Fields.GroupID); groupField != "" && strings.TrimSpace(groupID) != "" {
 		fields[groupField] = groupID
@@ -720,7 +717,7 @@ func (w *SingleURLWorker) markSingleURLTaskQueued(ctx context.Context, task *Fei
 	if err := taskagent.UpdateTaskFields(ctx, task, fields); err != nil {
 		return err
 	}
-	task.Status = singleURLStatusQueued
+	task.Status = feishusdk.StatusDownloaderQueued
 	if strings.TrimSpace(groupID) != "" {
 		task.GroupID = groupID
 	}
