@@ -441,7 +441,9 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 	}
 	cdnURL := extractSingleURLCDNURL(task.Extra)
 	if (strings.TrimSpace(task.Status) == feishusdk.StatusReady || strings.TrimSpace(task.Status) == feishusdk.StatusDownloaderFailed) && cdnURL == "" {
-		return w.failSingleURLTask(ctx, task, "missing cdn_url", nil)
+		// Ready/dl-failed tasks should come from device stage and must have cdn_url.
+		// If cdn_url is missing, hand the task back to device stage by marking it as failed.
+		return w.markSingleURLTaskFailedForDeviceStage(ctx, task)
 	}
 	if cdnURL != "" {
 		metaPayload["cdn_url"] = cdnURL
@@ -466,6 +468,23 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 		Str("user_id", userID).
 		Str("url", url).
 		Msg("single url capture job queued")
+	return nil
+}
+
+func (w *SingleURLWorker) markSingleURLTaskFailedForDeviceStage(ctx context.Context, task *FeishuTask) error {
+	_, table, err := taskagent.TaskSourceContext(task)
+	if err != nil {
+		return err
+	}
+	statusField := strings.TrimSpace(table.Fields.Status)
+	if statusField == "" {
+		return errors.New("single url worker: status field is empty")
+	}
+	fields := map[string]any{statusField: feishusdk.StatusFailed}
+	if err := taskagent.UpdateTaskFields(ctx, task, fields); err != nil {
+		return err
+	}
+	task.Status = feishusdk.StatusFailed
 	return nil
 }
 

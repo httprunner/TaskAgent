@@ -172,6 +172,47 @@ func TestSingleURLWorkerForwardsCDNURLFromExtra(t *testing.T) {
 	}
 }
 
+func TestSingleURLReadyWorkerMarksFailedWhenCDNURLMissing(t *testing.T) {
+	client := &singleURLTestClient{
+		rows: map[string][]feishusdk.TaskRow{
+			feishusdk.StatusReady: {
+				{
+					TaskID: 12,
+					Scene:  SceneSingleURLCapture,
+					Status: feishusdk.StatusReady,
+					Params: "capture",
+					BookID: "B012",
+					UserID: "U012",
+					App:    "com.smile.gifmaker",
+					URL:    "https://example.com/share",
+					Extra:  `{}`,
+				},
+			},
+		},
+	}
+	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
+		Client:        client,
+		CrawlerClient: &stubCrawlerClient{createJobID: "noop"},
+		BitableURL:    "https://bitable.example",
+		Limit:         5,
+		PollInterval:  time.Second,
+	})
+	if err != nil {
+		t.Fatalf("new worker: %v", err)
+	}
+	worker.newTaskStatuses = []string{feishusdk.StatusReady}
+	if err := worker.ProcessOnce(context.Background()); err != nil {
+		t.Fatalf("process once: %v", err)
+	}
+	if len(client.updateCalls) == 0 {
+		t.Fatalf("expected task status update")
+	}
+	call := client.updateCalls[len(client.updateCalls)-1]
+	if call.fields[feishusdk.DefaultTaskFields.Status] != feishusdk.StatusFailed {
+		t.Fatalf("expected status %q, got %#v", feishusdk.StatusFailed, call.fields[feishusdk.DefaultTaskFields.Status])
+	}
+}
+
 func TestSingleURLWorkerPollsSuccessAndWritesVid(t *testing.T) {
 	meta := singleURLMetadata{Attempts: []singleURLAttempt{{JobID: "job-success"}}}
 	client := &singleURLTestClient{
