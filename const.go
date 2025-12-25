@@ -25,13 +25,15 @@ const (
 // depend on the root taskagent package only.
 const (
 	// StatusError marks a task row as permanently errored and skipped.
-	StatusError      = feishusdk.StatusError
-	StatusPending    = feishusdk.StatusPending
-	StatusSuccess    = feishusdk.StatusSuccess
-	StatusReady      = feishusdk.StatusReady
-	StatusFailed     = feishusdk.StatusFailed
-	StatusDispatched = feishusdk.StatusDispatched
-	StatusRunning    = feishusdk.StatusRunning
+	StatusError          = feishusdk.StatusError
+	StatusPending        = feishusdk.StatusPending
+	StatusSuccess        = feishusdk.StatusSuccess
+	StatusReady          = feishusdk.StatusReady
+	StatusProcessing     = feishusdk.StatusProcessing
+	StatusFailed         = feishusdk.StatusFailed
+	StatusDownloadFailed = feishusdk.StatusDownloadFailed
+	StatusDispatched     = feishusdk.StatusDispatched
+	StatusRunning        = feishusdk.StatusRunning
 
 	CookieStatusValid   = feishusdk.CookieStatusValid
 	CookieStatusInvalid = feishusdk.CookieStatusInvalid

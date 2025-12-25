@@ -65,7 +65,7 @@ func TestSingleURLWorkerQueuesTaskAfterCreatingCrawlerJob(t *testing.T) {
 		t.Fatalf("unexpected url %s", got)
 	}
 	meta := crawler.createdMeta[0]
-	if got := meta["platform"]; got != "kuaishou" {
+	if got := meta["platform"]; got != defaultCookiePlatform {
 		t.Fatalf("unexpected platform %s", got)
 	}
 	if got := meta["bid"]; got != "B001" {
@@ -128,6 +128,47 @@ func TestSingleURLWorkerUsesCookiesWhenAvailable(t *testing.T) {
 	got := crawler.createdCookies[0]
 	if len(got) != 1 || got[0] != "cookie=value" {
 		t.Fatalf("unexpected cookies payload: %#v", got)
+	}
+}
+
+func TestSingleURLWorkerForwardsCDNURLFromExtra(t *testing.T) {
+	client := &singleURLTestClient{
+		rows: map[string][]feishusdk.TaskRow{
+			feishusdk.StatusPending: {
+				{
+					TaskID: 11,
+					Scene:  SceneSingleURLCapture,
+					Status: feishusdk.StatusPending,
+					Params: "capture",
+					BookID: "B011",
+					UserID: "U011",
+					App:    "com.smile.gifmaker",
+					URL:    "https://example.com/share",
+					Extra:  `{"feed_url":"https://cdn.example/video.m3u8"}`,
+				},
+			},
+		},
+	}
+	crawler := &stubCrawlerClient{createJobID: "job-cdn"}
+	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
+		Client:        client,
+		CrawlerClient: crawler,
+		BitableURL:    "https://bitable.example",
+		Limit:         5,
+		PollInterval:  time.Second,
+	})
+	if err != nil {
+		t.Fatalf("new worker: %v", err)
+	}
+	if err := worker.ProcessOnce(context.Background()); err != nil {
+		t.Fatalf("process once: %v", err)
+	}
+	if len(crawler.createdMeta) != 1 {
+		t.Fatalf("expected crawler create call")
+	}
+	meta := crawler.createdMeta[0]
+	if got := meta["cdn_url"]; got != "https://cdn.example/video.m3u8" {
+		t.Fatalf("unexpected cdn_url %s", got)
 	}
 }
 
@@ -225,8 +266,8 @@ func TestSingleURLWorkerDoesNotMarkSuccessWhenVidMissing(t *testing.T) {
 	if last.fields[feishusdk.DefaultTaskFields.Status] == feishusdk.StatusSuccess {
 		t.Fatalf("should not mark success when vid missing")
 	}
-	if last.fields[feishusdk.DefaultTaskFields.Status] != feishusdk.StatusRunning {
-		t.Fatalf("expected running status when vid missing, got %#v", last.fields[feishusdk.DefaultTaskFields.Status])
+	if last.fields[feishusdk.DefaultTaskFields.Status] != feishusdk.StatusProcessing {
+		t.Fatalf("expected processing status when vid missing, got %#v", last.fields[feishusdk.DefaultTaskFields.Status])
 	}
 	var logsStr string
 	for _, call := range client.updateCalls {
@@ -267,7 +308,7 @@ func TestSingleURLWorkerMarksCrawlerFailure(t *testing.T) {
 		t.Fatalf("expected failure update")
 	}
 	call := client.updateCalls[len(client.updateCalls)-1]
-	if call.fields[feishusdk.DefaultTaskFields.Status] != feishusdk.StatusFailed {
+	if call.fields[feishusdk.DefaultTaskFields.Status] != feishusdk.StatusDownloadFailed {
 		t.Fatalf("expected failed status, got %#v", call.fields)
 	}
 	logsField := feishusdk.DefaultTaskFields.Logs
@@ -358,7 +399,7 @@ func TestSingleURLWorkerSkipsGroupSummaryWhenNotAllSuccess(t *testing.T) {
 		groupRows: map[string][]feishusdk.TaskRow{
 			groupID: {
 				{TaskID: 30, Scene: SceneSingleURLCapture, Status: singleURLStatusQueued, Webhook: feishusdk.WebhookPending, BookID: "B010", UserID: "U010", GroupID: groupID, Params: "drama-B"},
-				{TaskID: 31, Scene: SceneSingleURLCapture, Status: feishusdk.StatusRunning, Webhook: feishusdk.WebhookPending, BookID: "B010", UserID: "U010", GroupID: groupID, Params: "drama-B"},
+				{TaskID: 31, Scene: SceneSingleURLCapture, Status: feishusdk.StatusProcessing, Webhook: feishusdk.WebhookPending, BookID: "B010", UserID: "U010", GroupID: groupID, Params: "drama-B"},
 			},
 		},
 	}

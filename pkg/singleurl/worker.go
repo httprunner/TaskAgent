@@ -138,7 +138,7 @@ func (m *singleURLMetadata) markQueued(ts time.Time) {
 
 func (m *singleURLMetadata) markRunning() {
 	if latest := m.latestAttempt(); latest != nil {
-		latest.Status = feishusdk.StatusRunning
+		latest.Status = feishusdk.StatusProcessing
 	}
 }
 
@@ -155,7 +155,7 @@ func (m *singleURLMetadata) markSuccess(vid string, ts time.Time) {
 
 func (m *singleURLMetadata) markFailure(reason string, ts time.Time) {
 	if latest := m.latestAttempt(); latest != nil {
-		latest.Status = feishusdk.StatusFailed
+		latest.Status = feishusdk.StatusDownloadFailed
 		latest.Error = strings.TrimSpace(reason)
 		if !ts.IsZero() {
 			latest.CompletedAt = ts.UTC().Unix()
@@ -185,6 +185,9 @@ type SingleURLWorker struct {
 	clock          func() time.Time
 	crawler        crawlerTaskClient
 	cookieProvider CookieProvider
+
+	newTaskStatuses    []string
+	activeTaskStatuses []string
 }
 
 // NewSingleURLWorker builds a worker using the provided configuration.
@@ -221,6 +224,15 @@ func NewSingleURLWorker(cfg SingleURLWorkerConfig) (*SingleURLWorker, error) {
 		clock:          clock,
 		crawler:        crawler,
 		cookieProvider: cfg.CookieProvider,
+		newTaskStatuses: []string{
+			feishusdk.StatusPending,
+			feishusdk.StatusFailed,
+			feishusdk.StatusDownloadFailed,
+		},
+		activeTaskStatuses: []string{
+			singleURLStatusQueued,
+			feishusdk.StatusProcessing,
+		},
 	}, nil
 }
 
@@ -254,6 +266,24 @@ func NewSingleURLWorkerFromEnv(bitableURL string, limit int, pollInterval time.D
 	})
 }
 
+// NewSingleURLReadyWorkerFromEnv builds a worker that consumes tasks already
+// prepared by the device stage (Status=ready) and dispatches them to the
+// downloader service.
+func NewSingleURLReadyWorkerFromEnv(bitableURL string, limit int, pollInterval time.Duration) (*SingleURLWorker, error) {
+	worker, err := NewSingleURLWorkerFromEnv(bitableURL, limit, pollInterval)
+	if err != nil {
+		return nil, err
+	}
+	if worker == nil {
+		return nil, errors.New("single url worker: nil instance")
+	}
+	worker.newTaskStatuses = []string{
+		feishusdk.StatusReady,
+		feishusdk.StatusDownloadFailed,
+	}
+	return worker, nil
+}
+
 // Run starts the polling loop until ctx is cancelled.
 func (w *SingleURLWorker) Run(ctx context.Context) error {
 	if w == nil {
@@ -284,7 +314,7 @@ func (w *SingleURLWorker) ProcessOnce(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	newTasks, err := w.fetchSingleURLTasks(ctx, []string{feishusdk.StatusPending, feishusdk.StatusFailed}, w.limit)
+	newTasks, err := w.fetchSingleURLTasks(ctx, w.newTaskStatuses, w.limit)
 	if err != nil {
 		return err
 	}
@@ -295,7 +325,7 @@ func (w *SingleURLWorker) ProcessOnce(ctx context.Context) error {
 				Msg("single url worker dispatch failed")
 		}
 	}
-	activeTasks, err := w.fetchSingleURLTasks(ctx, []string{singleURLStatusQueued, feishusdk.StatusRunning}, w.limit)
+	activeTasks, err := w.fetchSingleURLTasks(ctx, w.activeTaskStatuses, w.limit)
 	if err != nil {
 		return err
 	}
@@ -385,7 +415,11 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 			Msg("single url worker retry cap reached; marking task error")
 		return w.markSingleURLTaskError(ctx, task, meta)
 	}
-	retryRequired := strings.TrimSpace(task.Status) == feishusdk.StatusFailed
+	retryRequired := false
+	switch strings.TrimSpace(task.Status) {
+	case feishusdk.StatusFailed, feishusdk.StatusDownloadFailed:
+		retryRequired = true
+	}
 	if !retryRequired {
 		if jobID := meta.latestJobID(); jobID != "" {
 			log.Info().
@@ -397,14 +431,15 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 	}
 	cookies := w.collectCookies(ctx)
 	metaPayload := make(map[string]string, 3)
-	if platform := strings.TrimSpace(task.App); platform != "" {
-		metaPayload["platform"] = platform
-	}
+	metaPayload["platform"] = defaultCookiePlatform
 	if bookID != "" {
 		metaPayload["bid"] = bookID
 	}
 	if userID != "" {
 		metaPayload["uid"] = userID
+	}
+	if cdnURL := extractSingleURLFeedURL(task.Extra); cdnURL != "" {
+		metaPayload["cdn_url"] = cdnURL
 	}
 	jobID, err := w.crawler.CreateTask(ctx, url, cookies, metaPayload)
 	if err != nil {
@@ -457,7 +492,7 @@ func (w *SingleURLWorker) reconcileSingleURLTask(ctx context.Context, task *Feis
 		if err := w.updateTaskExtra(ctx, task, meta); err != nil {
 			return err
 		}
-		return taskagent.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishusdk.StatusRunning, "", nil)
+		return taskagent.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishusdk.StatusProcessing, "", nil)
 	case "done":
 		vid := strings.TrimSpace(status.VID)
 		if vid == "" {
@@ -479,11 +514,11 @@ func (w *SingleURLWorker) reconcileSingleURLTask(ctx context.Context, task *Feis
 			if err := w.updateTaskExtra(ctx, task, meta); err != nil {
 				return err
 			}
-			if task.Status != feishusdk.StatusRunning {
-				if err := taskagent.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishusdk.StatusRunning, "", nil); err != nil {
+			if task.Status != feishusdk.StatusProcessing {
+				if err := taskagent.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishusdk.StatusProcessing, "", nil); err != nil {
 					return err
 				}
-				task.Status = feishusdk.StatusRunning
+				task.Status = feishusdk.StatusProcessing
 			}
 			return nil
 		}
@@ -514,6 +549,29 @@ func (w *SingleURLWorker) reconcileSingleURLTask(ctx context.Context, task *Feis
 	}
 }
 
+func extractSingleURLFeedURL(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	var decoded struct {
+		FeedURL string `json:"feed_url"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &decoded); err == nil {
+		return strings.TrimSpace(decoded.FeedURL)
+	}
+	var generic map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &generic); err != nil {
+		return ""
+	}
+	if val, ok := generic["feed_url"]; ok {
+		if s, ok := val.(string); ok {
+			return strings.TrimSpace(s)
+		}
+	}
+	return ""
+}
+
 func (w *SingleURLWorker) updateTaskExtra(ctx context.Context, task *FeishuTask, meta singleURLMetadata) error {
 	_, table, err := taskagent.TaskSourceContext(task)
 	if err != nil {
@@ -540,7 +598,7 @@ func (w *SingleURLWorker) failSingleURLTask(ctx context.Context, task *FeishuTas
 	fields := map[string]any{}
 	statusField := strings.TrimSpace(table.Fields.Status)
 	if statusField != "" {
-		fields[statusField] = feishusdk.StatusFailed
+		fields[statusField] = feishusdk.StatusDownloadFailed
 	}
 	if logsField := strings.TrimSpace(table.Fields.Logs); logsField != "" {
 		encoded := ""
@@ -559,7 +617,7 @@ func (w *SingleURLWorker) failSingleURLTask(ctx context.Context, task *FeishuTas
 	if err := taskagent.UpdateTaskFields(ctx, task, fields); err != nil {
 		return err
 	}
-	task.Status = feishusdk.StatusFailed
+	task.Status = feishusdk.StatusDownloadFailed
 	if logsField := strings.TrimSpace(table.Fields.Logs); logsField != "" {
 		if logs, ok := fields[logsField].(string); ok {
 			task.Logs = logs

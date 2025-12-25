@@ -77,13 +77,31 @@ func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, cook
 		logEvent = logEvent.Str(trimmedKey, trimmedVal)
 	}
 	logEvent.Msg("creating crawler task")
-	payload := map[string]any{
-		"url":          strings.TrimSpace(url),
-		"cookies":      normalizeCookies(cookies),
-		"sync_to_hive": true,
+
+	type requestExtra struct {
+		Cookies []string `json:"cookies,omitempty"`
 	}
-	for k, v := range cleanMeta {
-		payload[k] = v
+	type requestBody struct {
+		Platform string        `json:"platform"`
+		Bid      string        `json:"bid"`
+		UID      string        `json:"uid"`
+		URL      string        `json:"url"`
+		CDNURL   string        `json:"cdn_url,omitempty"`
+		Extra    *requestExtra `json:"extra,omitempty"`
+	}
+
+	payload := requestBody{
+		Platform: strings.TrimSpace(cleanMeta["platform"]),
+		Bid:      strings.TrimSpace(cleanMeta["bid"]),
+		UID:      strings.TrimSpace(cleanMeta["uid"]),
+		URL:      strings.TrimSpace(url),
+		CDNURL:   strings.TrimSpace(cleanMeta["cdn_url"]),
+	}
+	if payload.Platform == "" {
+		payload.Platform = defaultCookiePlatform
+	}
+	if normalized := normalizeCookies(cookies); len(normalized) > 0 {
+		payload.Extra = &requestExtra{Cookies: normalized}
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
