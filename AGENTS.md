@@ -18,7 +18,7 @@
 ## 3. Coding conventions
 - Gofmt everything, keep packages short + lowercase, and colocate mocks in `*_test.go` files.
 - Use interfaces (`taskagent.DeviceProvider`, `taskagent.TaskManager`, `taskagent.JobRunner`) instead of wiring business logic directly into the pool.
-- Honor `TaskLifecycle`: invoke `OnTaskStarted` before the device work begins and call `OnTaskResult` exactly once per task so Feishu status + recorder state stay consistent.
+- Honor `TaskNotifier`: invoke `OnTaskStarted` before the device work begins and call `OnTaskResult` exactly once per task so Feishu status + recorder state stay consistent.
 - Prefer structured logging via `zerolog` and propagate `context.Context` through every exported API so callers can cancel long-running Feishu calls.
 
 ## 4. Feature-specific guidance

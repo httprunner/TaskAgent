@@ -58,7 +58,7 @@ type deviceJob struct {
 	tasks        []*Task
 	cancel       context.CancelFunc
 	startAt      time.Time
-	lifecycle    *TaskLifecycle
+	notifier     TaskNotifier
 	runningTask  string
 	started      bool
 }
@@ -371,7 +371,7 @@ func (a *DevicePoolAgent) startDeviceJob(ctx context.Context, serial string, tas
 		cancel:       cancel,
 		startAt:      time.Now(),
 	}
-	job.lifecycle = a.buildTaskLifecycle(jobCtx, serial, job)
+	job.notifier = a.buildTaskNotifier(jobCtx, serial, job)
 
 	a.jobsMu.Lock()
 	a.jobs[serial] = job
@@ -385,26 +385,53 @@ func (a *DevicePoolAgent) startDeviceJob(ctx context.Context, serial string, tas
 	go a.runDeviceJob(jobCtx, serial, job)
 }
 
-func (a *DevicePoolAgent) buildTaskLifecycle(ctx context.Context, serial string, job *deviceJob) *TaskLifecycle {
+func (a *DevicePoolAgent) buildTaskNotifier(ctx context.Context, serial string, job *deviceJob) TaskNotifier {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return &TaskLifecycle{
-		OnTaskStarted: func(task *Task) {
-			a.handleTaskStarted(ctx, serial, job, task)
-		},
-		OnTaskResult: func(task *Task, err error) {
-			if task == nil {
-				return
-			}
-			if err != nil {
-				task.ResultStatus = feishusdk.StatusFailed
-			} else {
-				task.ResultStatus = feishusdk.StatusSuccess
-			}
-			a.handleTaskResultEvent(ctx, job, task, err)
-		},
+	return taskNotifier{
+		ctx:    ctx,
+		agent:  a,
+		job:    job,
+		serial: serial,
 	}
+}
+
+type taskNotifier struct {
+	ctx    context.Context
+	agent  *DevicePoolAgent
+	job    *deviceJob
+	serial string
+}
+
+func (n taskNotifier) OnTaskStarted(ctx context.Context, deviceSerial string, task *Task) error {
+	if n.agent == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = n.ctx
+	}
+	n.agent.handleTaskStarted(ctx, n.serial, n.job, task)
+	return nil
+}
+
+func (n taskNotifier) OnTaskResult(ctx context.Context, deviceSerial string, task *Task, runErr error) error {
+	if n.agent == nil {
+		return nil
+	}
+	if task == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = n.ctx
+	}
+	if runErr != nil {
+		task.ResultStatus = feishusdk.StatusFailed
+	} else {
+		task.ResultStatus = feishusdk.StatusSuccess
+	}
+	n.agent.handleTaskResultEvent(ctx, n.job, task, runErr)
+	return nil
 }
 
 func (a *DevicePoolAgent) runDeviceJob(ctx context.Context, serial string, job *deviceJob) {
@@ -431,7 +458,7 @@ func (a *DevicePoolAgent) runDeviceJob(ctx context.Context, serial string, job *
 		err = a.jobRunner.RunJob(ctx, JobRequest{
 			DeviceSerial: job.deviceSerial,
 			Tasks:        job.tasks,
-			Lifecycle:    job.lifecycle,
+			Notifier:     job.notifier,
 		})
 		if err == nil {
 			if attempt > 1 {
@@ -563,8 +590,8 @@ func (a *DevicePoolAgent) handleTaskStarted(ctx context.Context, serial string, 
 			}
 		}
 	}
-	if notifier, ok := a.taskManager.(TaskStartNotifier); ok && notifier != nil {
-		if err := notifier.OnTaskStarted(ctx, serial, task); err != nil {
+	if a.taskManager != nil {
+		if err := a.taskManager.OnTaskStarted(ctx, serial, task); err != nil {
 			log.Warn().
 				Err(err).
 				Str("serial", serial).
@@ -581,8 +608,8 @@ func (a *DevicePoolAgent) handleTaskResultEvent(ctx context.Context, job *device
 	if job == nil || task == nil {
 		return
 	}
-	if notifier, ok := a.taskManager.(TaskResultNotifier); ok && notifier != nil {
-		if err := notifier.OnTaskResult(ctx, job.deviceSerial, task, runErr); err != nil {
+	if a.taskManager != nil {
+		if err := a.taskManager.OnTaskResult(ctx, job.deviceSerial, task, runErr); err != nil {
 			log.Warn().
 				Err(err).
 				Str("serial", job.deviceSerial).

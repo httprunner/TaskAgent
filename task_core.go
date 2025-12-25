@@ -17,34 +17,26 @@ type Task struct {
 	LastScreenShotPath string
 }
 
-// TaskLifecycle 暴露任务生命周期回调。
-type TaskLifecycle struct {
-	OnTaskStarted func(task *Task)
-	OnTaskResult  func(task *Task, err error)
+// TaskNotifier exposes task lifecycle callbacks for job runners.
+type TaskNotifier interface {
+	OnTaskStarted(ctx context.Context, deviceSerial string, task *Task) error
+	OnTaskResult(ctx context.Context, deviceSerial string, task *Task, runErr error) error
 }
 
 // TaskManager 定义任务来源需要实现的能力。
 type TaskManager interface {
 	FetchAvailableTasks(ctx context.Context, app string, limit int) ([]*Task, error)
 	OnTasksDispatched(ctx context.Context, deviceSerial string, tasks []*Task) error
-	OnTasksCompleted(ctx context.Context, deviceSerial string, tasks []*Task, jobErr error) error
-}
-
-// TaskStartNotifier 描述任务开始时的回调。
-type TaskStartNotifier interface {
 	OnTaskStarted(ctx context.Context, deviceSerial string, task *Task) error
-}
-
-// TaskResultNotifier 描述任务完成后的回调。
-type TaskResultNotifier interface {
 	OnTaskResult(ctx context.Context, deviceSerial string, task *Task, runErr error) error
+	OnTasksCompleted(ctx context.Context, deviceSerial string, tasks []*Task, jobErr error) error
 }
 
 // JobRequest bundles the execution details for a device.
 type JobRequest struct {
 	DeviceSerial string
 	Tasks        []*Task
-	Lifecycle    *TaskLifecycle
+	Notifier     TaskNotifier
 }
 
 // JobRunner executes tasks on a concrete device.

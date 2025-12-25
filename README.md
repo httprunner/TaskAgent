@@ -120,13 +120,13 @@ Feishu Task Table ──> FeishuTaskClient (task)
 
    func (CaptureRunner) RunJob(ctx context.Context, req taskagent.JobRequest) error {
        for _, task := range req.Tasks {
-           if req.Lifecycle != nil && req.Lifecycle.OnTaskStarted != nil {
-               req.Lifecycle.OnTaskStarted(task)
-           }
+          if req.Notifier != nil {
+              _ = req.Notifier.OnTaskStarted(ctx, req.DeviceSerial, task)
+          }
            // TODO: execute capture logic with task.Payload / req.DeviceSerial
-           if req.Lifecycle != nil && req.Lifecycle.OnTaskResult != nil {
-               req.Lifecycle.OnTaskResult(task, nil)
-           }
+          if req.Notifier != nil {
+              _ = req.Notifier.OnTaskResult(ctx, req.DeviceSerial, task, nil)
+          }
        }
        return nil
    }
@@ -193,10 +193,10 @@ Refer to [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) for the authoritative tabl
 pending/failed (Feishu filter)
         │ FetchAvailableTasks
         ▼
-dispatched ──> TaskLifecycle.OnTaskStarted (Status=running, recorder updates)
+dispatched ──> TaskManager.OnTaskStarted (Status=running, recorder updates)
         │
         ▼
-running ──> TaskLifecycle.OnTaskResult (success/failed)
+running ──> TaskManager.OnTaskResult (success/failed)
         │
         ▼
 OnTasksCompleted → Feishu updates + recorder cleanup

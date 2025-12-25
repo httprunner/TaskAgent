@@ -52,6 +52,14 @@ func (s *stubTaskManager) OnTasksDispatched(ctx context.Context, device string, 
 	return nil
 }
 
+func (s *stubTaskManager) OnTaskStarted(ctx context.Context, device string, task *Task) error {
+	return nil
+}
+
+func (s *stubTaskManager) OnTaskResult(ctx context.Context, device string, task *Task, runErr error) error {
+	return nil
+}
+
 func (s *stubTaskManager) OnTasksCompleted(ctx context.Context, device string, tasks []*Task, jobErr error) error {
 	s.mu.Lock()
 	s.completions += len(tasks)
