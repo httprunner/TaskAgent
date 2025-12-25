@@ -376,18 +376,18 @@ func TestFetchTaskTableExampleMock(t *testing.T) {
 	if id, ok := table.RecordIDByTaskID(101); !ok || id != "recYUOQd9" {
 		t.Fatalf("expected record id recYUOQd9 for task 101, got %q ok=%v", id, ok)
 	}
-	if err := client.UpdateTaskStatus(ctx, table, 101, "processing"); err != nil {
+	if err := client.UpdateTaskStatus(ctx, table, 101, StatusProcessing); err != nil {
 		t.Fatalf("UpdateTaskStatus error: %v", err)
 	}
-	if table.Rows[0].Status != "processing" {
+	if table.Rows[0].Status != StatusProcessing {
 		t.Fatalf("local table status not updated, got %q", table.Rows[0].Status)
 	}
 	fields, ok := capturedPayload["fields"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected captured fields map, got %#v", capturedPayload)
 	}
-	if fields[DefaultTaskFields.Status] != "processing" {
-		t.Fatalf("expected status payload 'processing', got %#v", fields)
+	if fields[DefaultTaskFields.Status] != StatusProcessing {
+		t.Fatalf("expected status payload %#v, got %#v", StatusProcessing, fields)
 	}
 	t.Logf("decoded rows from example table (mock): %+v", table.Rows)
 }
@@ -899,7 +899,7 @@ func TestUpdateTaskStatuses(t *testing.T) {
 		},
 	}
 
-	changes := []TaskStatusUpdate{{TaskID: 101, NewStatus: "processing"}, {TaskID: 102, NewStatus: "done"}}
+	changes := []TaskStatusUpdate{{TaskID: 101, NewStatus: StatusProcessing}, {TaskID: 102, NewStatus: "done"}}
 	override := &TaskFields{Status: customStatusField}
 	if err := client.UpdateTaskStatuses(ctx, liveWritableBitableURL, changes, override); err != nil {
 		t.Fatalf("UpdateTaskStatuses returned error: %v", err)
@@ -914,7 +914,7 @@ func TestUpdateTaskStatuses(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected fields map, got %T", updates[0]["fields"])
 	}
-	if firstFields[customStatusField] != "processing" {
+	if firstFields[customStatusField] != StatusProcessing {
 		t.Fatalf("unexpected first status %#v", firstFields[customStatusField])
 	}
 	secondFields, ok := updates[1]["fields"].(map[string]any)
@@ -1057,7 +1057,7 @@ func TestTargetRecordLifecycleLive(t *testing.T) {
 		}
 	}
 	updates := []TaskStatusUpdate{
-		{TaskID: localTable.Rows[0].TaskID, NewStatus: "processing"},
+		{TaskID: localTable.Rows[0].TaskID, NewStatus: StatusProcessing},
 		{TaskID: localTable.Rows[1].TaskID, NewStatus: "done"},
 	}
 	for _, upd := range updates {

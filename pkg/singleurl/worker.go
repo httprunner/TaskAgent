@@ -16,10 +16,12 @@ import (
 )
 
 const (
-	crawlerServiceBaseURLEnv     = "CRAWLER_SERVICE_BASE_URL"
-	defaultCrawlerServiceBaseURL = "http://localhost:8000"
-	singleURLStatusQueued        = "queued"
-	singleURLGroupFetchLimit     = 200
+	crawlerServiceBaseURLEnv            = "CRAWLER_SERVICE_BASE_URL"
+	defaultCrawlerServiceBaseURL        = "http://localhost:8000"
+	singleURLStatusQueued               = "queued"
+	legacySingleURLStatusProcessing     = "processing"
+	legacySingleURLStatusDownloadFailed = "download-failed"
+	singleURLGroupFetchLimit            = 200
 	// DefaultSingleURLWorkerLimit caps each fetch cycle when no explicit limit is provided.
 	DefaultSingleURLWorkerLimit = 20
 	singleURLMaxAttempts        = 3
@@ -228,10 +230,12 @@ func NewSingleURLWorker(cfg SingleURLWorkerConfig) (*SingleURLWorker, error) {
 			feishusdk.StatusPending,
 			feishusdk.StatusFailed,
 			feishusdk.StatusDownloadFailed,
+			legacySingleURLStatusDownloadFailed,
 		},
 		activeTaskStatuses: []string{
 			singleURLStatusQueued,
 			feishusdk.StatusProcessing,
+			legacySingleURLStatusProcessing,
 		},
 	}, nil
 }
@@ -280,6 +284,7 @@ func NewSingleURLReadyWorkerFromEnv(bitableURL string, limit int, pollInterval t
 	worker.newTaskStatuses = []string{
 		feishusdk.StatusReady,
 		feishusdk.StatusDownloadFailed,
+		legacySingleURLStatusDownloadFailed,
 	}
 	return worker, nil
 }
@@ -438,7 +443,7 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 	if userID != "" {
 		metaPayload["uid"] = userID
 	}
-	if cdnURL := extractSingleURLFeedURL(task.Extra); cdnURL != "" {
+	if cdnURL := extractSingleURLCDNURL(task.Extra); cdnURL != "" {
 		metaPayload["cdn_url"] = cdnURL
 	}
 	jobID, err := w.crawler.CreateTask(ctx, url, cookies, metaPayload)
@@ -549,23 +554,32 @@ func (w *SingleURLWorker) reconcileSingleURLTask(ctx context.Context, task *Feis
 	}
 }
 
-func extractSingleURLFeedURL(raw string) string {
+func extractSingleURLCDNURL(raw string) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return ""
 	}
 	var decoded struct {
+		CDNURL  string `json:"cdn_url"`
 		FeedURL string `json:"feed_url"`
 	}
 	if err := json.Unmarshal([]byte(trimmed), &decoded); err == nil {
+		if strings.TrimSpace(decoded.CDNURL) != "" {
+			return strings.TrimSpace(decoded.CDNURL)
+		}
 		return strings.TrimSpace(decoded.FeedURL)
 	}
 	var generic map[string]any
 	if err := json.Unmarshal([]byte(trimmed), &generic); err != nil {
 		return ""
 	}
+	if val, ok := generic["cdn_url"]; ok {
+		if s, ok := val.(string); ok && strings.TrimSpace(s) != "" {
+			return strings.TrimSpace(s)
+		}
+	}
 	if val, ok := generic["feed_url"]; ok {
-		if s, ok := val.(string); ok {
+		if s, ok := val.(string); ok && strings.TrimSpace(s) != "" {
 			return strings.TrimSpace(s)
 		}
 	}

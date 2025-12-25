@@ -144,7 +144,7 @@ func TestSingleURLWorkerForwardsCDNURLFromExtra(t *testing.T) {
 					UserID: "U011",
 					App:    "com.smile.gifmaker",
 					URL:    "https://example.com/share",
-					Extra:  `{"feed_url":"https://cdn.example/video.m3u8"}`,
+					Extra:  `{"cdn_url":"https://cdn.example/video.m3u8"}`,
 				},
 			},
 		},

@@ -1122,7 +1122,7 @@ func hasFeedURL(extra string) bool {
 	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
 		return false
 	}
-	v, ok := payload["feed_url"]
+	v, ok := payload["cdn_url"]
 	if !ok || v == nil {
 		return false
 	}
