@@ -28,6 +28,7 @@ const (
 	StatusError      = feishusdk.StatusError
 	StatusPending    = feishusdk.StatusPending
 	StatusSuccess    = feishusdk.StatusSuccess
+	StatusReady      = feishusdk.StatusReady
 	StatusFailed     = feishusdk.StatusFailed
 	StatusDispatched = feishusdk.StatusDispatched
 	StatusRunning    = feishusdk.StatusRunning

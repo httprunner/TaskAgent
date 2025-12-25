@@ -29,6 +29,8 @@ const (
 	StatusPending = "pending"
 	// StatusSuccess marks a task row as completed successfully.
 	StatusSuccess = "success"
+	// StatusReady marks a task row ready for downstream processing.
+	StatusReady = "ready"
 	// StatusFailed marks a task row as failed.
 	StatusFailed = "failed"
 	// StatusDispatched marks a task row as dispatched.
