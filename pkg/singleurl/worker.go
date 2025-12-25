@@ -18,7 +18,8 @@ import (
 const (
 	crawlerServiceBaseURLEnv     = "CRAWLER_SERVICE_BASE_URL"
 	defaultCrawlerServiceBaseURL = "http://localhost:8000"
-	singleURLStatusQueued        = "queued"
+	singleURLStatusQueued        = "dl-queued"
+	crawlerStatusQueued          = "queued"
 	singleURLGroupFetchLimit     = 200
 	// DefaultSingleURLWorkerLimit caps each fetch cycle when no explicit limit is provided.
 	DefaultSingleURLWorkerLimit = 20
@@ -438,7 +439,11 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 	if userID != "" {
 		metaPayload["uid"] = userID
 	}
-	if cdnURL := extractSingleURLCDNURL(task.Extra); cdnURL != "" {
+	cdnURL := extractSingleURLCDNURL(task.Extra)
+	if (strings.TrimSpace(task.Status) == feishusdk.StatusReady || strings.TrimSpace(task.Status) == feishusdk.StatusDownloaderFailed) && cdnURL == "" {
+		return w.failSingleURLTask(ctx, task, "missing cdn_url", nil)
+	}
+	if cdnURL != "" {
 		metaPayload["cdn_url"] = cdnURL
 	}
 	jobID, err := w.crawler.CreateTask(ctx, url, cookies, metaPayload)
@@ -482,7 +487,7 @@ func (w *SingleURLWorker) reconcileSingleURLTask(ctx context.Context, task *Feis
 		return err
 	}
 	switch strings.ToLower(strings.TrimSpace(status.Status)) {
-	case "", singleURLStatusQueued:
+	case "", crawlerStatusQueued:
 		if task.Status != singleURLStatusQueued {
 			return w.markSingleURLTaskQueued(ctx, task, task.GroupID, meta)
 		}

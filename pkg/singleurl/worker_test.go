@@ -79,7 +79,7 @@ func TestSingleURLWorkerQueuesTaskAfterCreatingCrawlerJob(t *testing.T) {
 	}
 	last := client.updateCalls[len(client.updateCalls)-1]
 	if status := last.fields[feishusdk.DefaultTaskFields.Status]; status != singleURLStatusQueued {
-		t.Fatalf("expected status queued, got %#v", status)
+		t.Fatalf("expected status %q, got %#v", singleURLStatusQueued, status)
 	}
 	logsVal := last.fields[feishusdk.DefaultTaskFields.Logs]
 	if logsStr, _ := logsVal.(string); logsStr == "" || !strings.Contains(logsStr, "job-123") {
