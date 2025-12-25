@@ -157,25 +157,23 @@ func (m *singleURLMetadata) markFailure(reason string, ts time.Time) {
 // SingleURLWorkerConfig captures the dependencies required to process
 // "单个链接采集" (single URL) tasks independently from device runners.
 type SingleURLWorkerConfig struct {
-	Client         taskagent.TargetTableClient
-	BitableURL     string
-	Limit          int
-	PollInterval   time.Duration
-	Clock          func() time.Time
-	CrawlerClient  crawlerTaskClient
-	CookieProvider CookieProvider
+	Client        taskagent.TargetTableClient
+	BitableURL    string
+	Limit         int
+	PollInterval  time.Duration
+	Clock         func() time.Time
+	CrawlerClient crawlerTaskClient
 }
 
 // SingleURLWorker pulls single-URL capture tasks and dispatches them via
 // API stubs without using physical devices.
 type SingleURLWorker struct {
-	client         taskagent.TargetTableClient
-	bitableURL     string
-	limit          int
-	pollInterval   time.Duration
-	clock          func() time.Time
-	crawler        crawlerTaskClient
-	cookieProvider CookieProvider
+	client       taskagent.TargetTableClient
+	bitableURL   string
+	limit        int
+	pollInterval time.Duration
+	clock        func() time.Time
+	crawler      crawlerTaskClient
 
 	newTaskStatuses    []string
 	activeTaskStatuses []string
@@ -208,13 +206,12 @@ func NewSingleURLWorker(cfg SingleURLWorkerConfig) (*SingleURLWorker, error) {
 		clock = time.Now
 	}
 	return &SingleURLWorker{
-		client:         client,
-		bitableURL:     bitableURL,
-		limit:          limit,
-		pollInterval:   poll,
-		clock:          clock,
-		crawler:        crawler,
-		cookieProvider: cfg.CookieProvider,
+		client:       client,
+		bitableURL:   bitableURL,
+		limit:        limit,
+		pollInterval: poll,
+		clock:        clock,
+		crawler:      crawler,
 		newTaskStatuses: []string{
 			feishusdk.StatusPending,
 			feishusdk.StatusFailed,
@@ -238,22 +235,12 @@ func NewSingleURLWorkerFromEnv(bitableURL string, limit int, pollInterval time.D
 	if err != nil {
 		return nil, err
 	}
-	var cookieProvider CookieProvider
-	cookieTableURL := env.String(feishusdk.EnvCookieBitableURL, "")
-	if cookieTableURL != "" {
-		provider, err := NewCookieProvider(client, cookieTableURL, defaultCookiePlatform, 0)
-		if err != nil {
-			return nil, err
-		}
-		cookieProvider = provider
-	}
 	return NewSingleURLWorker(SingleURLWorkerConfig{
-		Client:         client,
-		BitableURL:     bitableURL,
-		Limit:          limit,
-		PollInterval:   pollInterval,
-		CrawlerClient:  crawler,
-		CookieProvider: cookieProvider,
+		Client:        client,
+		BitableURL:    bitableURL,
+		Limit:         limit,
+		PollInterval:  pollInterval,
+		CrawlerClient: crawler,
 	})
 }
 
@@ -420,7 +407,6 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 			return nil
 		}
 	}
-	cookies := w.collectCookies(ctx)
 	metaPayload := make(map[string]string, 3)
 	metaPayload["platform"] = defaultCookiePlatform
 	if bookID != "" {
@@ -438,7 +424,7 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 	if cdnURL != "" {
 		metaPayload["cdn_url"] = cdnURL
 	}
-	taskID, err := w.crawler.CreateTask(ctx, url, cookies, metaPayload)
+	taskID, err := w.crawler.CreateTask(ctx, url, nil, metaPayload)
 	if err != nil {
 		return w.failSingleURLTask(ctx, task, fmt.Sprintf("create crawler task failed: %v", err), nil)
 	}
@@ -725,21 +711,6 @@ func (w *SingleURLWorker) markSingleURLTaskQueued(ctx context.Context, task *Fei
 	}
 	updateTimestampFields(task, now, nowMillis)
 	return nil
-}
-
-func (w *SingleURLWorker) collectCookies(ctx context.Context) []string {
-	if w == nil || w.cookieProvider == nil {
-		return nil
-	}
-	rec, err := w.cookieProvider.PickCookie(ctx)
-	if err != nil {
-		log.Warn().Err(err).Msg("single url worker: pick cookie failed")
-		return nil
-	}
-	if rec == nil || strings.TrimSpace(rec.Value) == "" {
-		return nil
-	}
-	return []string{rec.Value}
 }
 
 func updateTimestampFields(task *FeishuTask, ts time.Time, millis int64) {

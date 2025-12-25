@@ -88,47 +88,7 @@ func TestSingleURLWorkerQueuesTaskAfterCreatingCrawlerJob(t *testing.T) {
 }
 
 func TestSingleURLWorkerUsesCookiesWhenAvailable(t *testing.T) {
-	client := &singleURLTestClient{
-		rows: map[string][]feishusdk.TaskRow{
-			feishusdk.StatusPending: {
-				{
-					TaskID: 10,
-					Scene:  SceneSingleURLCapture,
-					Status: feishusdk.StatusPending,
-					Params: "capture",
-					BookID: "B010",
-					UserID: "U010",
-					App:    "kuaishou",
-					URL:    "https://example.com/cookie",
-				},
-			},
-		},
-	}
-	crawler := &stubCrawlerClient{createTaskID: "task-cookie"}
-	provider := &stubCookieProvider{
-		values: []*CookieRecord{{RecordID: "rec-1", Value: "cookie=value"}},
-	}
-	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
-		Client:         client,
-		CrawlerClient:  crawler,
-		CookieProvider: provider,
-		BitableURL:     "https://bitable.example",
-		Limit:          5,
-		PollInterval:   time.Second,
-	})
-	if err != nil {
-		t.Fatalf("new worker: %v", err)
-	}
-	if err := worker.ProcessOnce(context.Background()); err != nil {
-		t.Fatalf("process once: %v", err)
-	}
-	if len(crawler.createdCookies) != 1 {
-		t.Fatalf("expected cookies to be forwarded")
-	}
-	got := crawler.createdCookies[0]
-	if len(got) != 1 || got[0] != "cookie=value" {
-		t.Fatalf("unexpected cookies payload: %#v", got)
-	}
+	t.Skip("cookie forwarding removed from SingleURLWorker")
 }
 
 func TestSingleURLWorkerForwardsCDNURLFromExtra(t *testing.T) {
@@ -691,7 +651,6 @@ type stubCrawlerClient struct {
 	createErr       error
 	statuses        map[string]*crawlerTaskStatus
 	createdURLs     []string
-	createdCookies  [][]string
 	createdMeta     []map[string]string
 	summaryPayloads []TaskSummaryPayload
 	summaryErr      error
@@ -700,8 +659,6 @@ type stubCrawlerClient struct {
 
 func (c *stubCrawlerClient) CreateTask(_ context.Context, url string, cookies []string, meta map[string]string) (string, error) {
 	c.createdURLs = append(c.createdURLs, url)
-	copyCookies := append([]string(nil), cookies...)
-	c.createdCookies = append(c.createdCookies, copyCookies)
 	copyMeta := make(map[string]string, len(meta))
 	for k, v := range meta {
 		copyMeta[k] = v
@@ -727,23 +684,4 @@ func (c *stubCrawlerClient) GetTask(_ context.Context, taskID string) (*crawlerT
 func (c *stubCrawlerClient) SendTaskSummary(_ context.Context, payload TaskSummaryPayload) error {
 	c.summaryPayloads = append(c.summaryPayloads, payload)
 	return c.summaryErr
-}
-
-type stubCookieProvider struct {
-	values []*CookieRecord
-	idx    int
-	err    error
-}
-
-func (s *stubCookieProvider) PickCookie(context.Context) (*CookieRecord, error) {
-	if s.err != nil {
-		return nil, s.err
-	}
-	if len(s.values) == 0 {
-		return nil, nil
-	}
-	rec := s.values[s.idx%len(s.values)]
-	s.idx++
-	copy := *rec
-	return &copy, nil
 }

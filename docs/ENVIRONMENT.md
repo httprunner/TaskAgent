@@ -32,13 +32,13 @@ The tables below enumerate every environment variable TaskAgent reads via `os.Ge
 | Variable | Required | Default | Used by | Description |
 | --- | --- | --- | --- | --- |
 | `CRAWLER_SERVICE_BASE_URL` | Optional | `http://localhost:8080` | `pkg/singleurl`, `pkg/webhook`（single_url_capture 汇总）, `cmd singleurl` | Base URL for `content_web_crawler` 的 `/download/tasks` API（创建 task + 轮询 `/download/tasks/<task_id>` 状态 + `/download/tasks/finish` 汇总上报）。 |
-| `COOKIE_BITABLE_URL` | Optional | – | `pkg/singleurl` | Feishu bitable storing account cookies（字段：`Cookies`、`Platform`、`Status`），worker 会轮询 `Status=valid` 的 cookies 并随机/轮流使用。 |
-| `ENABLE_COOKIE_VALIDATION` | Optional | unset (`false`) | `pkg/singleurl` | 设为 `true` 时才会对快手 cookies 发送首页请求校验登录态；默认跳过校验直接使用表里记录。 |
+| `COOKIE_BITABLE_URL` | Optional | – | – | (Deprecated) SingleURLWorker no longer reads/forwards cookies. |
+| `ENABLE_COOKIE_VALIDATION` | Optional | unset (`false`) | – | (Deprecated) Kept for backward compatibility; no longer used by SingleURLWorker. |
 
-Cookies 表字段要求：
+Cookies 表字段要求（Deprecated）：
 - `Cookies`：账号 Web 登录态字符串；
 - `Platform`：平台名称；
-- `Status`：`valid` / `invalid`，SingleURLWorker 仅挑选 `valid` 行，后续会在验证失败时写回 `invalid`（预留能力）。
+- `Status`：`valid` / `invalid`。
 
 ## Field overrides
 

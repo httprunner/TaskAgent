@@ -19,19 +19,14 @@
 
 ## Cookies 管理
 
-- 在 `COOKIE_BITABLE_URL` 对应的多维表中维护账号 cookies：
-  - `Cookies`：Web 登录态字符串；
-  - `Platform`：平台名称。
-  - `Status`：`valid` / `invalid`。SingleURLWorker 只会使用 `Status=valid` 的行。
-- Worker 每次刷新时会批量抓取 `valid` cookies，并采用随机/轮询的方式挑选，避免同一 cookie 被连续使用。
-- 预留了 cookie 有效性检测与失效回写能力：未来可实现检测逻辑，若发现失效即把对应行的 `Status` 写回 `invalid` 并继续尝试下一条。
+目前 SingleURLWorker 不再从 Feishu 读取/转发 cookies，调用下载服务时不会携带 cookies。
 
 ## 调度与状态流转
 
 1. 设备池（`DevicePoolAgent`）默认通过 `task.Config.AllowedScenes` 仅消费需要物理设备的场景（比如综合页/个人页/录屏/合集/锚点），`Scene=单个链接采集` 不在列表中，因此完全交给 `SingleURLWorker`（内部仍使用 `task` 的相同查询逻辑），不会再占用设备拉取额度。
 2. `SingleURLWorker`（核心实现位于 `pkg/singleurl`，通过 `singleurl.NewSingleURLWorker` / `singleurl.NewSingleURLWorkerFromEnv` 使用）按照 `pending → failed` 顺序批量拉取任务，每轮最多 `fetch-tasks-limit` 条，可通过 `--single-url-poll-interval` 改写扫描频率。
 3. 对于所有字段完整的任务：
-   - Worker 会调用下载服务 `POST /download/tasks`，请求体包含 `{platform,bid,uid,url}`（可选 `cdn_url` / `extra.cookies`）；
+   - Worker 会调用下载服务 `POST /download/tasks`，请求体包含 `{platform,bid,uid,url}`（可选 `cdn_url`）；
    - 成功后会把任务 `Status` 更新为 `queued`，将 `GroupID` 写成 `BookID_UserID`，并把 `{task_id: <xxx>}` 序列化到 `Logs`；
    - `DispatchedAt/StartAt` 同步为当前时间，用于后续统计；若创建失败则立即标记 `failed` 并写入错误信息。
 4. `SingleURLWorker` 继续在每轮 `ProcessOnce` 中拉取 `Status ∈ {queued,running}` 的任务并轮询 `GET /download/tasks/<task_id>`：
