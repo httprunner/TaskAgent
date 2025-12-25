@@ -15,7 +15,7 @@ import (
 )
 
 type crawlerTaskClient interface {
-	CreateTask(ctx context.Context, url string, cookies []string, meta map[string]string) (string, error)
+	CreateTask(ctx context.Context, url string, meta map[string]string) (string, error)
 	GetTask(ctx context.Context, taskID string) (*crawlerTaskStatus, error)
 	SendTaskSummary(ctx context.Context, payload TaskSummaryPayload) error
 }
@@ -67,8 +67,8 @@ func newRESTCrawlerTaskClient(baseURL string, httpClient *http.Client) (crawlerT
 	return &restCrawlerTaskClient{baseURL: baseURL, httpClient: httpClient}, nil
 }
 
-func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, cookies []string, meta map[string]string) (string, error) {
-	logEvent := log.Info().Str("url", url).Int("cookies", len(cookies))
+func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, meta map[string]string) (string, error) {
+	logEvent := log.Info().Str("url", url)
 	cleanMeta := make(map[string]string, len(meta))
 	for k, v := range meta {
 		trimmedKey := strings.TrimSpace(k)
@@ -81,16 +81,12 @@ func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, cook
 	}
 	logEvent.Msg("creating crawler task")
 
-	type requestExtra struct {
-		Cookies []string `json:"cookies,omitempty"`
-	}
 	type requestBody struct {
-		Platform string        `json:"platform"`
-		Bid      string        `json:"bid"`
-		UID      string        `json:"uid"`
-		URL      string        `json:"url"`
-		CDNURL   string        `json:"cdn_url,omitempty"`
-		Extra    *requestExtra `json:"extra,omitempty"`
+		Platform string `json:"platform"`
+		Bid      string `json:"bid"`
+		UID      string `json:"uid"`
+		URL      string `json:"url"`
+		CDNURL   string `json:"cdn_url,omitempty"`
 	}
 
 	payload := requestBody{
@@ -112,28 +108,16 @@ func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, cook
 	if payload.URL == "" {
 		return "", errors.New("crawler create task payload missing url")
 	}
-	if normalized := normalizeCookies(cookies); len(normalized) > 0 {
-		payload.Extra = &requestExtra{Cookies: normalized}
-	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", errors.Wrap(err, "encode create task payload")
 	}
 	endpoint := fmt.Sprintf("%s/download/tasks", c.baseURL)
-	cookieCount := 0
-	if payload.Extra != nil {
-		cookieCount = len(payload.Extra.Cookies)
-	}
 	log.Info().
 		Str("method", http.MethodPost).
-		Str("path", "/download/tasks").
 		Str("url", endpoint).
-		Str("platform", payload.Platform).
-		Str("bid", payload.Bid).
-		Str("uid", payload.UID).
-		Bool("has_cdn_url", strings.TrimSpace(payload.CDNURL) != "").
-		Int("cookie_count", cookieCount).
-		Msg("crawler request")
+		Any("payload", payload).
+		Msg("crawler create tasks request")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return "", errors.Wrap(err, "build create task request")
@@ -162,12 +146,10 @@ func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, cook
 	taskID := stringifyJSONID(parsed.Data.TaskID)
 	log.Info().
 		Str("method", http.MethodPost).
-		Str("path", "/download/tasks").
+		Str("url", endpoint).
 		Int("http_status", resp.StatusCode).
-		Int("code", parsed.Code).
-		Str("msg", strings.TrimSpace(parsed.Msg)).
-		Str("task_id", taskID).
-		Msg("crawler response")
+		Any("response", parsed).
+		Msg("crawler create tasks response")
 	if parsed.Code != 0 {
 		return "", errors.Errorf("crawler create task failed: code=%d msg=%s", parsed.Code, strings.TrimSpace(parsed.Msg))
 	}
@@ -182,10 +164,9 @@ func (c *restCrawlerTaskClient) GetTask(ctx context.Context, taskID string) (*cr
 	endpoint := fmt.Sprintf("%s/download/tasks/%s", c.baseURL, requestedTaskID)
 	log.Info().
 		Str("method", http.MethodGet).
-		Str("path", "/download/tasks/<task_id>").
 		Str("url", endpoint).
 		Str("task_id", requestedTaskID).
-		Msg("crawler request")
+		Msg("crawler get task request")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "build get task request")
@@ -220,6 +201,12 @@ func (c *restCrawlerTaskClient) GetTask(ctx context.Context, taskID string) (*cr
 	if err := decoder.Decode(&parsed); err != nil {
 		return nil, errors.Wrap(err, "decode get task response")
 	}
+	log.Info().
+		Str("method", http.MethodGet).
+		Str("url", endpoint).
+		Int("http_status", resp.StatusCode).
+		Any("response", parsed).
+		Msg("crawler get task response")
 	if parsed.Code != 0 {
 		return nil, errors.Errorf("crawler get task failed: code=%d msg=%s", parsed.Code, strings.TrimSpace(parsed.Msg))
 	}
@@ -237,17 +224,6 @@ func (c *restCrawlerTaskClient) GetTask(ctx context.Context, taskID string) (*cr
 		CreatedAt: parsed.Data.CreatedAt,
 		UpdatedAt: parsed.Data.UpdatedAt,
 	}
-	log.Info().
-		Str("method", http.MethodGet).
-		Str("path", "/download/tasks/<task_id>").
-		Int("http_status", resp.StatusCode).
-		Int("code", parsed.Code).
-		Str("msg", strings.TrimSpace(parsed.Msg)).
-		Str("task_id", status.TaskID).
-		Str("task_status", status.Status).
-		Bool("has_vid", status.VID != "").
-		Str("error", status.Error).
-		Msg("crawler response")
 	return status, nil
 }
 
@@ -255,7 +231,7 @@ func (c *restCrawlerTaskClient) errorFromResponse(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 	bodyStr := strings.TrimSpace(string(body))
 	bodyStr = truncateString(bodyStr, 512)
-	log.Info().
+	log.Error().
 		Str("method", resp.Request.Method).
 		Str("path", resp.Request.URL.Path).
 		Int("http_status", resp.StatusCode).
@@ -273,13 +249,6 @@ func (c *restCrawlerTaskClient) SendTaskSummary(ctx context.Context, payload Tas
 	if err != nil {
 		return err
 	}
-	log.Info().
-		Str("status", normalized.Status).
-		Str("task_name", normalized.TaskName).
-		Int("total", normalized.Total).
-		Int("done", normalized.Done).
-		Int("unique_count", normalized.UniqueCount).
-		Msg("sending crawler task summary")
 	body, err := json.Marshal(normalized)
 	if err != nil {
 		return errors.Wrap(err, "encode task summary payload")
@@ -287,15 +256,9 @@ func (c *restCrawlerTaskClient) SendTaskSummary(ctx context.Context, payload Tas
 	endpoint := fmt.Sprintf("%s/download/tasks/finish", c.baseURL)
 	log.Info().
 		Str("method", http.MethodPost).
-		Str("path", "/download/tasks/finish").
 		Str("url", endpoint).
-		Str("status", normalized.Status).
-		Str("task_name", normalized.TaskName).
-		Int("total", normalized.Total).
-		Int("done", normalized.Done).
-		Int("unique_count", normalized.UniqueCount).
-		Bool("has_email", strings.TrimSpace(normalized.Email) != "").
-		Msg("crawler request")
+		Any("payload", normalized).
+		Msg("crawler task summary request")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return errors.Wrap(err, "build task summary request")
@@ -320,11 +283,10 @@ func (c *restCrawlerTaskClient) SendTaskSummary(ctx context.Context, payload Tas
 	}
 	log.Info().
 		Str("method", http.MethodPost).
-		Str("path", "/download/tasks/finish").
+		Str("url", endpoint).
 		Int("http_status", resp.StatusCode).
-		Int("code", parsed.Code).
-		Str("msg", strings.TrimSpace(parsed.Msg)).
-		Msg("crawler response")
+		Any("response", parsed).
+		Msg("crawler task summary response")
 	if parsed.Code != 0 {
 		return errors.Errorf("crawler task summary failed: code=%d msg=%s", parsed.Code, strings.TrimSpace(parsed.Msg))
 	}
@@ -345,19 +307,6 @@ func SendTaskSummaryToCrawler(ctx context.Context, baseURL string, payload TaskS
 		return err
 	}
 	return client.SendTaskSummary(ctx, payload)
-}
-
-func normalizeCookies(values []string) []string {
-	if len(values) == 0 {
-		return []string{}
-	}
-	out := make([]string, 0, len(values))
-	for _, v := range values {
-		if trimmed := strings.TrimSpace(v); trimmed != "" {
-			out = append(out, trimmed)
-		}
-	}
-	return out
 }
 
 func normalizeTaskSummaryPayload(payload TaskSummaryPayload) (TaskSummaryPayload, error) {

@@ -424,7 +424,7 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 	if cdnURL != "" {
 		metaPayload["cdn_url"] = cdnURL
 	}
-	taskID, err := w.crawler.CreateTask(ctx, url, nil, metaPayload)
+	taskID, err := w.crawler.CreateTask(ctx, url, metaPayload)
 	if err != nil {
 		return w.failSingleURLTask(ctx, task, fmt.Sprintf("create crawler task failed: %v", err), nil)
 	}

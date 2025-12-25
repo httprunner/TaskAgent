@@ -87,10 +87,6 @@ func TestSingleURLWorkerQueuesTaskAfterCreatingCrawlerJob(t *testing.T) {
 	}
 }
 
-func TestSingleURLWorkerUsesCookiesWhenAvailable(t *testing.T) {
-	t.Skip("cookie forwarding removed from SingleURLWorker")
-}
-
 func TestSingleURLWorkerForwardsCDNURLFromExtra(t *testing.T) {
 	client := &singleURLTestClient{
 		rows: map[string][]feishusdk.TaskRow{
@@ -657,7 +653,7 @@ type stubCrawlerClient struct {
 	queriedTaskID   []string
 }
 
-func (c *stubCrawlerClient) CreateTask(_ context.Context, url string, cookies []string, meta map[string]string) (string, error) {
+func (c *stubCrawlerClient) CreateTask(_ context.Context, url string, meta map[string]string) (string, error) {
 	c.createdURLs = append(c.createdURLs, url)
 	copyMeta := make(map[string]string, len(meta))
 	for k, v := range meta {
