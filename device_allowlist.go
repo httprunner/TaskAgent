@@ -4,24 +4,17 @@ import "strings"
 
 const (
 	// EnvDeviceAllowlist optionally restricts the local device pool to a subset of device serials.
-	// The value can be a comma/semicolon/whitespace-separated list, for example:
+	// The value must be a comma-separated list, for example:
 	//   DEVICE_ALLOWLIST="device-A,device-B"
-	//   DEVICE_ALLOWLIST="device-A device-B"
 	EnvDeviceAllowlist = "DEVICE_ALLOWLIST"
 )
 
 func parseDeviceAllowlist(raw string) []string {
-	if strings.TrimSpace(raw) == "" {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
 		return nil
 	}
-	parts := strings.FieldsFunc(raw, func(r rune) bool {
-		switch r {
-		case ',', ';', '\n', '\r', '\t', ' ', '|':
-			return true
-		default:
-			return false
-		}
-	})
+	parts := strings.Split(trimmed, ",")
 	return normalizeDeviceAllowlist(parts)
 }
 

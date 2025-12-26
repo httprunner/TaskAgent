@@ -31,7 +31,7 @@ The tables below enumerate every environment variable TaskAgent reads via `os.Ge
 
 | Variable | Required | Default | Used by | Description |
 | --- | --- | --- | --- | --- |
-| `DEVICE_ALLOWLIST` | Optional | empty | `taskagent.DevicePoolAgent` | Restrict scheduling to a subset of locally connected device serials. Supports comma/semicolon/whitespace/pipe separated lists (e.g. `device-A,device-B`). When empty, all connected devices are eligible. |
+| `DEVICE_ALLOWLIST` | Optional | empty | `taskagent.DevicePoolAgent` | Restrict scheduling to a subset of locally connected device serials. Must be a comma-separated list (e.g. `device-A,device-B`). When empty, all connected devices are eligible. |
 
 ## 资源下载服务
 
