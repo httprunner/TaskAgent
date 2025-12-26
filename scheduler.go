@@ -176,6 +176,11 @@ func (a *DevicePoolAgent) Start(ctx context.Context, app string) error {
 		return errors.New("context cannot be nil")
 	}
 
+	// Fast-start: run one cycle immediately instead of waiting for the first tick.
+	if err := a.runCycle(ctx, app); err != nil {
+		log.Error().Err(err).Msg("device pool initial cycle failed")
+	}
+
 	ticker := time.NewTicker(a.cfg.PollInterval)
 	defer ticker.Stop()
 
@@ -221,78 +226,116 @@ func (a *DevicePoolAgent) refreshDevices(ctx context.Context) error {
 }
 
 func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
-	idle := a.idleDevices()
-	if len(idle) == 0 {
-		log.Info().Msg("device pool dispatch skipped: no idle devices")
-		return nil
-	}
-	maxTasks := len(idle) * a.cfg.MaxTasksPerJob
-	fetchCap := a.cfg.MaxFetchPerPoll
-	if fetchCap > 0 && maxTasks > fetchCap {
-		maxTasks = fetchCap
-	}
-	log.Info().
-		Int("idle_devices", len(idle)).
-		Int("max_tasks_per_job", a.cfg.MaxTasksPerJob).
-		Int("fetch_cap", fetchCap).
-		Int("max_fetch", maxTasks).
-		Msg("device pool dispatch requesting tasks")
-	tasks, err := a.taskManager.FetchAvailableTasks(ctx, app, maxTasks)
-	if err != nil {
-		return errors.Wrap(err, "fetch available tasks failed")
-	}
-	if len(tasks) == 0 {
-		log.Info().
-			Int("idle_devices", len(idle)).
-			Int("max_fetch", maxTasks).
-			Msg("device pool dispatch found no available tasks")
-		return nil
-	}
+	dispatchStart := time.Now()
+	dispatchedInCycle := make(map[string]struct{})
 
+	round := 0
+	for {
+		round++
+		idle := a.idleDevices()
+		if len(idle) == 0 {
+			event := log.Info()
+			if round > 1 {
+				event = log.Debug()
+			}
+			event.Int("dispatch_round", round).
+				Msg("device pool dispatch finished: no idle devices")
+			return nil
+		}
+
+		maxTasks := len(idle) * a.cfg.MaxTasksPerJob
+		fetchCap := a.cfg.MaxFetchPerPoll
+		if fetchCap > 0 && maxTasks > fetchCap {
+			maxTasks = fetchCap
+		}
+
+		event := log.Info()
+		if round > 1 {
+			event = log.Debug()
+		}
+		event.
+			Int("dispatch_round", round).
+			Int("idle_devices", len(idle)).
+			Int("max_tasks_per_job", a.cfg.MaxTasksPerJob).
+			Int("fetch_cap", fetchCap).
+			Int("max_fetch", maxTasks).
+			Msg("device pool dispatch requesting tasks")
+
+		tasks, err := a.taskManager.FetchAvailableTasks(ctx, app, maxTasks)
+		if err != nil {
+			return errors.Wrap(err, "fetch available tasks failed")
+		}
+		if len(tasks) == 0 {
+			event.
+				Int("dispatch_round", round).
+				Int("idle_devices", len(idle)).
+				Int("max_fetch", maxTasks).
+				Msg("device pool dispatch found no available tasks")
+			return nil
+		}
+
+		tasks = filterUndispatchedTasks(tasks, dispatchedInCycle)
+		if len(tasks) == 0 {
+			log.Debug().
+				Int("dispatch_round", round).
+				Msg("device pool dispatch drained after cycle-local de-dup; stopping")
+			return nil
+		}
+
+		dispatchedDevices, err := a.dispatchTasks(ctx, idle, tasks, dispatchedInCycle)
+		if err != nil {
+			return err
+		}
+
+		if dispatchedDevices == 0 {
+			log.Debug().
+				Int("dispatch_round", round).
+				Msg("device pool dispatch made no progress; stopping")
+			return nil
+		}
+
+		// Respect per-poll caps and avoid spending too long looping within a single cycle.
+		if a.cfg.MaxFetchPerPoll > 0 {
+			return nil
+		}
+		if time.Since(dispatchStart) > 10*time.Second {
+			log.Debug().
+				Dur("elapsed", time.Since(dispatchStart)).
+				Int("dispatch_rounds", round).
+				Msg("device pool dispatch reached time budget; stopping")
+			return nil
+		}
+	}
+}
+
+func (a *DevicePoolAgent) dispatchTasks(ctx context.Context, idle []string, tasks []*Task, dispatched map[string]struct{}) (int, error) {
+	if a == nil || a.taskManager == nil {
+		return 0, nil
+	}
+	if len(idle) == 0 || len(tasks) == 0 {
+		return 0, nil
+	}
 	if a.dispatchPlanner != nil {
 		assignments, err := a.dispatchPlanner.PlanDispatch(ctx, idle, tasks)
 		if err != nil {
-			return errors.Wrap(err, "dispatch planner failed")
+			return 0, errors.Wrap(err, "dispatch planner failed")
 		}
+		dispatchedDevices := 0
 		for _, assignment := range assignments {
-			if assignment.DeviceSerial == "" || len(assignment.Tasks) == 0 {
-				continue
-			}
 			serial := strings.TrimSpace(assignment.DeviceSerial)
-			if serial == "" {
+			if serial == "" || len(assignment.Tasks) == 0 {
 				continue
 			}
-			if err := a.taskManager.OnTasksDispatched(ctx, serial, assignment.Tasks); err != nil {
-				log.Error().Err(err).Str("serial", serial).Msg("task dispatch hook failed")
-				continue
-			}
-			now := time.Now()
-			pending := extractTaskIDs(assignment.Tasks)
 			meta := deviceMeta{}
 			if a.deviceManager != nil {
 				meta = a.deviceManager.Meta(serial)
 			}
-			if err := a.recorder.UpsertDevices(ctx, []DeviceInfoUpdate{{
-				DeviceSerial: serial,
-				Status:       string(statusDispatched),
-				OSType:       meta.OSType,
-				OSVersion:    meta.OSVersion,
-				IsRoot:       meta.IsRoot,
-				ProviderUUID: meta.ProviderUUID,
-				AgentVersion: a.cfg.AgentVersion,
-				LastSeenAt:   now,
-				RunningTask:  "",
-				PendingTasks: pending,
-			}}); err != nil {
-				log.Error().Err(err).Str("serial", serial).Msg("device recorder update dispatch state failed")
+			ok := a.dispatchToDevice(ctx, serial, assignment.Tasks, meta, "device pool dispatched tasks to device (planner)", dispatched)
+			if ok {
+				dispatchedDevices++
 			}
-			log.Info().
-				Str("serial", serial).
-				Int("assigned_tasks", len(assignment.Tasks)).
-				Msg("device pool dispatched tasks to device (planner)")
-			a.startDeviceJob(ctx, serial, assignment.Tasks)
 		}
-		return nil
+		return dispatchedDevices, nil
 	}
 
 	targeted := make(map[string][]*Task)
@@ -353,38 +396,84 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 			break
 		}
 	}
+	dispatchedDevices := 0
 	for _, assignment := range assignments {
-		if len(assignment.tasks) == 0 || strings.TrimSpace(assignment.serial) == "" {
+		serial := strings.TrimSpace(assignment.serial)
+		if serial == "" || len(assignment.tasks) == 0 {
 			continue
 		}
-		serial := assignment.serial
-		if err := a.taskManager.OnTasksDispatched(ctx, serial, assignment.tasks); err != nil {
-			log.Error().Err(err).Str("serial", serial).Msg("task dispatch hook failed")
-			continue
+		ok := a.dispatchToDevice(ctx, serial, assignment.tasks, assignment.meta, "device pool dispatched tasks to device", dispatched)
+		if ok {
+			dispatchedDevices++
 		}
-		now := time.Now()
-		pending := extractTaskIDs(assignment.tasks)
-		if err := a.recorder.UpsertDevices(ctx, []DeviceInfoUpdate{{
-			DeviceSerial: serial,
-			Status:       string(statusDispatched),
-			OSType:       assignment.meta.OSType,
-			OSVersion:    assignment.meta.OSVersion,
-			IsRoot:       assignment.meta.IsRoot,
-			ProviderUUID: assignment.meta.ProviderUUID,
-			AgentVersion: a.cfg.AgentVersion,
-			LastSeenAt:   now,
-			RunningTask:  "",
-			PendingTasks: pending,
-		}}); err != nil {
-			log.Error().Err(err).Str("serial", serial).Msg("device recorder update dispatch state failed")
-		}
-		log.Info().
-			Str("serial", serial).
-			Int("assigned_tasks", len(assignment.tasks)).
-			Msg("device pool dispatched tasks to device")
-		a.startDeviceJob(ctx, serial, assignment.tasks)
 	}
-	return nil
+	return dispatchedDevices, nil
+}
+
+func (a *DevicePoolAgent) dispatchToDevice(ctx context.Context, serial string, tasks []*Task, meta deviceMeta, msg string, dispatched map[string]struct{}) bool {
+	if a == nil || a.taskManager == nil || len(tasks) == 0 {
+		return false
+	}
+	if err := a.taskManager.OnTasksDispatched(ctx, serial, tasks); err != nil {
+		log.Error().Err(err).Str("serial", serial).Msg("task dispatch hook failed")
+		return false
+	}
+	taskIDs := extractTaskIDs(tasks)
+	if dispatched != nil {
+		for _, id := range taskIDs {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			dispatched[id] = struct{}{}
+		}
+	}
+	now := time.Now()
+	if err := a.recorder.UpsertDevices(ctx, []DeviceInfoUpdate{{
+		DeviceSerial: serial,
+		Status:       string(statusDispatched),
+		OSType:       meta.OSType,
+		OSVersion:    meta.OSVersion,
+		IsRoot:       meta.IsRoot,
+		ProviderUUID: meta.ProviderUUID,
+		AgentVersion: a.cfg.AgentVersion,
+		LastSeenAt:   now,
+		RunningTask:  "",
+		PendingTasks: taskIDs,
+	}}); err != nil {
+		log.Error().Err(err).Str("serial", serial).Msg("device recorder update dispatch state failed")
+	}
+	log.Info().
+		Str("serial", serial).
+		Int("assigned_tasks", len(tasks)).
+		Msg(msg)
+	a.startDeviceJob(ctx, serial, tasks)
+	return true
+}
+
+func filterUndispatchedTasks(tasks []*Task, dispatched map[string]struct{}) []*Task {
+	if len(tasks) == 0 {
+		return tasks
+	}
+	if len(dispatched) == 0 {
+		return tasks
+	}
+	filtered := tasks[:0]
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		id := strings.TrimSpace(task.ID)
+		if id == "" {
+			filtered = append(filtered, task)
+			continue
+		}
+		if _, ok := dispatched[id]; ok {
+			continue
+		}
+		filtered = append(filtered, task)
+	}
+	return filtered
 }
 
 func (a *DevicePoolAgent) idleDevices() []string {

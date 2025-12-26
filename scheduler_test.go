@@ -390,3 +390,50 @@ func TestDevicePoolAgentRetriesFailedJobs(t *testing.T) {
 		t.Fatalf("expected final job success, got %v", manager.lastErr)
 	}
 }
+
+func TestDevicePoolAgentStartRunsInitialCycleImmediately(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	provider := &stubDeviceProvider{devices: []string{"device-1"}}
+	manager := &stubTaskManager{
+		tasks: []*Task{{ID: "task-1"}},
+	}
+	jobCh := make(chan JobRequest, 1)
+	runner := &channelJobRunner{ch: jobCh}
+
+	agent, err := NewDevicePoolAgent(Config{
+		PollInterval:    10 * time.Second,
+		MaxTasksPerJob:  1,
+		MaxJobRetries:   1,
+		JobRetryBackoff: time.Millisecond,
+		Provider:        provider,
+		TaskManager:     manager,
+	}, runner)
+	if err != nil {
+		t.Fatalf("NewDevicePoolAgent returned error: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- agent.Start(ctx, "com.smile.gifmaker")
+	}()
+
+	select {
+	case <-jobCh:
+		// Cancel after we observe the initial dispatch.
+		cancel()
+	case <-time.After(500 * time.Millisecond):
+		cancel()
+		t.Fatalf("expected Start() to dispatch before first poll tick")
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("expected Start() to exit cleanly, got %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("Start() did not exit after cancellation")
+	}
+}
