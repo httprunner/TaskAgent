@@ -437,3 +437,93 @@ func TestDevicePoolAgentStartRunsInitialCycleImmediately(t *testing.T) {
 		t.Fatalf("Start() did not exit after cancellation")
 	}
 }
+
+func TestDevicePoolAgentRespectsDeviceAllowlistEnv(t *testing.T) {
+	t.Setenv(EnvDeviceAllowlist, "device-A,device-C")
+
+	ctx := context.Background()
+	provider := &stubDeviceProvider{devices: []string{"device-A", "device-B", "device-C"}}
+	manager := &stubTaskManager{
+		tasks: make([]*Task, 15),
+	}
+	for i := range manager.tasks {
+		manager.tasks[i] = &Task{ID: fmt.Sprintf("task-%d", i+1)}
+	}
+	jobCh := make(chan JobRequest, 3)
+	runner := &channelJobRunner{ch: jobCh}
+
+	agent, err := NewDevicePoolAgent(Config{
+		PollInterval:   time.Millisecond,
+		MaxTasksPerJob: 5,
+		Provider:       provider,
+		TaskManager:    manager,
+	}, runner)
+	if err != nil {
+		t.Fatalf("NewDevicePoolAgent returned error: %v", err)
+	}
+	if err := agent.RunOnce(ctx, "com.smile.gifmaker"); err != nil {
+		t.Fatalf("RunOnce error: %v", err)
+	}
+
+	got := make(map[string]JobRequest)
+	for i := 0; i < 2; i++ {
+		select {
+		case req := <-jobCh:
+			got[req.DeviceSerial] = req
+		case <-time.After(time.Second):
+			t.Fatalf("expected job %d to be scheduled", i+1)
+		}
+	}
+	if _, ok := got["device-B"]; ok {
+		t.Fatalf("expected device-B to be filtered by allowlist")
+	}
+	if _, ok := got["device-A"]; !ok {
+		t.Fatalf("expected device-A to be scheduled")
+	}
+	if _, ok := got["device-C"]; !ok {
+		t.Fatalf("expected device-C to be scheduled")
+	}
+
+	select {
+	case extra := <-jobCh:
+		t.Fatalf("expected only 2 jobs, got extra for %s", extra.DeviceSerial)
+	default:
+	}
+}
+
+func TestDevicePoolAgentDeviceAllowlistConfigOverridesEnv(t *testing.T) {
+	t.Setenv(EnvDeviceAllowlist, "device-A")
+
+	ctx := context.Background()
+	provider := &stubDeviceProvider{devices: []string{"device-A", "device-B"}}
+	manager := &stubTaskManager{
+		tasks: []*Task{{ID: "task-1"}},
+	}
+	jobCh := make(chan JobRequest, 1)
+	runner := &channelJobRunner{ch: jobCh}
+
+	agent, err := NewDevicePoolAgent(Config{
+		PollInterval:          time.Millisecond,
+		MaxTasksPerJob:        1,
+		DeviceSerialAllowlist: []string{"device-B"},
+		Provider:              provider,
+		TaskManager:           manager,
+		MaxJobRetries:         1,
+		JobRetryBackoff:       time.Millisecond,
+	}, runner)
+	if err != nil {
+		t.Fatalf("NewDevicePoolAgent returned error: %v", err)
+	}
+	if err := agent.RunOnce(ctx, "com.smile.gifmaker"); err != nil {
+		t.Fatalf("RunOnce error: %v", err)
+	}
+
+	select {
+	case req := <-jobCh:
+		if req.DeviceSerial != "device-B" {
+			t.Fatalf("expected device-B, got %s", req.DeviceSerial)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("expected job to be scheduled")
+	}
+}

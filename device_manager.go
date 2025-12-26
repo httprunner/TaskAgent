@@ -18,6 +18,7 @@ type deviceManager struct {
 	recorder     DeviceRecorder
 	agentVersion string
 	hostUUID     string
+	allowlist    map[string]struct{}
 
 	mu      sync.Mutex
 	devices map[string]*deviceState
@@ -32,14 +33,23 @@ type deviceState struct {
 	metaReady      bool
 }
 
-func newDeviceManager(provider DeviceProvider, recorder DeviceRecorder, agentVersion, hostUUID string) *deviceManager {
+func newDeviceManager(provider DeviceProvider, recorder DeviceRecorder, agentVersion, hostUUID string, allowlist map[string]struct{}) *deviceManager {
 	return &deviceManager{
 		provider:     provider,
 		recorder:     recorder,
 		agentVersion: agentVersion,
 		hostUUID:     hostUUID,
+		allowlist:    cloneStringSet(allowlist),
 		devices:      make(map[string]*deviceState),
 	}
+}
+
+func (m *deviceManager) isAllowed(serial string) bool {
+	if m == nil || len(m.allowlist) == 0 {
+		return true
+	}
+	_, ok := m.allowlist[strings.TrimSpace(serial)]
+	return ok
 }
 
 // Refresh 刷新设备列表并同步 recorder。
@@ -56,9 +66,24 @@ func (m *deviceManager) Refresh(ctx context.Context, fetchMeta func(serial strin
 	updates := make([]DeviceInfoUpdate, 0, len(serials))
 
 	m.mu.Lock()
+	if len(m.allowlist) > 0 {
+		for serial, dev := range m.devices {
+			if m.isAllowed(serial) {
+				continue
+			}
+			if dev != nil && dev.status == deviceStatusRunning {
+				dev.removeAfterJob = true
+				continue
+			}
+			delete(m.devices, serial)
+		}
+	}
 	for _, serial := range serials {
 		serial = strings.TrimSpace(serial)
 		if serial == "" {
+			continue
+		}
+		if !m.isAllowed(serial) {
 			continue
 		}
 		seen[serial] = struct{}{}
@@ -157,6 +182,9 @@ func (m *deviceManager) IdleDevices() []string {
 	result := make([]string, 0, len(m.devices))
 	for serial, dev := range m.devices {
 		if dev.status == deviceStatusIdle && !dev.removeAfterJob {
+			if !m.isAllowed(serial) {
+				continue
+			}
 			result = append(result, serial)
 		}
 	}
@@ -167,6 +195,9 @@ func (m *deviceManager) IdleDevices() []string {
 func (m *deviceManager) MarkDispatched(serial string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if !m.isAllowed(serial) {
+		return
+	}
 	if dev, ok := m.devices[serial]; ok {
 		dev.status = deviceStatusDispatched
 	}
@@ -176,6 +207,9 @@ func (m *deviceManager) MarkDispatched(serial string) {
 func (m *deviceManager) MarkRunning(serial string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if !m.isAllowed(serial) {
+		return
+	}
 	if dev, ok := m.devices[serial]; ok {
 		dev.status = deviceStatusRunning
 	}
@@ -185,6 +219,9 @@ func (m *deviceManager) MarkRunning(serial string) {
 func (m *deviceManager) MarkIdle(serial string) (removeAfterJob bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if !m.isAllowed(serial) {
+		return false
+	}
 	if dev, ok := m.devices[serial]; ok {
 		dev.status = deviceStatusIdle
 		remove := dev.removeAfterJob

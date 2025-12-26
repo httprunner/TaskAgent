@@ -25,13 +25,16 @@ type Config struct {
 	MaxJobRetries   int
 	JobRetryBackoff time.Duration
 	OSType          string
-	Provider        DeviceProvider
-	TaskManager     TaskManager
-	BitableURL      string
-	AgentVersion    string
-	DeviceRecorder  DeviceRecorder
-	AllowedScenes   []string
-	DispatchPlanner DispatchPlanner
+	// DeviceSerialAllowlist optionally restricts scheduling to these device serials.
+	// When empty, all connected devices are eligible unless overridden by env.
+	DeviceSerialAllowlist []string
+	Provider              DeviceProvider
+	TaskManager           TaskManager
+	BitableURL            string
+	AgentVersion          string
+	DeviceRecorder        DeviceRecorder
+	AllowedScenes         []string
+	DispatchPlanner       DispatchPlanner
 }
 
 // DevicePoolAgent coordinates plug-and-play devices with a task source.
@@ -104,6 +107,19 @@ func NewDevicePoolAgent(cfg Config, runner JobRunner) (*DevicePoolAgent, error) 
 		cfg.JobRetryBackoff = 5 * time.Second
 	}
 
+	if len(cfg.DeviceSerialAllowlist) == 0 {
+		raw := strings.TrimSpace(EnvString(EnvDeviceAllowlist, ""))
+		cfg.DeviceSerialAllowlist = parseDeviceAllowlist(raw)
+	} else {
+		cfg.DeviceSerialAllowlist = normalizeDeviceAllowlist(cfg.DeviceSerialAllowlist)
+	}
+	allowlistSet := buildDeviceAllowlistSet(cfg.DeviceSerialAllowlist)
+	if len(allowlistSet) > 0 {
+		log.Info().
+			Int("device_allowlist_size", len(allowlistSet)).
+			Msg("device pool allowlist enabled")
+	}
+
 	provider := cfg.Provider
 	if provider == nil {
 		var err error
@@ -152,7 +168,7 @@ func NewDevicePoolAgent(cfg Config, runner JobRunner) (*DevicePoolAgent, error) 
 	if agent.recorder == nil {
 		agent.recorder = noopRecorder{}
 	}
-	agent.deviceManager = newDeviceManager(agent.deviceProvider, agent.recorder, agent.cfg.AgentVersion, agent.hostUUID)
+	agent.deviceManager = newDeviceManager(agent.deviceProvider, agent.recorder, agent.cfg.AgentVersion, agent.hostUUID, allowlistSet)
 	return agent, nil
 }
 
