@@ -49,6 +49,18 @@ type DeviceProvider interface {
 	ListDevices(ctx context.Context) ([]string, error)
 }
 
+// DispatchPlanner optionally customizes how tasks are assigned to idle devices.
+// When nil, DevicePoolAgent falls back to its built-in round-robin strategy.
+type DispatchPlanner interface {
+	PlanDispatch(ctx context.Context, idleDevices []string, tasks []*Task) ([]DispatchAssignment, error)
+}
+
+// DispatchAssignment describes a per-device task assignment produced by a DispatchPlanner.
+type DispatchAssignment struct {
+	DeviceSerial string
+	Tasks        []*Task
+}
+
 // DeviceRecorder 负责将设备信息同步到外部存储（Feishu/SQLite）。
 type DeviceRecorder interface {
 	UpsertDevices(ctx context.Context, devices []DeviceInfoUpdate) error

@@ -31,6 +31,7 @@ type Config struct {
 	AgentVersion    string
 	DeviceRecorder  DeviceRecorder
 	AllowedScenes   []string
+	DispatchPlanner DispatchPlanner
 }
 
 // DevicePoolAgent coordinates plug-and-play devices with a task source.
@@ -41,6 +42,7 @@ type DevicePoolAgent struct {
 	recorder        DeviceRecorder
 	jobRunner       JobRunner
 	deviceManager   *deviceManager
+	dispatchPlanner DispatchPlanner
 	jobsMu          sync.RWMutex
 	jobs            map[string]*deviceJob
 	backgroundGroup sync.WaitGroup
@@ -138,13 +140,14 @@ func NewDevicePoolAgent(cfg Config, runner JobRunner) (*DevicePoolAgent, error) 
 	}
 
 	agent := &DevicePoolAgent{
-		cfg:            cfg,
-		deviceProvider: provider,
-		taskManager:    manager,
-		recorder:       cfg.DeviceRecorder,
-		jobRunner:      runner,
-		jobs:           make(map[string]*deviceJob),
-		hostUUID:       hostUUID,
+		cfg:             cfg,
+		deviceProvider:  provider,
+		taskManager:     manager,
+		recorder:        cfg.DeviceRecorder,
+		jobRunner:       runner,
+		jobs:            make(map[string]*deviceJob),
+		hostUUID:        hostUUID,
+		dispatchPlanner: cfg.DispatchPlanner,
 	}
 	if agent.recorder == nil {
 		agent.recorder = noopRecorder{}
@@ -243,6 +246,52 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 			Int("idle_devices", len(idle)).
 			Int("max_fetch", maxTasks).
 			Msg("device pool dispatch found no available tasks")
+		return nil
+	}
+
+	if a.dispatchPlanner != nil {
+		assignments, err := a.dispatchPlanner.PlanDispatch(ctx, idle, tasks)
+		if err != nil {
+			return errors.Wrap(err, "dispatch planner failed")
+		}
+		for _, assignment := range assignments {
+			if assignment.DeviceSerial == "" || len(assignment.Tasks) == 0 {
+				continue
+			}
+			serial := strings.TrimSpace(assignment.DeviceSerial)
+			if serial == "" {
+				continue
+			}
+			if err := a.taskManager.OnTasksDispatched(ctx, serial, assignment.Tasks); err != nil {
+				log.Error().Err(err).Str("serial", serial).Msg("task dispatch hook failed")
+				continue
+			}
+			now := time.Now()
+			pending := extractTaskIDs(assignment.Tasks)
+			meta := deviceMeta{}
+			if a.deviceManager != nil {
+				meta = a.deviceManager.Meta(serial)
+			}
+			if err := a.recorder.UpsertDevices(ctx, []DeviceInfoUpdate{{
+				DeviceSerial: serial,
+				Status:       string(statusDispatched),
+				OSType:       meta.OSType,
+				OSVersion:    meta.OSVersion,
+				IsRoot:       meta.IsRoot,
+				ProviderUUID: meta.ProviderUUID,
+				AgentVersion: a.cfg.AgentVersion,
+				LastSeenAt:   now,
+				RunningTask:  "",
+				PendingTasks: pending,
+			}}); err != nil {
+				log.Error().Err(err).Str("serial", serial).Msg("device recorder update dispatch state failed")
+			}
+			log.Info().
+				Str("serial", serial).
+				Int("assigned_tasks", len(assignment.Tasks)).
+				Msg("device pool dispatched tasks to device (planner)")
+			a.startDeviceJob(ctx, serial, assignment.Tasks)
+		}
 		return nil
 	}
 

@@ -98,6 +98,14 @@ func (r *flakyJobRunner) RunJob(ctx context.Context, req JobRequest) error {
 	return nil
 }
 
+type stubDispatchPlanner struct {
+	assignments []DispatchAssignment
+}
+
+func (s *stubDispatchPlanner) PlanDispatch(ctx context.Context, idleDevices []string, tasks []*Task) ([]DispatchAssignment, error) {
+	return s.assignments, nil
+}
+
 func TestDevicePoolAgentDispatchesAcrossIdleDevices(t *testing.T) {
 	ctx := context.Background()
 	provider := &stubDeviceProvider{devices: []string{"device-A", "device-B", "device-C"}}
@@ -243,6 +251,59 @@ func TestDevicePoolAgentRespectsTargetDeviceSerial(t *testing.T) {
 				t.Fatalf("offline-only task should not be dispatched, got %s", serial)
 			}
 		}
+	}
+}
+
+func TestDevicePoolAgentUsesDispatchPlanner(t *testing.T) {
+	ctx := context.Background()
+	provider := &stubDeviceProvider{devices: []string{"device-1", "device-2"}}
+	manager := &stubTaskManager{
+		tasks: []*Task{
+			{ID: "1"},
+			{ID: "2"},
+		},
+	}
+	jobCh := make(chan JobRequest, 2)
+	runner := &channelJobRunner{ch: jobCh}
+
+	planner := &stubDispatchPlanner{assignments: []DispatchAssignment{{
+		DeviceSerial: "device-2",
+		Tasks:        manager.tasks,
+	}}}
+
+	agent, err := NewDevicePoolAgent(Config{
+		PollInterval:    time.Millisecond,
+		MaxTasksPerJob:  10,
+		Provider:        provider,
+		TaskManager:     manager,
+		DispatchPlanner: planner,
+		MaxJobRetries:   1,
+		JobRetryBackoff: time.Millisecond,
+		MaxFetchPerPoll: 0,
+	}, runner)
+	if err != nil {
+		t.Fatalf("NewDevicePoolAgent returned error: %v", err)
+	}
+	if err := agent.RunOnce(ctx, "com.smile.gifmaker"); err != nil {
+		t.Fatalf("RunOnce error: %v", err)
+	}
+
+	select {
+	case req := <-jobCh:
+		if req.DeviceSerial != "device-2" {
+			t.Fatalf("expected planner job scheduled for device-2, got %s", req.DeviceSerial)
+		}
+		if len(req.Tasks) != 2 {
+			t.Fatalf("expected 2 tasks, got %d", len(req.Tasks))
+		}
+	default:
+		t.Fatalf("expected job scheduled")
+	}
+
+	select {
+	case req := <-jobCh:
+		t.Fatalf("expected only one job, got extra for %s", req.DeviceSerial)
+	default:
 	}
 }
 

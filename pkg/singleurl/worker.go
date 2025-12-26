@@ -163,6 +163,11 @@ type SingleURLWorkerConfig struct {
 	PollInterval  time.Duration
 	Clock         func() time.Time
 	CrawlerClient crawlerTaskClient
+	// AppFilter optionally scopes tasks by the App column in the task table.
+	AppFilter string
+	// NodeIndex and NodeTotal enable optional sharding (BookID+App) across multiple nodes.
+	NodeIndex int
+	NodeTotal int
 }
 
 // SingleURLWorker pulls single-URL capture tasks and dispatches them via
@@ -174,6 +179,9 @@ type SingleURLWorker struct {
 	pollInterval time.Duration
 	clock        func() time.Time
 	crawler      crawlerTaskClient
+	appFilter    string
+	nodeIndex    int
+	nodeTotal    int
 
 	newTaskStatuses    []string
 	activeTaskStatuses []string
@@ -205,6 +213,7 @@ func NewSingleURLWorker(cfg SingleURLWorkerConfig) (*SingleURLWorker, error) {
 	if clock == nil {
 		clock = time.Now
 	}
+	nodeIndex, nodeTotal := taskagent.NormalizeShardConfig(cfg.NodeIndex, cfg.NodeTotal)
 	return &SingleURLWorker{
 		client:       client,
 		bitableURL:   bitableURL,
@@ -212,6 +221,9 @@ func NewSingleURLWorker(cfg SingleURLWorkerConfig) (*SingleURLWorker, error) {
 		pollInterval: poll,
 		clock:        clock,
 		crawler:      crawler,
+		appFilter:    strings.TrimSpace(cfg.AppFilter),
+		nodeIndex:    nodeIndex,
+		nodeTotal:    nodeTotal,
 		newTaskStatuses: []string{
 			feishusdk.StatusPending,
 			feishusdk.StatusFailed,
@@ -226,6 +238,16 @@ func NewSingleURLWorker(cfg SingleURLWorkerConfig) (*SingleURLWorker, error) {
 
 // NewSingleURLWorkerFromEnv builds a worker using Feishu credentials from env.
 func NewSingleURLWorkerFromEnv(bitableURL string, limit int, pollInterval time.Duration) (*SingleURLWorker, error) {
+	return NewSingleURLWorkerFromEnvWithOptions(SingleURLWorkerConfig{
+		BitableURL:   bitableURL,
+		Limit:        limit,
+		PollInterval: pollInterval,
+	})
+}
+
+// NewSingleURLWorkerFromEnvWithOptions builds a worker using Feishu credentials from env.
+// Additional behavior such as app scoping and sharding can be configured via cfg.
+func NewSingleURLWorkerFromEnvWithOptions(cfg SingleURLWorkerConfig) (*SingleURLWorker, error) {
 	client, err := feishusdk.NewClientFromEnv()
 	if err != nil {
 		return nil, err
@@ -237,10 +259,13 @@ func NewSingleURLWorkerFromEnv(bitableURL string, limit int, pollInterval time.D
 	}
 	return NewSingleURLWorker(SingleURLWorkerConfig{
 		Client:        client,
-		BitableURL:    bitableURL,
-		Limit:         limit,
-		PollInterval:  pollInterval,
+		BitableURL:    cfg.BitableURL,
+		Limit:         cfg.Limit,
+		PollInterval:  cfg.PollInterval,
 		CrawlerClient: crawler,
+		AppFilter:     cfg.AppFilter,
+		NodeIndex:     cfg.NodeIndex,
+		NodeTotal:     cfg.NodeTotal,
 	})
 }
 
@@ -248,7 +273,18 @@ func NewSingleURLWorkerFromEnv(bitableURL string, limit int, pollInterval time.D
 // prepared by the device stage (Status=ready) and dispatches them to the
 // downloader service.
 func NewSingleURLReadyWorkerFromEnv(bitableURL string, limit int, pollInterval time.Duration) (*SingleURLWorker, error) {
-	worker, err := NewSingleURLWorkerFromEnv(bitableURL, limit, pollInterval)
+	return NewSingleURLReadyWorkerFromEnvWithOptions(SingleURLWorkerConfig{
+		BitableURL:   bitableURL,
+		Limit:        limit,
+		PollInterval: pollInterval,
+	})
+}
+
+// NewSingleURLReadyWorkerFromEnvWithOptions builds a worker that consumes tasks already
+// prepared by the device stage (Status=ready) and dispatches them to the
+// downloader service. It also supports optional app scoping and sharding.
+func NewSingleURLReadyWorkerFromEnvWithOptions(cfg SingleURLWorkerConfig) (*SingleURLWorker, error) {
+	worker, err := NewSingleURLWorkerFromEnvWithOptions(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +375,7 @@ func (w *SingleURLWorker) fetchSingleURLTasks(ctx context.Context, statuses []st
 			}
 		}
 		subset, err := taskagent.FetchFeishuTasksWithStrategy(
-			ctx, w.client, w.bitableURL, fields, "", []string{status},
+			ctx, w.client, w.bitableURL, fields, w.appFilter, []string{status},
 			remaining, taskagent.SceneSingleURLCapture, taskagent.TaskDateToday)
 		if err != nil {
 			log.Warn().Err(err).
@@ -347,9 +383,30 @@ func (w *SingleURLWorker) fetchSingleURLTasks(ctx context.Context, statuses []st
 				Msg("single url worker fetch failed")
 			continue
 		}
+		if w.nodeTotal > 1 && len(subset) > 0 {
+			subset = filterFeishuTasksByShard(subset, w.nodeIndex, w.nodeTotal)
+		}
 		result = taskagent.AppendUniqueFeishuTasks(result, subset, limit, seen)
 	}
 	return result, nil
+}
+
+func filterFeishuTasksByShard(tasks []*FeishuTask, nodeIndex, nodeTotal int) []*FeishuTask {
+	if nodeTotal <= 1 || len(tasks) == 0 {
+		return tasks
+	}
+	out := make([]*FeishuTask, 0, len(tasks))
+	for _, t := range tasks {
+		if t == nil {
+			continue
+		}
+		key := taskagent.ResolveShardIDForTaskRow(taskagent.FeishuTaskRow{BookID: t.BookID, App: t.App})
+		shard := int(key % int64(nodeTotal))
+		if shard == nodeIndex {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuTask) error {

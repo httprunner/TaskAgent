@@ -33,6 +33,9 @@ Feishu Task Table ──> FeishuTaskClient (task)
     - Result storage: `ResultStorageConfig`, `ResultStorageManager`, `NewResultStorageManager`, `EnsureResultReporter`, `OpenCaptureResultsDB`, `ResolveResultDBPath`.
     - Feishu SDK aliases: `FeishuClient`, `TaskRecordInput`, `BitableRow`, field mappings (`DefaultTaskFields`, `DefaultResultFields`, `DefaultDramaFields`), filter helpers (`FeishuFilterInfo`, `NewFeishuFilterInfo`, `NewFeishuCondition`, etc.).
     - Env + constants: `EnvString` and env/status constants (`EnvTaskBitableURL`, `EnvResultBitableURL`, `EnvDeviceBitableURL`, `EnvCookieBitableURL`, `StatusPending/Success/...`).
+  - Multi-scenario helpers (optional):
+    - `DispatchPlanner` hooks: `Config.DispatchPlanner`.
+    - Reference implementations: `MultiDispatchPlanner`, `MultiTaskManager`, `MultiJobRunner`.
 
 - **`internal/feishusdk`**
   - Low-level Feishu Bitable SDK: HTTP client, auth, schema structs (`TaskFields`, `ResultFields`, `DramaFields`, `DeviceFields`), filter builders, and rate-limited Feishu result writer.
@@ -203,6 +206,37 @@ OnTasksCompleted → Feishu updates + recorder cleanup
 ```
 
 `FeishuTaskClient` fetches tasks in prioritized bands (个人页搜索 before 综合页搜索, same-day before backlog, failed before untouched) and only fills the shortfall to `MaxTasksPerJob`. See [`client.go`](client.go) for the full prioritization table.
+
+## Multi-scenario scheduling (Multi*)
+
+When you need to run multiple task "scenes" in a single process (e.g. search + single-url) but still keep **one** device pool, you can combine:
+
+- `MultiTaskManager`: fetches tasks from two task managers and multiplexes lifecycle callbacks by task scene.
+- `MultiDispatchPlanner`: assigns tasks to idle devices with per-scene caps (search vs `SceneSingleURLCapture`) and a 50/50 device preference.
+- `MultiJobRunner`: runs the two scene groups sequentially on the same device (no concurrency on one device).
+
+Minimal wiring:
+
+```go
+multiTM := &taskagent.MultiTaskManager{
+  Search: someSearchTM, SingleURL: someSingleURLTM,
+  SearchFetchLimit: 0, SingleURLFetchLimit: 0,
+}
+planner := &taskagent.MultiDispatchPlanner{SearchMaxTasksPerDevice: 5, SingleURLMaxTasksPerDevice: 10}
+runner := &taskagent.MultiJobRunner{SearchRunner: searchRunner, SingleURLRunner: singleURLRunner}
+
+agent, _ := taskagent.NewDevicePoolAgent(taskagent.Config{
+  PollInterval: 30 * time.Second,
+  MaxTasksPerJob: 10,
+  TaskManager: multiTM,
+  DispatchPlanner: planner,
+}, runner)
+_ = agent.Start(ctx, "com.smile.gifmaker")
+```
+
+Notes:
+- `MultiDispatchPlanner` currently recognizes `SceneSingleURLCapture` as the "single-url" scene and treats everything else as "search".
+- If you need different sharding keys, per-scene priorities, or a different mixing policy, implement your own `DispatchPlanner`.
 
 ## Troubleshooting
 - **Missing tasks** – verify `TASK_BITABLE_URL` points to a view with Status=`pending/failed`, App matches the `Start` argument, and the service account has permission to read.
