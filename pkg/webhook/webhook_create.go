@@ -27,6 +27,10 @@ type WebhookResultCreateOptions struct {
 	BookID       string
 	GroupIDs     []string
 	ExtraTaskIDs []int64
+
+	// DramaInfoPatchByGroupID merges additional fields into the stored DramaInfo JSON
+	// for each group. Values should be JSON-serializable; callers typically provide strings.
+	DramaInfoPatchByGroupID map[string]map[string]any
 }
 
 const (
@@ -69,6 +73,11 @@ func CreateWebhookResultsForGroups(ctx context.Context, opts WebhookResultCreate
 
 	dramaInfoJSON, _ := fetchDramaInfoJSONByBookID(ctx, client,
 		firstNonEmpty(opts.DramaBitableURL, taskagent.EnvString("DRAMA_BITABLE_URL", "")), bookID)
+	baseDramaInfo, err := decodeDramaInfo(dramaInfoJSON)
+	if err != nil {
+		log.Warn().Err(err).Msg("webhook result: decode base DramaInfo failed; continue with empty drama info")
+		baseDramaInfo = nil
+	}
 	day := dayString(opts.ParentDatetime, opts.ParentDatetimeRaw)
 	var dateMs int64
 	if strings.TrimSpace(day) != "" {
@@ -78,11 +87,27 @@ func CreateWebhookResultsForGroups(ctx context.Context, opts WebhookResultCreate
 	}
 
 	for _, groupID := range groupIDs {
+		patch := opts.DramaInfoPatchByGroupID[strings.TrimSpace(groupID)]
+		mergedDramaInfo := mergeDramaInfo(baseDramaInfo, patch)
+		mergedDramaInfoJSON, mergeErr := marshalDramaInfo(mergedDramaInfo)
+		if mergeErr != nil {
+			log.Warn().Err(mergeErr).Str("group_id", groupID).Msg("webhook result: marshal DramaInfo failed; fallback to base drama info")
+			mergedDramaInfoJSON = strings.TrimSpace(dramaInfoJSON)
+		}
+
 		existing, err := store.getExistingByBizGroupAndDay(ctx, WebhookBizTypePiracyGeneralSearch, groupID, day)
 		if err != nil {
 			return err
 		}
 		if existing != nil && strings.TrimSpace(existing.RecordID) != "" {
+			if len(patch) > 0 {
+				updated, ok := maybeUpdateExistingDramaInfo(existing.DramaInfo, patch)
+				if ok {
+					if err := store.update(ctx, existing.RecordID, webhookResultUpdate{DramaInfo: ptrString(updated)}); err != nil {
+						return err
+					}
+				}
+			}
 			continue
 		}
 
@@ -104,7 +129,7 @@ func CreateWebhookResultsForGroups(ctx context.Context, opts WebhookResultCreate
 			BizType:   WebhookBizTypePiracyGeneralSearch,
 			GroupID:   groupID,
 			TaskIDs:   allTaskIDs,
-			DramaInfo: dramaInfoJSON,
+			DramaInfo: mergedDramaInfoJSON,
 			DateMs:    dateMs,
 		}); err != nil {
 			return err
@@ -114,6 +139,69 @@ func CreateWebhookResultsForGroups(ctx context.Context, opts WebhookResultCreate
 	}
 
 	return nil
+}
+
+func mergeDramaInfo(base map[string]any, patch map[string]any) map[string]any {
+	if len(patch) == 0 && len(base) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(base)+len(patch))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range patch {
+		key := strings.TrimSpace(k)
+		if key == "" {
+			continue
+		}
+		if s, ok := v.(string); ok {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			out[key] = s
+			continue
+		}
+		if v == nil {
+			continue
+		}
+		out[key] = v
+	}
+	return out
+}
+
+func marshalDramaInfo(info map[string]any) (string, error) {
+	if len(info) == 0 {
+		return "{}", nil
+	}
+	raw, err := json.Marshal(info)
+	if err != nil {
+		return "", err
+	}
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return "{}", nil
+	}
+	return trimmed, nil
+}
+
+func maybeUpdateExistingDramaInfo(existing string, patch map[string]any) (string, bool) {
+	if len(patch) == 0 {
+		return "", false
+	}
+	base, err := decodeDramaInfo(existing)
+	if err != nil {
+		base = nil
+	}
+	merged := mergeDramaInfo(base, patch)
+	mergedJSON, err := marshalDramaInfo(merged)
+	if err != nil {
+		return "", false
+	}
+	if strings.TrimSpace(mergedJSON) == strings.TrimSpace(existing) {
+		return "", false
+	}
+	return mergedJSON, true
 }
 
 func fetchDramaInfoJSONByBookID(ctx context.Context, client *taskagent.FeishuClient, dramaTableURL, bookID string) (string, error) {

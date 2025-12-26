@@ -416,6 +416,27 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 		}
 	}
 
+	if bizType == WebhookBizTypePiracyGeneralSearch {
+		next := computeGroupTotalRatioString(records, dramaRaw)
+		if shouldUpdateDramaInfoRatio(dramaRaw, DramaInfoKeyGroupTotalRatio, next) {
+			if dramaRaw == nil {
+				dramaRaw = make(map[string]any)
+			}
+			dramaRaw[DramaInfoKeyGroupTotalRatio] = next
+			if merged, err := json.Marshal(dramaRaw); err != nil {
+				log.Warn().Err(err).Str("record_id", strings.TrimSpace(row.RecordID)).Msg("webhook: marshal DramaInfo with ratio failed")
+			} else {
+				mergedStr := strings.TrimSpace(string(merged))
+				if mergedStr == "" {
+					mergedStr = "{}"
+				}
+				if err := w.store.update(ctx, row.RecordID, webhookResultUpdate{DramaInfo: ptrString(mergedStr)}); err != nil {
+					return err
+				}
+			}
+		}
+	}
+
 	payload := buildWebhookResultPayload(dramaRaw, records)
 	if val, ok := payload["DramaName"]; !ok || strings.TrimSpace(fmt.Sprint(val)) == "" {
 		payload["DramaName"] = strings.TrimSpace(meta.Params)
@@ -474,6 +495,16 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 
 func buildWebhookResultPayload(dramaRaw map[string]any, records []CaptureRecordPayload) map[string]any {
 	payload := flattenDramaFields(dramaRaw, taskagent.DefaultDramaFields())
+	for key, val := range dramaRaw {
+		trimmed := strings.TrimSpace(key)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := payload[trimmed]; exists {
+			continue
+		}
+		payload[trimmed] = val
+	}
 	flat, _ := FlattenRecordsAndCollectItemIDs(records, taskagent.DefaultResultFields())
 	payload["records"] = flat
 	return payload
@@ -1129,6 +1160,98 @@ func (w *WebhookResultWorker) fetchTasksByIDs(ctx context.Context, taskIDs []int
 		}
 	}
 	return result, nil
+}
+
+func shouldUpdateDramaInfoRatio(dramaRaw map[string]any, key string, next string) bool {
+	if strings.TrimSpace(key) == "" {
+		return false
+	}
+	if strings.TrimSpace(next) == "" {
+		return false
+	}
+	if dramaRaw == nil {
+		return true
+	}
+	cur := strings.TrimSpace(fmt.Sprint(dramaRaw[key]))
+	if cur == "" {
+		return true
+	}
+	return cur != strings.TrimSpace(next)
+}
+
+func computeGroupTotalRatioString(records []CaptureRecordPayload, dramaRaw map[string]any) string {
+	totalDur, ok := parseDramaTotalDurationSeconds(dramaRaw)
+	if !ok || totalDur <= 0 {
+		return DramaInfoRatioNA
+	}
+	sum, ok := sumUniqueItemDurations(records)
+	if !ok || sum <= 0 {
+		return DramaInfoRatioNA
+	}
+	return fmt.Sprintf("%.2f%%", (sum/totalDur)*100)
+}
+
+func parseDramaTotalDurationSeconds(dramaRaw map[string]any) (float64, bool) {
+	if dramaRaw == nil {
+		return 0, false
+	}
+	raw := strings.TrimSpace(fmt.Sprint(dramaRaw["TotalDuration"]))
+	if raw == "" {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, v > 0
+}
+
+func sumUniqueItemDurations(records []CaptureRecordPayload) (float64, bool) {
+	if len(records) == 0 {
+		return 0, false
+	}
+	fields := taskagent.DefaultResultFields()
+	fieldMap := taskagent.StructFieldMap(fields)
+	rawItemID := strings.TrimSpace(fieldMap["ItemID"])
+	rawDuration := strings.TrimSpace(fieldMap["ItemDuration"])
+	seen := make(map[string]struct{}, len(records))
+	sum := 0.0
+	count := 0
+	for idx, rec := range records {
+		if rec.Fields == nil {
+			continue
+		}
+		itemID := strings.TrimSpace(getString(rec.Fields, "ItemID"))
+		if itemID == "" && rawItemID != "" {
+			itemID = strings.TrimSpace(getString(rec.Fields, rawItemID))
+		}
+		key := itemID
+		if key == "" {
+			key = strings.TrimSpace(rec.RecordID)
+		}
+		if key == "" {
+			key = fmt.Sprintf("idx-%d", idx)
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+
+		durStr := strings.TrimSpace(getString(rec.Fields, "ItemDuration"))
+		if durStr == "" && rawDuration != "" {
+			durStr = strings.TrimSpace(getString(rec.Fields, rawDuration))
+		}
+		if durStr == "" {
+			continue
+		}
+		dur, err := strconv.ParseFloat(durStr, 64)
+		if err != nil || dur <= 0 {
+			continue
+		}
+		sum += dur
+		count++
+	}
+	return sum, count > 0
 }
 
 func ptrString(v string) *string { return &v }
