@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	taskagent "github.com/httprunner/TaskAgent"
 	"github.com/httprunner/TaskAgent/internal/feishusdk"
 )
 
@@ -529,10 +530,116 @@ func TestSingleURLWorkerStopsAfterMaxAttempts(t *testing.T) {
 	}
 }
 
+func TestSingleURLReadyWorkerFetchesYesterdayTasks(t *testing.T) {
+	client := &singleURLTestClient{
+		rowsByDatePreset: map[string]map[string][]feishusdk.TaskRow{
+			taskagent.TaskDateYesterday: {
+				feishusdk.StatusReady: {
+					{
+						TaskID: 21,
+						Scene:  SceneSingleURLCapture,
+						Status: feishusdk.StatusReady,
+						Params: "capture",
+						BookID: "B021",
+						UserID: "U021",
+						App:    "kuaishou",
+						URL:    "https://example.com/share/21",
+						Extra:  `{"cdn_url":"https://cdn.example/21.m3u8"}`,
+					},
+				},
+			},
+		},
+	}
+	crawler := &stubCrawlerClient{createTaskID: "task-yesterday"}
+	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
+		Client:        client,
+		CrawlerClient: crawler,
+		BitableURL:    "https://bitable.example",
+		Limit:         5,
+		PollInterval:  time.Second,
+	})
+	if err != nil {
+		t.Fatalf("new worker: %v", err)
+	}
+	worker.newTaskStatuses = []string{feishusdk.StatusReady}
+	worker.datePresets = []string{taskagent.TaskDateToday, taskagent.TaskDateYesterday}
+
+	if err := worker.ProcessOnce(context.Background()); err != nil {
+		t.Fatalf("process once: %v", err)
+	}
+	if len(client.updateCalls) == 0 {
+		t.Fatalf("expected update calls")
+	}
+	last := client.updateCalls[len(client.updateCalls)-1]
+	if status := last.fields[feishusdk.DefaultTaskFields.Status]; status != feishusdk.StatusDownloaderQueued {
+		t.Fatalf("expected status %q, got %#v", feishusdk.StatusDownloaderQueued, status)
+	}
+}
+
+func TestSingleURLReadyWorkerReconcilesWhenLogsHasCrawlerTaskID(t *testing.T) {
+	client := &singleURLTestClient{
+		rows: map[string][]feishusdk.TaskRow{
+			feishusdk.StatusReady: {
+				{
+					TaskID: 31,
+					Scene:  SceneSingleURLCapture,
+					Status: feishusdk.StatusReady,
+					Params: "capture",
+					BookID: "B031",
+					UserID: "U031",
+					App:    "kuaishou",
+					URL:    "https://example.com/share/31",
+					Extra:  `{"cdn_url":"https://cdn.example/31.m3u8"}`,
+					Logs:   `[{"task_id":"task-31","status":"dl-queued"}]`,
+				},
+			},
+		},
+	}
+	crawler := &stubCrawlerClient{
+		statuses: map[string]*crawlerTaskStatus{
+			"task-31": {Status: "WAITING"},
+		},
+	}
+	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
+		Client:        client,
+		CrawlerClient: crawler,
+		BitableURL:    "https://bitable.example",
+		Limit:         5,
+		PollInterval:  time.Second,
+		Clock:         func() time.Time { return time.Unix(100, 0) },
+	})
+	if err != nil {
+		t.Fatalf("new worker: %v", err)
+	}
+	worker.newTaskStatuses = []string{feishusdk.StatusReady}
+	worker.activeTaskStatuses = nil
+
+	if err := worker.ProcessOnce(context.Background()); err != nil {
+		t.Fatalf("process once: %v", err)
+	}
+	found := false
+	for _, call := range client.updateCalls {
+		if call.taskID != 31 {
+			continue
+		}
+		if v, ok := call.fields[feishusdk.DefaultTaskFields.Status]; ok && v == feishusdk.StatusDownloaderQueued {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected task to be marked %q", feishusdk.StatusDownloaderQueued)
+	}
+	if len(crawler.queriedTaskID) == 0 || crawler.queriedTaskID[0] != "task-31" {
+		t.Fatalf("expected crawler task to be queried, got %#v", crawler.queriedTaskID)
+	}
+}
+
 type singleURLTestClient struct {
-	rows        map[string][]feishusdk.TaskRow
-	groupRows   map[string][]feishusdk.TaskRow
-	updateCalls []singleURLUpdateCall
+	rows             map[string][]feishusdk.TaskRow
+	rowsByDatePreset map[string]map[string][]feishusdk.TaskRow
+	groupRows        map[string][]feishusdk.TaskRow
+	updateCalls      []singleURLUpdateCall
 }
 
 type singleURLUpdateCall struct {
@@ -551,7 +658,13 @@ func (c *singleURLTestClient) FetchTaskTableWithOptions(_ context.Context, _ str
 	if scene != SceneSingleURLCapture {
 		return &feishusdk.TaskTable{Fields: feishusdk.DefaultTaskFields}, nil
 	}
-	rows := cloneTaskRows(c.rows[status])
+	var rows []feishusdk.TaskRow
+	if len(c.rowsByDatePreset) > 0 {
+		datePreset := suExtractConditionValue(opts.Filter, feishusdk.DefaultTaskFields.Datetime)
+		rows = cloneTaskRows(c.rowsByDatePreset[datePreset][status])
+	} else {
+		rows = cloneTaskRows(c.rows[status])
+	}
 	limit := 0
 	if opts != nil {
 		limit = opts.Limit

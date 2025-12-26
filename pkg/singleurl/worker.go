@@ -185,6 +185,7 @@ type SingleURLWorker struct {
 
 	newTaskStatuses    []string
 	activeTaskStatuses []string
+	datePresets        []string
 }
 
 // NewSingleURLWorker builds a worker using the provided configuration.
@@ -233,6 +234,7 @@ func NewSingleURLWorker(cfg SingleURLWorkerConfig) (*SingleURLWorker, error) {
 			feishusdk.StatusDownloaderQueued,
 			feishusdk.StatusDownloaderProcessing,
 		},
+		datePresets: []string{taskagent.TaskDateToday},
 	}, nil
 }
 
@@ -294,6 +296,10 @@ func NewSingleURLReadyWorkerFromEnvWithOptions(cfg SingleURLWorkerConfig) (*Sing
 	worker.newTaskStatuses = []string{
 		feishusdk.StatusReady,
 		feishusdk.StatusDownloaderFailed,
+	}
+	worker.datePresets = []string{
+		taskagent.TaskDateToday,
+		taskagent.TaskDateYesterday,
 	}
 	return worker, nil
 }
@@ -360,33 +366,40 @@ func (w *SingleURLWorker) fetchSingleURLTasks(ctx context.Context, statuses []st
 	if limit <= 0 {
 		limit = DefaultSingleURLWorkerLimit
 	}
+	datePresets := w.datePresets
+	if len(datePresets) == 0 {
+		datePresets = []string{taskagent.TaskDateToday}
+	}
 	result := make([]*FeishuTask, 0, limit)
 	seen := make(map[int64]struct{}, limit)
 	fields := feishusdk.DefaultTaskFields
 	for _, status := range statuses {
-		if limit > 0 && len(result) >= limit {
-			break
-		}
-		remaining := limit
-		if remaining > 0 {
-			remaining -= len(result)
-			if remaining <= 0 {
+		for _, preset := range datePresets {
+			if limit > 0 && len(result) >= limit {
 				break
 			}
+			remaining := limit
+			if remaining > 0 {
+				remaining -= len(result)
+				if remaining <= 0 {
+					break
+				}
+			}
+			subset, err := taskagent.FetchFeishuTasksWithStrategy(
+				ctx, w.client, w.bitableURL, fields, w.appFilter, []string{status},
+				remaining, taskagent.SceneSingleURLCapture, preset)
+			if err != nil {
+				log.Warn().Err(err).
+					Str("status", status).
+					Str("date_preset", preset).
+					Msg("single url worker fetch failed")
+				continue
+			}
+			if w.nodeTotal > 1 && len(subset) > 0 {
+				subset = filterFeishuTasksByShard(subset, w.nodeIndex, w.nodeTotal)
+			}
+			result = taskagent.AppendUniqueFeishuTasks(result, subset, limit, seen)
 		}
-		subset, err := taskagent.FetchFeishuTasksWithStrategy(
-			ctx, w.client, w.bitableURL, fields, w.appFilter, []string{status},
-			remaining, taskagent.SceneSingleURLCapture, taskagent.TaskDateToday)
-		if err != nil {
-			log.Warn().Err(err).
-				Str("status", status).
-				Msg("single url worker fetch failed")
-			continue
-		}
-		if w.nodeTotal > 1 && len(subset) > 0 {
-			subset = filterFeishuTasksByShard(subset, w.nodeIndex, w.nodeTotal)
-		}
-		result = taskagent.AppendUniqueFeishuTasks(result, subset, limit, seen)
 	}
 	return result, nil
 }
@@ -460,8 +473,11 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 			log.Info().
 				Int64("task_id", task.TaskID).
 				Str("crawler_task_id", taskID).
-				Msg("single url task already has crawler task id; skip creation")
-			return nil
+				Msg("single url task already has crawler task id; reconciling")
+			// Recover tasks that have a crawler task id recorded in Logs but are stuck
+			// in Status=ready (or other non-dl states) due to previous update failures
+			// or manual edits.
+			return w.reconcileSingleURLTask(ctx, task)
 		}
 	}
 	metaPayload := make(map[string]string, 3)
@@ -541,7 +557,11 @@ func (w *SingleURLWorker) reconcileSingleURLTask(ctx context.Context, task *Feis
 	switch strings.ToUpper(strings.TrimSpace(status.Status)) {
 	case "WAITING":
 		if task.Status != feishusdk.StatusDownloaderQueued {
-			return w.markSingleURLTaskQueued(ctx, task, task.GroupID, meta)
+			groupID := strings.TrimSpace(task.GroupID)
+			if groupID == "" {
+				groupID = buildSingleURLGroupID(task.App, strings.TrimSpace(task.BookID), strings.TrimSpace(task.UserID))
+			}
+			return w.markSingleURLTaskQueued(ctx, task, groupID, meta)
 		}
 		return nil
 	case "PROCESSING":
