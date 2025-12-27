@@ -735,6 +735,43 @@ func TestSingleURLWorkerPollsProcessingTasksBeforeQueued(t *testing.T) {
 	}
 }
 
+func TestSingleURLWorkerPollsActiveTasksBeforeDispatchingNewTasks(t *testing.T) {
+	client := &singleURLTestClient{
+		rows: map[string][]feishusdk.TaskRow{
+			feishusdk.StatusPending: {
+				{TaskID: 1, Scene: SceneSingleURLCapture, Status: feishusdk.StatusPending, BookID: "B001", UserID: "U001", App: "kuaishou", URL: "https://example.com/video"},
+			},
+			feishusdk.StatusDownloaderProcessing: {
+				{TaskID: 2, Scene: SceneSingleURLCapture, Status: feishusdk.StatusDownloaderProcessing, BookID: "B002", UserID: "U002", App: "kuaishou", URL: "https://example.com/processing", Logs: `[{"task_id":"processing-1"}]`},
+			},
+		},
+	}
+	crawler := &orderedCrawlerClient{
+		statuses: map[string]*crawlerTaskStatus{
+			"processing-1": {TaskID: "processing-1", Status: "PROCESSING"},
+		},
+	}
+	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
+		Client:        client,
+		CrawlerClient: crawler,
+		BitableURL:    "https://bitable.example",
+		Limit:         5,
+		PollInterval:  time.Second,
+	})
+	if err != nil {
+		t.Fatalf("new worker: %v", err)
+	}
+	if err := worker.ProcessOnce(context.Background()); err != nil {
+		t.Fatalf("process once: %v", err)
+	}
+	if len(crawler.events) == 0 {
+		t.Fatalf("expected crawler calls, got none")
+	}
+	if crawler.events[0] != "get:processing-1" {
+		t.Fatalf("expected active polling first, got events=%v", crawler.events)
+	}
+}
+
 type singleURLTestClient struct {
 	rows             map[string][]feishusdk.TaskRow
 	rowsByDatePreset map[string]map[string][]feishusdk.TaskRow
@@ -959,5 +996,27 @@ func (c *concurrencyCrawlerClient) GetTask(context.Context, string) (*crawlerTas
 }
 
 func (c *concurrencyCrawlerClient) SendTaskSummary(context.Context, TaskSummaryPayload) error {
+	return nil
+}
+
+type orderedCrawlerClient struct {
+	statuses map[string]*crawlerTaskStatus
+	events   []string
+}
+
+func (c *orderedCrawlerClient) CreateTask(_ context.Context, _ string, _ map[string]string) (string, error) {
+	c.events = append(c.events, "create")
+	return "task-1", nil
+}
+
+func (c *orderedCrawlerClient) GetTask(_ context.Context, taskID string) (*crawlerTaskStatus, error) {
+	c.events = append(c.events, "get:"+strings.TrimSpace(taskID))
+	if status, ok := c.statuses[strings.TrimSpace(taskID)]; ok {
+		return status, nil
+	}
+	return nil, errCrawlerTaskNotFound
+}
+
+func (c *orderedCrawlerClient) SendTaskSummary(context.Context, TaskSummaryPayload) error {
 	return nil
 }

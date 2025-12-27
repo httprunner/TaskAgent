@@ -350,6 +350,20 @@ func (w *SingleURLWorker) ProcessOnce(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// Always poll active tasks first so dl-processing tasks don't get starved when
+	// the table is dominated by ready/queued tasks.
+	activeTasks, err := w.fetchSingleURLTasks(ctx, w.activeTaskStatuses, w.limit)
+	if err != nil {
+		return err
+	}
+	for _, task := range activeTasks {
+		if err := w.reconcileSingleURLTask(ctx, task); err != nil {
+			log.Error().Err(err).
+				Int64("task_id", task.TaskID).
+				Msg("single url worker polling failed")
+		}
+	}
+
 	newTasks, err := w.fetchSingleURLTasks(ctx, w.newTaskStatuses, w.limit)
 	if err != nil {
 		return err
@@ -364,17 +378,6 @@ func (w *SingleURLWorker) ProcessOnce(ctx context.Context) error {
 		}
 	} else {
 		w.dispatchSingleURLTasks(ctx, newTasks)
-	}
-	activeTasks, err := w.fetchSingleURLTasks(ctx, w.activeTaskStatuses, w.limit)
-	if err != nil {
-		return err
-	}
-	for _, task := range activeTasks {
-		if err := w.reconcileSingleURLTask(ctx, task); err != nil {
-			log.Error().Err(err).
-				Int64("task_id", task.TaskID).
-				Msg("single url worker polling failed")
-		}
 	}
 	return nil
 }
