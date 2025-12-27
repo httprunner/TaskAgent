@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -12,7 +14,7 @@ import (
 	"github.com/httprunner/TaskAgent/internal/feishusdk"
 )
 
-func TestSingleURLWorkerDefaultLimit(t *testing.T) {
+func TestSingleURLWorkerAutoLimitPreservesZero(t *testing.T) {
 	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
 		Client:        &singleURLTestClient{},
 		CrawlerClient: &stubCrawlerClient{createTaskID: "noop"},
@@ -22,8 +24,8 @@ func TestSingleURLWorkerDefaultLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new worker: %v", err)
 	}
-	if worker.limit != DefaultSingleURLWorkerLimit {
-		t.Fatalf("expected limit %d, got %d", DefaultSingleURLWorkerLimit, worker.limit)
+	if worker.limit != 0 {
+		t.Fatalf("expected auto limit to preserve 0, got %d", worker.limit)
 	}
 }
 
@@ -635,6 +637,50 @@ func TestSingleURLReadyWorkerReconcilesWhenLogsHasCrawlerTaskID(t *testing.T) {
 	}
 }
 
+func TestSingleURLWorkerConcurrencySerialFeishuUpdates(t *testing.T) {
+	client := &singleURLConcurrencyClient{
+		base: &singleURLTestClient{
+			rows: map[string][]feishusdk.TaskRow{
+				feishusdk.StatusPending: {
+					{TaskID: 1, Scene: SceneSingleURLCapture, Status: feishusdk.StatusPending, BookID: "B1", UserID: "U1", App: "kuaishou", URL: "https://example.com/1"},
+					{TaskID: 2, Scene: SceneSingleURLCapture, Status: feishusdk.StatusPending, BookID: "B2", UserID: "U2", App: "kuaishou", URL: "https://example.com/2"},
+					{TaskID: 3, Scene: SceneSingleURLCapture, Status: feishusdk.StatusPending, BookID: "B3", UserID: "U3", App: "kuaishou", URL: "https://example.com/3"},
+					{TaskID: 4, Scene: SceneSingleURLCapture, Status: feishusdk.StatusPending, BookID: "B4", UserID: "U4", App: "kuaishou", URL: "https://example.com/4"},
+					{TaskID: 5, Scene: SceneSingleURLCapture, Status: feishusdk.StatusPending, BookID: "B5", UserID: "U5", App: "kuaishou", URL: "https://example.com/5"},
+					{TaskID: 6, Scene: SceneSingleURLCapture, Status: feishusdk.StatusPending, BookID: "B6", UserID: "U6", App: "kuaishou", URL: "https://example.com/6"},
+					{TaskID: 7, Scene: SceneSingleURLCapture, Status: feishusdk.StatusPending, BookID: "B7", UserID: "U7", App: "kuaishou", URL: "https://example.com/7"},
+					{TaskID: 8, Scene: SceneSingleURLCapture, Status: feishusdk.StatusPending, BookID: "B8", UserID: "U8", App: "kuaishou", URL: "https://example.com/8"},
+				},
+			},
+		},
+		updateDelay: 30 * time.Millisecond,
+	}
+	crawler := &concurrencyCrawlerClient{
+		delay: 50 * time.Millisecond,
+	}
+
+	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
+		Client:        client,
+		CrawlerClient: crawler,
+		BitableURL:    "https://bitable.example",
+		Limit:         8,
+		PollInterval:  time.Second,
+		Concurrency:   4,
+	})
+	if err != nil {
+		t.Fatalf("new worker: %v", err)
+	}
+	if err := worker.ProcessOnce(context.Background()); err != nil {
+		t.Fatalf("process once: %v", err)
+	}
+	if got := crawler.maxConcurrentCreate.Load(); got <= 1 {
+		t.Fatalf("expected concurrent create tasks, max=%d", got)
+	}
+	if got := client.maxConcurrentUpdate.Load(); got != 1 {
+		t.Fatalf("expected serial feishu updates, max=%d", got)
+	}
+}
+
 type singleURLTestClient struct {
 	rows             map[string][]feishusdk.TaskRow
 	rowsByDatePreset map[string]map[string][]feishusdk.TaskRow
@@ -793,4 +839,71 @@ func (c *stubCrawlerClient) GetTask(_ context.Context, taskID string) (*crawlerT
 func (c *stubCrawlerClient) SendTaskSummary(_ context.Context, payload TaskSummaryPayload) error {
 	c.summaryPayloads = append(c.summaryPayloads, payload)
 	return c.summaryErr
+}
+
+type singleURLConcurrencyClient struct {
+	base        *singleURLTestClient
+	mu          sync.Mutex
+	inUpdate    atomic.Int32
+	updateDelay time.Duration
+
+	maxConcurrentUpdate atomic.Int32
+}
+
+func (c *singleURLConcurrencyClient) FetchTaskTableWithOptions(ctx context.Context, rawURL string, override *feishusdk.TaskFields, opts *feishusdk.TaskQueryOptions) (*feishusdk.TaskTable, error) {
+	return c.base.FetchTaskTableWithOptions(ctx, rawURL, override, opts)
+}
+
+func (c *singleURLConcurrencyClient) UpdateTaskStatus(ctx context.Context, table *feishusdk.TaskTable, taskID int64, newStatus string) error {
+	return c.base.UpdateTaskStatus(ctx, table, taskID, newStatus)
+}
+
+func (c *singleURLConcurrencyClient) UpdateTaskFields(ctx context.Context, table *feishusdk.TaskTable, taskID int64, fields map[string]any) error {
+	cur := c.inUpdate.Add(1)
+	for {
+		prev := c.maxConcurrentUpdate.Load()
+		if cur <= prev || c.maxConcurrentUpdate.CompareAndSwap(prev, cur) {
+			break
+		}
+	}
+	if c.updateDelay > 0 {
+		time.Sleep(c.updateDelay)
+	}
+	c.mu.Lock()
+	err := c.base.UpdateTaskFields(ctx, table, taskID, fields)
+	c.mu.Unlock()
+	c.inUpdate.Add(-1)
+	return err
+}
+
+type concurrencyCrawlerClient struct {
+	delay time.Duration
+
+	nextID              atomic.Int64
+	inCreate            atomic.Int32
+	maxConcurrentCreate atomic.Int32
+}
+
+func (c *concurrencyCrawlerClient) CreateTask(ctx context.Context, url string, meta map[string]string) (string, error) {
+	cur := c.inCreate.Add(1)
+	for {
+		prev := c.maxConcurrentCreate.Load()
+		if cur <= prev || c.maxConcurrentCreate.CompareAndSwap(prev, cur) {
+			break
+		}
+	}
+	if c.delay > 0 {
+		time.Sleep(c.delay)
+	}
+	c.inCreate.Add(-1)
+	id := c.nextID.Add(1)
+	return fmt.Sprintf("task-%d", id), nil
+}
+
+func (c *concurrencyCrawlerClient) GetTask(context.Context, string) (*crawlerTaskStatus, error) {
+	return nil, errCrawlerTaskNotFound
+}
+
+func (c *concurrencyCrawlerClient) SendTaskSummary(context.Context, TaskSummaryPayload) error {
+	return nil
 }

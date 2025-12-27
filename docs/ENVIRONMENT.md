@@ -38,6 +38,7 @@ The tables below enumerate every environment variable TaskAgent reads via `os.Ge
 | Variable | Required | Default | Used by | Description |
 | --- | --- | --- | --- | --- |
 | `CRAWLER_SERVICE_BASE_URL` | Optional | `http://localhost:8080` | `pkg/singleurl`, `pkg/webhook`（single_url_capture 汇总）, `cmd singleurl` | Base URL for `content_web_crawler` 的 `/download/tasks` API（创建 task + 轮询 `/download/tasks/<task_id>` 状态 + `/download/tasks/finish` 汇总上报）。 |
+| `SINGLE_URL_CONCURRENCY` | Optional | `1` | `pkg/singleurl`, `cmd singleurl` | Max parallel crawler `POST /download/tasks` calls per `ProcessOnce`. Feishu status updates remain serial to stay under rate limits. |
 | `COOKIE_BITABLE_URL` | Optional | – | – | (Deprecated) SingleURLWorker no longer reads/forwards cookies. |
 | `ENABLE_COOKIE_VALIDATION` | Optional | unset (`false`) | – | (Deprecated) Kept for backward compatibility; no longer used by SingleURLWorker. |
 

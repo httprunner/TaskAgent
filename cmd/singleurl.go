@@ -21,6 +21,7 @@ func newSingleURLCmd() *cobra.Command {
 		flagCrawlerBaseURL string
 		flagPollInterval   time.Duration
 		flagFetchLimit     int
+		flagConcurrency    int
 		flagOnce           bool
 	)
 
@@ -50,7 +51,12 @@ func newSingleURLCmd() *cobra.Command {
 			if limit <= 0 {
 				limit = singleurl.DefaultSingleURLWorkerLimit
 			}
-			worker, err := singleurl.NewSingleURLWorkerFromEnv(taskURL, limit, poll)
+			worker, err := singleurl.NewSingleURLWorkerFromEnvWithOptions(singleurl.SingleURLWorkerConfig{
+				BitableURL:   taskURL,
+				Limit:        limit,
+				PollInterval: poll,
+				Concurrency:  flagConcurrency,
+			})
 			if err != nil {
 				return err
 			}
@@ -59,6 +65,7 @@ func newSingleURLCmd() *cobra.Command {
 					Str("task_url", taskURL).
 					Bool("once", true).
 					Int("fetch_limit", limit).
+					Int("concurrency", flagConcurrency).
 					Msg("singleurl worker processing once")
 				return worker.ProcessOnce(ctx)
 			}
@@ -68,6 +75,7 @@ func newSingleURLCmd() *cobra.Command {
 				Str("task_url", taskURL).
 				Dur("poll_interval", poll).
 				Int("fetch_limit", limit).
+				Int("concurrency", flagConcurrency).
 				Msg("singleurl worker running")
 			return worker.Run(sigCtx)
 		},
@@ -77,6 +85,7 @@ func newSingleURLCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flagCrawlerBaseURL, "crawler-base-url", "", "Crawler service endpoint overriding $CRAWLER_SERVICE_BASE_URL")
 	cmd.Flags().DurationVar(&flagPollInterval, "poll-interval", 30*time.Second, "Polling interval when running continuously")
 	cmd.Flags().IntVar(&flagFetchLimit, "fetch-limit", singleurl.DefaultSingleURLWorkerLimit, "Maximum tasks to fetch per cycle")
+	cmd.Flags().IntVar(&flagConcurrency, "concurrency", 0, "Parallelism for crawler CreateTask calls (0 uses $SINGLE_URL_CONCURRENCY)")
 	cmd.Flags().BoolVar(&flagOnce, "once", false, "Run only one ProcessOnce cycle and exit")
 
 	return cmd

@@ -25,6 +25,7 @@
 
 1. 设备池（`DevicePoolAgent`）默认通过 `task.Config.AllowedScenes` 仅消费需要物理设备的场景（比如综合页/个人页/录屏/合集/锚点），`Scene=单个链接采集` 不在列表中，因此完全交给 `SingleURLWorker`（内部仍使用 `task` 的相同查询逻辑），不会再占用设备拉取额度。
 2. `SingleURLWorker`（核心实现位于 `pkg/singleurl`，通过 `singleurl.NewSingleURLWorker` / `singleurl.NewSingleURLWorkerFromEnv` 使用）按照 `pending → failed` 顺序批量拉取任务，每轮最多 `fetch-tasks-limit` 条，可通过 `--single-url-poll-interval` 改写扫描频率。
+   - 为了加速 `ready/pending → dl-queued` 的入队吞吐，可以通过 `SINGLE_URL_CONCURRENCY`（或 `cmd singleurl --concurrency`）并发调用下载服务的 `POST /download/tasks`；但对 Feishu 的状态写回仍保持串行以避免触发频率限制。
 3. 对于所有字段完整的任务：
    - Worker 会调用下载服务 `POST /download/tasks`，请求体包含 `{platform,bid,uid,url}`（可选 `cdn_url`）；
    - 成功后会把任务 `Status` 更新为 `queued`，将 `GroupID` 写成 `BookID_UserID`，并把 `{task_id: <xxx>}` 序列化到 `Logs`；

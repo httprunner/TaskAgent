@@ -13,10 +13,12 @@ import (
 	"github.com/httprunner/TaskAgent/internal/feishusdk"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
 	crawlerServiceBaseURLEnv     = "CRAWLER_SERVICE_BASE_URL"
+	singleURLConcurrencyEnv      = "SINGLE_URL_CONCURRENCY"
 	defaultCrawlerServiceBaseURL = "http://localhost:8000"
 	// DefaultSingleURLWorkerLimit is the per-device multiplier used when the worker
 	// auto-resolves fetch limits (Limit<=0).
@@ -166,6 +168,10 @@ type SingleURLWorkerConfig struct {
 	PollInterval  time.Duration
 	Clock         func() time.Time
 	CrawlerClient crawlerTaskClient
+	// Concurrency controls how many crawler CreateTask requests can run in parallel
+	// within a single ProcessOnce cycle. Feishu updates are still applied serially to avoid
+	// triggering rate limits.
+	Concurrency int
 	// AppFilter optionally scopes tasks by the App column in the task table.
 	AppFilter string
 	// NodeIndex and NodeTotal enable optional sharding (BookID+App) across multiple nodes.
@@ -182,6 +188,7 @@ type SingleURLWorker struct {
 	pollInterval time.Duration
 	clock        func() time.Time
 	crawler      crawlerTaskClient
+	concurrency  int
 	appFilter    string
 	nodeIndex    int
 	nodeTotal    int
@@ -214,6 +221,13 @@ func NewSingleURLWorker(cfg SingleURLWorkerConfig) (*SingleURLWorker, error) {
 	if clock == nil {
 		clock = time.Now
 	}
+	concurrency := cfg.Concurrency
+	if concurrency <= 0 {
+		concurrency = env.Int(singleURLConcurrencyEnv, 1)
+	}
+	if concurrency <= 0 {
+		concurrency = 1
+	}
 	nodeIndex, nodeTotal := taskagent.NormalizeShardConfig(cfg.NodeIndex, cfg.NodeTotal)
 	return &SingleURLWorker{
 		client:       client,
@@ -222,6 +236,7 @@ func NewSingleURLWorker(cfg SingleURLWorkerConfig) (*SingleURLWorker, error) {
 		pollInterval: poll,
 		clock:        clock,
 		crawler:      crawler,
+		concurrency:  concurrency,
 		appFilter:    strings.TrimSpace(cfg.AppFilter),
 		nodeIndex:    nodeIndex,
 		nodeTotal:    nodeTotal,
@@ -265,6 +280,7 @@ func NewSingleURLWorkerFromEnvWithOptions(cfg SingleURLWorkerConfig) (*SingleURL
 		Limit:         cfg.Limit,
 		PollInterval:  cfg.PollInterval,
 		CrawlerClient: crawler,
+		Concurrency:   cfg.Concurrency,
 		AppFilter:     cfg.AppFilter,
 		NodeIndex:     cfg.NodeIndex,
 		NodeTotal:     cfg.NodeTotal,
@@ -338,12 +354,16 @@ func (w *SingleURLWorker) ProcessOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, task := range newTasks {
-		if err := w.handleSingleURLTask(ctx, task); err != nil {
-			log.Error().Err(err).
-				Int64("task_id", task.TaskID).
-				Msg("single url worker dispatch failed")
+	if w.concurrency <= 1 || len(newTasks) <= 1 {
+		for _, task := range newTasks {
+			if err := w.handleSingleURLTask(ctx, task); err != nil {
+				log.Error().Err(err).
+					Int64("task_id", task.TaskID).
+					Msg("single url worker dispatch failed")
+			}
 		}
+	} else {
+		w.dispatchSingleURLTasks(ctx, newTasks)
 	}
 	activeTasks, err := w.fetchSingleURLTasks(ctx, w.activeTaskStatuses, w.limit)
 	if err != nil {
@@ -357,6 +377,183 @@ func (w *SingleURLWorker) ProcessOnce(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+type singleURLUpdateWork struct {
+	taskID int64
+	apply  func(context.Context) error
+}
+
+func (w *SingleURLWorker) dispatchSingleURLTasks(ctx context.Context, tasks []*FeishuTask) {
+	if w == nil || len(tasks) == 0 {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	works := make([]singleURLUpdateWork, len(tasks))
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(w.concurrency)
+	for idx, task := range tasks {
+		idx := idx
+		task := task
+		group.Go(func() error {
+			if task == nil {
+				return nil
+			}
+			works[idx] = w.buildSingleURLDispatchWork(groupCtx, task)
+			return nil
+		})
+	}
+	_ = group.Wait()
+	for _, work := range works {
+		if work.apply == nil {
+			continue
+		}
+		if err := work.apply(ctx); err != nil {
+			log.Error().Err(err).
+				Int64("task_id", work.taskID).
+				Msg("single url worker update failed")
+		}
+	}
+}
+
+func (w *SingleURLWorker) buildSingleURLDispatchWork(ctx context.Context, task *FeishuTask) singleURLUpdateWork {
+	work := singleURLUpdateWork{taskID: 0}
+	if task == nil {
+		return work
+	}
+	work.taskID = task.TaskID
+	if w == nil {
+		work.apply = func(context.Context) error { return errors.New("single url worker: nil instance") }
+		return work
+	}
+	meta := decodeSingleURLMetadata(task.Logs)
+	if meta.reachedRetryCap(singleURLMaxAttempts) {
+		reason := fmt.Sprintf("retry limit reached after %d attempts", meta.attemptsWithTaskID())
+		bookID := strings.TrimSpace(task.BookID)
+		userID := strings.TrimSpace(task.UserID)
+		attempts := meta.attemptsWithTaskID()
+		if latest := meta.latestAttempt(); latest != nil {
+			latest.Error = reason
+			if latest.CompletedAt == 0 {
+				if ts := w.clock(); !ts.IsZero() {
+					latest.CompletedAt = ts.UTC().Unix()
+				}
+			}
+		}
+		work.apply = func(ctx context.Context) error {
+			log.Warn().
+				Int64("task_id", task.TaskID).
+				Str("book_id", bookID).
+				Str("user_id", userID).
+				Int("attempts", attempts).
+				Msg("single url worker retry cap reached; marking task error")
+			return w.markSingleURLTaskError(ctx, task, meta)
+		}
+		return work
+	}
+
+	retryRequired := false
+	switch strings.TrimSpace(task.Status) {
+	case feishusdk.StatusFailed, feishusdk.StatusDownloaderFailed:
+		retryRequired = true
+	}
+
+	bookID := strings.TrimSpace(task.BookID)
+	userID := strings.TrimSpace(task.UserID)
+	url := strings.TrimSpace(task.URL)
+	if bookID == "" || userID == "" || url == "" {
+		missingFields := make([]string, 0, 3)
+		if bookID == "" {
+			missingFields = append(missingFields, "BookID")
+		}
+		if userID == "" {
+			missingFields = append(missingFields, "UserID")
+		}
+		if url == "" {
+			missingFields = append(missingFields, "URL")
+		}
+		reason := fmt.Sprintf("missing fields: %s", strings.Join(missingFields, ","))
+		work.apply = func(ctx context.Context) error {
+			return w.failSingleURLTask(ctx, task, reason, nil)
+		}
+		return work
+	}
+
+	if !retryRequired {
+		if taskID := meta.latestTaskID(); taskID != "" {
+			work.apply = func(ctx context.Context) error {
+				log.Info().
+					Int64("task_id", task.TaskID).
+					Str("crawler_task_id", taskID).
+					Msg("single url task already has crawler task id; reconciling")
+				return w.reconcileSingleURLTask(ctx, task)
+			}
+			return work
+		}
+	}
+
+	metaPayload := make(map[string]string, 3)
+	metaPayload["platform"] = defaultCookiePlatform
+	metaPayload["bid"] = bookID
+	metaPayload["uid"] = userID
+	cdnURL := extractSingleURLCDNURL(task.Extra)
+	if (strings.TrimSpace(task.Status) == feishusdk.StatusReady || strings.TrimSpace(task.Status) == feishusdk.StatusDownloaderFailed) && cdnURL == "" {
+		work.apply = func(ctx context.Context) error {
+			return w.markSingleURLTaskFailedForDeviceStage(ctx, task)
+		}
+		return work
+	}
+	if cdnURL != "" {
+		metaPayload["cdn_url"] = cdnURL
+	}
+	taskID, err := w.crawler.CreateTask(ctx, url, metaPayload)
+	if err != nil {
+		reason := fmt.Sprintf("create crawler task failed: %v", err)
+		work.apply = func(ctx context.Context) error {
+			return w.failSingleURLTask(ctx, task, reason, nil)
+		}
+		return work
+	}
+
+	createdAt := w.clock()
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
+	meta.appendAttempt(taskID, feishusdk.StatusDownloaderQueued, createdAt)
+	groupID := buildSingleURLGroupID(task.App, bookID, userID)
+	work.apply = func(ctx context.Context) error {
+		if err := w.markSingleURLTaskQueued(ctx, task, groupID, meta); err != nil {
+			return err
+		}
+		log.Info().
+			Int64("task_id", task.TaskID).
+			Str("crawler_task_id", taskID).
+			Str("book_id", bookID).
+			Str("user_id", userID).
+			Str("url", url).
+			Msg("single url capture task queued")
+		return nil
+	}
+	return work
+}
+
+func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuTask) error {
+	if w == nil {
+		return errors.New("single url worker: nil instance")
+	}
+	if task == nil {
+		return errors.New("single url worker: nil task")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	work := w.buildSingleURLDispatchWork(ctx, task)
+	if work.apply == nil {
+		return nil
+	}
+	return work.apply(ctx)
 }
 
 func (w *SingleURLWorker) fetchSingleURLTasks(ctx context.Context, statuses []string, limit int) ([]*FeishuTask, error) {
@@ -430,104 +627,6 @@ func filterFeishuTasksByShard(tasks []*FeishuTask, nodeIndex, nodeTotal int) []*
 		}
 	}
 	return out
-}
-
-func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuTask) error {
-	if task == nil {
-		return errors.New("single url worker: nil task")
-	}
-	bookID := strings.TrimSpace(task.BookID)
-	userID := strings.TrimSpace(task.UserID)
-	url := strings.TrimSpace(task.URL)
-	missingFields := make([]string, 0, 3)
-	if bookID == "" {
-		missingFields = append(missingFields, "BookID")
-	}
-	if userID == "" {
-		missingFields = append(missingFields, "UserID")
-	}
-	if url == "" {
-		missingFields = append(missingFields, "URL")
-	}
-	if len(missingFields) > 0 {
-		reason := fmt.Sprintf("missing fields: %s", strings.Join(missingFields, ","))
-		return w.failSingleURLTask(ctx, task, reason, nil)
-	}
-	// Metadata for single_url_capture tasks is stored in Logs.
-	meta := decodeSingleURLMetadata(task.Logs)
-	if meta.reachedRetryCap(singleURLMaxAttempts) {
-		reason := fmt.Sprintf("retry limit reached after %d attempts", meta.attemptsWithTaskID())
-		if latest := meta.latestAttempt(); latest != nil {
-			latest.Error = reason
-			if latest.CompletedAt == 0 {
-				if ts := w.clock(); !ts.IsZero() {
-					latest.CompletedAt = ts.UTC().Unix()
-				}
-			}
-		}
-		log.Warn().
-			Int64("task_id", task.TaskID).
-			Str("book_id", bookID).
-			Str("user_id", userID).
-			Int("attempts", meta.attemptsWithTaskID()).
-			Msg("single url worker retry cap reached; marking task error")
-		return w.markSingleURLTaskError(ctx, task, meta)
-	}
-	retryRequired := false
-	switch strings.TrimSpace(task.Status) {
-	case feishusdk.StatusFailed, feishusdk.StatusDownloaderFailed:
-		retryRequired = true
-	}
-	if !retryRequired {
-		if taskID := meta.latestTaskID(); taskID != "" {
-			log.Info().
-				Int64("task_id", task.TaskID).
-				Str("crawler_task_id", taskID).
-				Msg("single url task already has crawler task id; reconciling")
-			// Recover tasks that have a crawler task id recorded in Logs but are stuck
-			// in Status=ready (or other non-dl states) due to previous update failures
-			// or manual edits.
-			return w.reconcileSingleURLTask(ctx, task)
-		}
-	}
-	metaPayload := make(map[string]string, 3)
-	metaPayload["platform"] = defaultCookiePlatform
-	if bookID != "" {
-		metaPayload["bid"] = bookID
-	}
-	if userID != "" {
-		metaPayload["uid"] = userID
-	}
-	cdnURL := extractSingleURLCDNURL(task.Extra)
-	if (strings.TrimSpace(task.Status) == feishusdk.StatusReady || strings.TrimSpace(task.Status) == feishusdk.StatusDownloaderFailed) && cdnURL == "" {
-		// Ready/dl-failed tasks should come from device stage and must have cdn_url.
-		// If cdn_url is missing, hand the task back to device stage by marking it as failed.
-		return w.markSingleURLTaskFailedForDeviceStage(ctx, task)
-	}
-	if cdnURL != "" {
-		metaPayload["cdn_url"] = cdnURL
-	}
-	taskID, err := w.crawler.CreateTask(ctx, url, metaPayload)
-	if err != nil {
-		return w.failSingleURLTask(ctx, task, fmt.Sprintf("create crawler task failed: %v", err), nil)
-	}
-	createdAt := w.clock()
-	if createdAt.IsZero() {
-		createdAt = time.Now()
-	}
-	meta.appendAttempt(taskID, feishusdk.StatusDownloaderQueued, createdAt)
-	groupID := buildSingleURLGroupID(task.App, bookID, userID)
-	if err := w.markSingleURLTaskQueued(ctx, task, groupID, meta); err != nil {
-		return err
-	}
-	log.Info().
-		Int64("task_id", task.TaskID).
-		Str("crawler_task_id", taskID).
-		Str("book_id", bookID).
-		Str("user_id", userID).
-		Str("url", url).
-		Msg("single url capture task queued")
-	return nil
 }
 
 func (w *SingleURLWorker) markSingleURLTaskFailedForDeviceStage(ctx context.Context, task *FeishuTask) error {
