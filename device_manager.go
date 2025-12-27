@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
@@ -191,6 +192,25 @@ func (m *deviceManager) IdleDevices() []string {
 	return result
 }
 
+// OnlineDeviceCount returns how many devices are currently tracked as online.
+// It reflects the latest Refresh() result, respects allowlist, and excludes
+// devices scheduled for removal after job completion.
+func (m *deviceManager) OnlineDeviceCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	count := 0
+	for serial, dev := range m.devices {
+		if dev == nil || dev.removeAfterJob {
+			continue
+		}
+		if !m.isAllowed(serial) {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
 // MarkDispatched sets the device to dispatched state.
 func (m *deviceManager) MarkDispatched(serial string) {
 	m.mu.Lock()
@@ -257,4 +277,21 @@ func (m *deviceManager) SetMeta(serial string, meta deviceMeta) {
 		dev.meta = meta
 		dev.metaReady = true
 	}
+}
+
+var onlineDeviceCount int64
+
+// SetOnlineDeviceCount stores the latest online device count for the current process.
+// It is updated by DevicePoolAgent refresh cycles and can be consumed by other workers
+// (for example, to size fetch limits) without introducing tight coupling.
+func SetOnlineDeviceCount(count int) {
+	if count < 0 {
+		count = 0
+	}
+	atomic.StoreInt64(&onlineDeviceCount, int64(count))
+}
+
+// OnlineDeviceCount returns the latest online device count recorded in this process.
+func OnlineDeviceCount() int {
+	return int(atomic.LoadInt64(&onlineDeviceCount))
 }

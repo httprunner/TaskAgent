@@ -18,9 +18,12 @@ import (
 const (
 	crawlerServiceBaseURLEnv     = "CRAWLER_SERVICE_BASE_URL"
 	defaultCrawlerServiceBaseURL = "http://localhost:8000"
-	// DefaultSingleURLWorkerLimit caps each fetch cycle when no explicit limit is provided.
+	// DefaultSingleURLWorkerLimit is the per-device multiplier used when the worker
+	// auto-resolves fetch limits (Limit<=0).
 	DefaultSingleURLWorkerLimit = 20
-	singleURLMaxAttempts        = 3
+	// MaxSingleURLWorkerFetchLimit caps a single fetch cycle to protect the Feishu API.
+	MaxSingleURLWorkerFetchLimit = 200
+	singleURLMaxAttempts         = 3
 )
 
 // SceneSingleURLCapture mirrors the Feishu scene name used for single URL capture tasks.
@@ -203,9 +206,6 @@ func NewSingleURLWorker(cfg SingleURLWorkerConfig) (*SingleURLWorker, error) {
 		return nil, errors.New("single url worker: bitable url is empty")
 	}
 	limit := cfg.Limit
-	if limit <= 0 {
-		limit = DefaultSingleURLWorkerLimit
-	}
 	poll := cfg.PollInterval
 	if poll <= 0 {
 		poll = 30 * time.Second
@@ -362,6 +362,16 @@ func (w *SingleURLWorker) ProcessOnce(ctx context.Context) error {
 func (w *SingleURLWorker) fetchSingleURLTasks(ctx context.Context, statuses []string, limit int) ([]*FeishuTask, error) {
 	if limit <= 0 {
 		limit = w.limit
+	}
+	if limit <= 0 && w != nil {
+		online := taskagent.OnlineDeviceCount()
+		if online <= 0 {
+			online = 1
+		}
+		limit = DefaultSingleURLWorkerLimit * online
+	}
+	if limit > MaxSingleURLWorkerFetchLimit {
+		limit = MaxSingleURLWorkerFetchLimit
 	}
 	if limit <= 0 {
 		limit = DefaultSingleURLWorkerLimit

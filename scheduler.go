@@ -238,7 +238,20 @@ func (a *DevicePoolAgent) refreshDevices(ctx context.Context) error {
 	if a.deviceManager == nil {
 		return errors.New("device manager is not initialized")
 	}
-	return a.deviceManager.Refresh(ctx, a.fetchDeviceMeta, a.snapshotJobTasks)
+	if err := a.deviceManager.Refresh(ctx, a.fetchDeviceMeta, a.snapshotJobTasks); err != nil {
+		return err
+	}
+	SetOnlineDeviceCount(a.deviceManager.OnlineDeviceCount())
+	return nil
+}
+
+// OnlineDeviceCount returns the number of currently online devices managed by this agent.
+// It reflects the latest Refresh() cycle and respects allowlist and offline removal logic.
+func (a *DevicePoolAgent) OnlineDeviceCount() int {
+	if a == nil || a.deviceManager == nil {
+		return 0
+	}
+	return a.deviceManager.OnlineDeviceCount()
 }
 
 func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
