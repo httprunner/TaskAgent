@@ -123,13 +123,21 @@ func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, meta
 		return "", errors.Wrap(err, "build create task request")
 	}
 	req.Header.Set("Content-Type", "application/json")
+	startedAt := time.Now()
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		log.Error().
+			Str("method", http.MethodPost).
+			Str("url", endpoint).
+			Int64("elapsed_ms", time.Since(startedAt).Milliseconds()).
+			Err(err).
+			Msg("crawler create tasks request failed")
 		return "", errors.Wrap(err, "call crawler create task")
 	}
 	defer resp.Body.Close()
+	elapsed := time.Since(startedAt)
 	if resp.StatusCode >= http.StatusBadRequest {
-		return "", c.errorFromResponse(resp)
+		return "", c.errorFromResponse(resp, elapsed)
 	}
 	var parsed struct {
 		Code int    `json:"code"`
@@ -148,6 +156,7 @@ func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, meta
 		Str("method", http.MethodPost).
 		Str("url", endpoint).
 		Int("http_status", resp.StatusCode).
+		Int64("elapsed_ms", elapsed.Milliseconds()).
 		Any("response", parsed).
 		Msg("crawler create tasks response")
 	if parsed.Code != 0 {
@@ -171,16 +180,32 @@ func (c *restCrawlerTaskClient) GetTask(ctx context.Context, taskID string) (*cr
 	if err != nil {
 		return nil, errors.Wrap(err, "build get task request")
 	}
+	startedAt := time.Now()
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		log.Error().
+			Str("method", http.MethodGet).
+			Str("url", endpoint).
+			Str("task_id", requestedTaskID).
+			Int64("elapsed_ms", time.Since(startedAt).Milliseconds()).
+			Err(err).
+			Msg("crawler get task request failed")
 		return nil, errors.Wrap(err, "call crawler get task")
 	}
 	defer resp.Body.Close()
+	elapsed := time.Since(startedAt)
 	if resp.StatusCode == http.StatusNotFound {
+		log.Info().
+			Str("method", http.MethodGet).
+			Str("url", endpoint).
+			Str("task_id", requestedTaskID).
+			Int("http_status", resp.StatusCode).
+			Int64("elapsed_ms", elapsed.Milliseconds()).
+			Msg("crawler get task response (not found)")
 		return nil, errCrawlerTaskNotFound
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
-		return nil, c.errorFromResponse(resp)
+		return nil, c.errorFromResponse(resp, elapsed)
 	}
 	var parsed struct {
 		Code int    `json:"code"`
@@ -205,6 +230,7 @@ func (c *restCrawlerTaskClient) GetTask(ctx context.Context, taskID string) (*cr
 		Str("method", http.MethodGet).
 		Str("url", endpoint).
 		Int("http_status", resp.StatusCode).
+		Int64("elapsed_ms", elapsed.Milliseconds()).
 		Any("response", parsed).
 		Msg("crawler get task response")
 	if parsed.Code != 0 {
@@ -227,7 +253,7 @@ func (c *restCrawlerTaskClient) GetTask(ctx context.Context, taskID string) (*cr
 	return status, nil
 }
 
-func (c *restCrawlerTaskClient) errorFromResponse(resp *http.Response) error {
+func (c *restCrawlerTaskClient) errorFromResponse(resp *http.Response, elapsed time.Duration) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 	bodyStr := strings.TrimSpace(string(body))
 	bodyStr = truncateString(bodyStr, 512)
@@ -235,6 +261,7 @@ func (c *restCrawlerTaskClient) errorFromResponse(resp *http.Response) error {
 		Str("method", resp.Request.Method).
 		Str("path", resp.Request.URL.Path).
 		Int("http_status", resp.StatusCode).
+		Int64("elapsed_ms", elapsed.Milliseconds()).
 		Str("content_type", strings.TrimSpace(resp.Header.Get("Content-Type"))).
 		Str("body", bodyStr).
 		Msg("crawler response (http error)")
@@ -264,13 +291,21 @@ func (c *restCrawlerTaskClient) SendTaskSummary(ctx context.Context, payload Tas
 		return errors.Wrap(err, "build task summary request")
 	}
 	req.Header.Set("Content-Type", "application/json")
+	startedAt := time.Now()
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		log.Error().
+			Str("method", http.MethodPost).
+			Str("url", endpoint).
+			Int64("elapsed_ms", time.Since(startedAt).Milliseconds()).
+			Err(err).
+			Msg("crawler task summary request failed")
 		return errors.Wrap(err, "call crawler task summary")
 	}
 	defer resp.Body.Close()
+	elapsed := time.Since(startedAt)
 	if resp.StatusCode >= http.StatusBadRequest {
-		return c.errorFromResponse(resp)
+		return c.errorFromResponse(resp, elapsed)
 	}
 	var parsed struct {
 		Code int    `json:"code"`
@@ -285,6 +320,7 @@ func (c *restCrawlerTaskClient) SendTaskSummary(ctx context.Context, payload Tas
 		Str("method", http.MethodPost).
 		Str("url", endpoint).
 		Int("http_status", resp.StatusCode).
+		Int64("elapsed_ms", elapsed.Milliseconds()).
 		Any("response", parsed).
 		Msg("crawler task summary response")
 	if parsed.Code != 0 {
