@@ -681,6 +681,60 @@ func TestSingleURLWorkerConcurrencySerialFeishuUpdates(t *testing.T) {
 	}
 }
 
+func TestSingleURLWorkerPollsProcessingTasksBeforeQueued(t *testing.T) {
+	client := &singleURLTestClient{
+		rows: map[string][]feishusdk.TaskRow{
+			feishusdk.StatusDownloaderQueued: {
+				{TaskID: 100, Scene: SceneSingleURLCapture, Status: feishusdk.StatusDownloaderQueued, BookID: "B100", UserID: "U100", App: "kuaishou", URL: "https://example.com/q1", Logs: `[{"task_id":"queued-1"}]`},
+				{TaskID: 101, Scene: SceneSingleURLCapture, Status: feishusdk.StatusDownloaderQueued, BookID: "B101", UserID: "U101", App: "kuaishou", URL: "https://example.com/q2", Logs: `[{"task_id":"queued-2"}]`},
+				{TaskID: 102, Scene: SceneSingleURLCapture, Status: feishusdk.StatusDownloaderQueued, BookID: "B102", UserID: "U102", App: "kuaishou", URL: "https://example.com/q3", Logs: `[{"task_id":"queued-3"}]`},
+				{TaskID: 103, Scene: SceneSingleURLCapture, Status: feishusdk.StatusDownloaderQueued, BookID: "B103", UserID: "U103", App: "kuaishou", URL: "https://example.com/q4", Logs: `[{"task_id":"queued-4"}]`},
+				{TaskID: 104, Scene: SceneSingleURLCapture, Status: feishusdk.StatusDownloaderQueued, BookID: "B104", UserID: "U104", App: "kuaishou", URL: "https://example.com/q5", Logs: `[{"task_id":"queued-5"}]`},
+				{TaskID: 105, Scene: SceneSingleURLCapture, Status: feishusdk.StatusDownloaderQueued, BookID: "B105", UserID: "U105", App: "kuaishou", URL: "https://example.com/q6", Logs: `[{"task_id":"queued-6"}]`},
+			},
+			feishusdk.StatusDownloaderProcessing: {
+				{TaskID: 200, Scene: SceneSingleURLCapture, Status: feishusdk.StatusDownloaderProcessing, BookID: "B200", UserID: "U200", App: "kuaishou", URL: "https://example.com/p1", Logs: `[{"task_id":"processing-1"}]`},
+			},
+		},
+	}
+	crawler := &stubCrawlerClient{
+		statuses: map[string]*crawlerTaskStatus{
+			"queued-1":     {TaskID: "queued-1", Status: "WAITING"},
+			"queued-2":     {TaskID: "queued-2", Status: "WAITING"},
+			"queued-3":     {TaskID: "queued-3", Status: "WAITING"},
+			"queued-4":     {TaskID: "queued-4", Status: "WAITING"},
+			"queued-5":     {TaskID: "queued-5", Status: "WAITING"},
+			"queued-6":     {TaskID: "queued-6", Status: "WAITING"},
+			"processing-1": {TaskID: "processing-1", Status: "PROCESSING"},
+		},
+	}
+
+	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
+		Client:        client,
+		CrawlerClient: crawler,
+		BitableURL:    "https://bitable.example",
+		Limit:         5,
+		PollInterval:  time.Second,
+	})
+	if err != nil {
+		t.Fatalf("new worker: %v", err)
+	}
+	// No pending tasks in the stub client; only active tasks will be polled.
+	if err := worker.ProcessOnce(context.Background()); err != nil {
+		t.Fatalf("process once: %v", err)
+	}
+	found := false
+	for _, id := range crawler.queriedTaskID {
+		if id == "processing-1" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected processing task to be polled; queried=%v", crawler.queriedTaskID)
+	}
+}
+
 type singleURLTestClient struct {
 	rows             map[string][]feishusdk.TaskRow
 	rowsByDatePreset map[string]map[string][]feishusdk.TaskRow

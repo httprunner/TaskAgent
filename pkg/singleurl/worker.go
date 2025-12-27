@@ -246,8 +246,8 @@ func NewSingleURLWorker(cfg SingleURLWorkerConfig) (*SingleURLWorker, error) {
 			feishusdk.StatusDownloaderFailed,
 		},
 		activeTaskStatuses: []string{
-			feishusdk.StatusDownloaderQueued,
 			feishusdk.StatusDownloaderProcessing,
+			feishusdk.StatusDownloaderQueued,
 		},
 		datePresets: []string{taskagent.TaskDateToday},
 	}, nil
