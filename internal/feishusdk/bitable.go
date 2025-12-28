@@ -258,7 +258,7 @@ func (c *Client) FetchCookieRows(ctx context.Context, rawURL string, override *C
 		}
 	}
 	opts := &TaskQueryOptions{Filter: f}
-	records, err := c.listBitableRecords(ctx, ref, defaultBitablePageSize, opts)
+	records, _, err := c.listBitableRecords(ctx, ref, defaultBitablePageSize, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -350,6 +350,14 @@ type TaskTable struct {
 	Invalid []TaskRowError
 
 	taskIndex map[int64]string
+
+	// HasMore and NextPageToken describe whether the underlying record search has
+	// more pages. They are populated when FetchTaskTableWithOptions is called with
+	// TaskQueryOptions.MaxPages > 0 so callers can continue scanning on the next
+	// tick without refetching the first page.
+	HasMore       bool
+	NextPageToken string
+	Pages         int
 }
 
 // TaskQueryOptions allows configuring additional filters when fetching task tables.
@@ -358,6 +366,10 @@ type TaskQueryOptions struct {
 	Filter     *FilterInfo
 	Limit      int
 	IgnoreView bool
+	// PageToken controls where the record search begins. When empty, the first page is fetched.
+	PageToken string
+	// MaxPages caps how many pages are fetched in a single call (0 means no cap).
+	MaxPages int
 }
 
 // RecordIDByTaskID returns the record id for a given TaskID if present.
@@ -596,7 +608,7 @@ func (c *Client) FetchTaskTableWithOptions(ctx context.Context, rawURL string, o
 		pageSize = opts.Limit
 	}
 
-	records, err := c.listBitableRecords(ctx, ref, pageSize, opts)
+	records, pageInfo, err := c.listBitableRecords(ctx, ref, pageSize, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -607,7 +619,10 @@ func (c *Client) FetchTaskTableWithOptions(ctx context.Context, rawURL string, o
 		Rows:      make([]TaskRow, 0, len(records)),
 		Invalid:   make([]TaskRowError, 0),
 		taskIndex: make(map[int64]string, len(records)),
+		HasMore:   pageInfo.HasMore,
+		Pages:     pageInfo.Pages,
 	}
+	table.NextPageToken = strings.TrimSpace(pageInfo.NextPageToken)
 
 	for _, rec := range records {
 		row, err := decodeTaskRow(rec, fields)
@@ -720,7 +735,7 @@ func (c *Client) FetchBitableRows(ctx context.Context, rawURL string, opts *Task
 	if opts != nil && opts.Limit > 0 && opts.Limit < pageSize {
 		pageSize = opts.Limit
 	}
-	records, err := c.listBitableRecords(ctx, ref, pageSize, opts)
+	records, _, err := c.listBitableRecords(ctx, ref, pageSize, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -1354,6 +1369,12 @@ type bitableRecord struct {
 	Fields   map[string]any `json:"fields"`
 }
 
+type bitablePageInfo struct {
+	HasMore       bool
+	NextPageToken string
+	Pages         int
+}
+
 // BitableRow wraps a raw bitable record so external packages can read arbitrary columns.
 type BitableRow struct {
 	RecordID string
@@ -1377,9 +1398,9 @@ func (c *Client) BatchGetBitableRows(ctx context.Context, ref BitableRef, record
 	return rows, nil
 }
 
-func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSize int, opts *TaskQueryOptions) ([]bitableRecord, error) {
+func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSize int, opts *TaskQueryOptions) ([]bitableRecord, bitablePageInfo, error) {
 	if strings.TrimSpace(ref.AppToken) == "" {
-		return nil, errors.New("feishu: bitable app token is empty")
+		return nil, bitablePageInfo{}, errors.New("feishu: bitable app token is empty")
 	}
 	if pageSize <= 0 {
 		pageSize = defaultBitablePageSize
@@ -1398,6 +1419,10 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 		if limit > 0 && limit < pageSize {
 			values.Set("page_size", strconv.Itoa(limit))
 		}
+	}
+	maxPages := 0
+	if opts != nil && opts.MaxPages > 0 {
+		maxPages = opts.MaxPages
 	}
 
 	useView := true
@@ -1430,6 +1455,10 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 
 	all := make([]bitableRecord, 0, pageSize)
 	pageToken := ""
+	if opts != nil {
+		pageToken = strings.TrimSpace(opts.PageToken)
+	}
+	pageInfo := bitablePageInfo{}
 
 	start := time.Now()
 	page := 0
@@ -1453,7 +1482,8 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 		}
 		_, raw, err := c.doJSONRequest(ctx, http.MethodPost, path, body)
 		if err != nil {
-			return nil, err
+			pageInfo.Pages = page
+			return nil, pageInfo, err
 		}
 
 		var resp struct {
@@ -1466,7 +1496,8 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 			} `json:"data"`
 		}
 		if err := json.Unmarshal(raw, &resp); err != nil {
-			return nil, fmt.Errorf("feishu: decode bitable search response: %w", err)
+			pageInfo.Pages = page
+			return nil, pageInfo, fmt.Errorf("feishu: decode bitable search response: %w", err)
 		}
 		if resp.Code != 0 {
 			filterJSON := ""
@@ -1479,7 +1510,8 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 					}
 				}
 			}
-			return nil, fmt.Errorf(
+			pageInfo.Pages = page
+			return nil, pageInfo, fmt.Errorf(
 				"feishu: search bitable records failed code=%d msg=%s table_id=%s view_id=%s filter=%s",
 				resp.Code, resp.Msg, ref.TableID, viewID, filterJSON,
 			)
@@ -1487,13 +1519,19 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 
 		page++
 		all = append(all, resp.Data.Items...)
+		pageInfo.HasMore = resp.Data.HasMore
+		pageInfo.NextPageToken = strings.TrimSpace(resp.Data.PageToken)
+		pageInfo.Pages = page
 		if limit > 0 && len(all) >= limit {
 			break
 		}
-		if !resp.Data.HasMore || strings.TrimSpace(resp.Data.PageToken) == "" {
+		if maxPages > 0 && page >= maxPages {
 			break
 		}
-		pageToken = resp.Data.PageToken
+		if !resp.Data.HasMore || pageInfo.NextPageToken == "" {
+			break
+		}
+		pageToken = pageInfo.NextPageToken
 	}
 
 	truncated := false
@@ -1510,7 +1548,7 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 		Dur("elapsed", time.Since(start)).
 		Msg("fetched bitable records")
 
-	return all, nil
+	return all, pageInfo, nil
 }
 
 func decodeTaskRow(rec bitableRecord, fields TaskFields) (TaskRow, error) {

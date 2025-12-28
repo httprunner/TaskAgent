@@ -141,7 +141,7 @@ func (c *Client) FetchDeviceTable(ctx context.Context, rawURL string, override *
 	if override != nil {
 		fields = fields.merge(*override)
 	}
-	records, err := c.listBitableRecords(ctx, ref, defaultBitablePageSize, nil)
+	records, _, err := c.listBitableRecords(ctx, ref, defaultBitablePageSize, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +229,7 @@ func (c *Client) lookupDeviceRecordID(ctx context.Context, ref BitableRef, field
 		refs = append(refs, refNoView)
 	}
 	for _, candidate := range refs {
-		records, err := c.listBitableRecords(ctx, candidate, 1, opts)
+		records, _, err := c.listBitableRecords(ctx, candidate, 1, opts)
 		if err != nil {
 			return "", err
 		}

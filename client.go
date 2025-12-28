@@ -532,6 +532,13 @@ type TargetTableClient interface {
 	UpdateTaskFields(ctx context.Context, table *feishusdk.TaskTable, taskID int64, fields map[string]any) error
 }
 
+// FeishuFetchPageInfo describes paging metadata for a single fetch call.
+type FeishuFetchPageInfo struct {
+	HasMore       bool
+	NextPageToken string
+	Pages         int
+}
+
 type bitableMediaUploader interface {
 	UploadBitableMedia(ctx context.Context, appToken string, fileName string, content []byte, asImage bool) (string, error)
 }
@@ -683,8 +690,13 @@ func fetchPendingFeishuTasksByDatePreset(ctx context.Context, client TargetTable
 }
 
 func FetchFeishuTasksWithStrategy(ctx context.Context, client TargetTableClient, bitableURL string, fields feishusdk.TaskFields, app string, statuses []string, limit int, scene, datePreset string) ([]*FeishuTask, error) {
+	tasks, _, err := FetchFeishuTasksWithStrategyPage(ctx, client, bitableURL, fields, app, statuses, limit, scene, datePreset, FeishuTaskQueryOptions{})
+	return tasks, err
+}
+
+func FetchFeishuTasksWithStrategyPage(ctx context.Context, client TargetTableClient, bitableURL string, fields feishusdk.TaskFields, app string, statuses []string, limit int, scene, datePreset string, queryOpts FeishuTaskQueryOptions) ([]*FeishuTask, FeishuFetchPageInfo, error) {
 	if len(statuses) == 0 {
-		return nil, nil
+		return nil, FeishuFetchPageInfo{}, nil
 	}
 	fetchLimit := limit
 	if fetchLimit <= 0 {
@@ -697,11 +709,14 @@ func FetchFeishuTasksWithStrategy(ctx context.Context, client TargetTableClient,
 		Strs("statuses", statuses).
 		Str("scene", strings.TrimSpace(scene)).
 		Int("fetch_limit", fetchLimit).
+		Bool("ignore_view", queryOpts.IgnoreView).
+		Str("page_token", strings.TrimSpace(queryOpts.PageToken)).
+		Int("max_pages", queryOpts.MaxPages).
 		Str("filter", formatFilterForLog(filter)).
 		Msg("fetching feishusdk tasks from bitable")
-	subset, err := FetchFeishuTasksWithFilter(ctx, client, bitableURL, filter, fetchLimit)
+	subset, pageInfo, err := FetchFeishuTasksWithFilterPage(ctx, client, bitableURL, filter, fetchLimit, queryOpts)
 	if err != nil {
-		return nil, err
+		return nil, FeishuFetchPageInfo{}, err
 	}
 	if len(subset) > 0 {
 		log.Info().
@@ -709,6 +724,10 @@ func FetchFeishuTasksWithStrategy(ctx context.Context, client TargetTableClient,
 			Strs("statuses", statuses).
 			Int("batch_limit", limit).
 			Int("fetch_limit", fetchLimit).
+			Bool("ignore_view", queryOpts.IgnoreView).
+			Str("next_page_token", strings.TrimSpace(pageInfo.NextPageToken)).
+			Bool("has_more", pageInfo.HasMore).
+			Int("pages", pageInfo.Pages).
 			Int("selected", len(subset)).
 			Interface("tasks", summarizeFeishuTasks(subset)).
 			Msg("feishusdk tasks selected after filtering")
@@ -720,20 +739,32 @@ func FetchFeishuTasksWithStrategy(ctx context.Context, client TargetTableClient,
 			Msg("feishusdk tasks aggregated over limit; trimming to cap")
 		subset = subset[:limit]
 	}
-	return subset, nil
+	return subset, pageInfo, nil
 }
 
 func FetchFeishuTasksWithFilter(ctx context.Context, client TargetTableClient, bitableURL string, filter *feishusdk.FilterInfo, limit int) ([]*FeishuTask, error) {
+	tasks, _, err := FetchFeishuTasksWithFilterPage(ctx, client, bitableURL, filter, limit, FeishuTaskQueryOptions{})
+	return tasks, err
+}
+
+func FetchFeishuTasksWithFilterPage(ctx context.Context, client TargetTableClient, bitableURL string, filter *feishusdk.FilterInfo, limit int, queryOpts FeishuTaskQueryOptions) ([]*FeishuTask, FeishuFetchPageInfo, error) {
 	opts := &feishusdk.TaskQueryOptions{
-		Filter: filter,
-		Limit:  limit,
+		Filter:     filter,
+		Limit:      limit,
+		ViewID:     strings.TrimSpace(queryOpts.ViewID),
+		IgnoreView: queryOpts.IgnoreView,
+		PageToken:  strings.TrimSpace(queryOpts.PageToken),
+		MaxPages:   queryOpts.MaxPages,
 	}
 	table, err := client.FetchTaskTableWithOptions(ctx, bitableURL, nil, opts)
 	if err != nil {
-		return nil, errors.Wrap(err, "fetch task table with options failed")
+		return nil, FeishuFetchPageInfo{}, errors.Wrap(err, "fetch task table with options failed")
 	}
 	if table == nil || len(table.Rows) == 0 {
-		return nil, nil
+		if table == nil {
+			return nil, FeishuFetchPageInfo{}, nil
+		}
+		return nil, FeishuFetchPageInfo{HasMore: table.HasMore, NextPageToken: strings.TrimSpace(table.NextPageToken), Pages: table.Pages}, nil
 	}
 
 	source := &feishuTaskSource{client: client, table: table}
@@ -786,7 +817,12 @@ func FetchFeishuTasksWithFilter(ctx context.Context, client TargetTableClient, b
 			break
 		}
 	}
-	return tasks, nil
+	pageInfo := FeishuFetchPageInfo{
+		HasMore:       table.HasMore,
+		NextPageToken: strings.TrimSpace(table.NextPageToken),
+		Pages:         table.Pages,
+	}
+	return tasks, pageInfo, nil
 }
 
 func buildFeishuFilterInfo(fields feishusdk.TaskFields, app string, statuses []string, scene, datePreset string) *feishusdk.FilterInfo {

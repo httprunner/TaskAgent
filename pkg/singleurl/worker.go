@@ -196,6 +196,8 @@ type SingleURLWorker struct {
 	newTaskStatuses    []string
 	activeTaskStatuses []string
 	datePresets        []string
+
+	activePageTokens map[string]string
 }
 
 // NewSingleURLWorker builds a worker using the provided configuration.
@@ -249,7 +251,8 @@ func NewSingleURLWorker(cfg SingleURLWorkerConfig) (*SingleURLWorker, error) {
 			feishusdk.StatusDownloaderProcessing,
 			feishusdk.StatusDownloaderQueued,
 		},
-		datePresets: []string{taskagent.TaskDateToday},
+		datePresets:      []string{taskagent.TaskDateToday},
+		activePageTokens: make(map[string]string, 4),
 	}, nil
 }
 
@@ -352,8 +355,7 @@ func (w *SingleURLWorker) ProcessOnce(ctx context.Context) error {
 	}
 	// Always poll active tasks first so dl-processing tasks don't get starved when
 	// the table is dominated by ready/queued tasks.
-	activeTasks, err := w.fetchSingleURLTasksWithDatePresets(
-		ctx, w.activeTaskStatuses, w.limit, []string{taskagent.TaskDateAny})
+	activeTasks, err := w.fetchSingleURLActiveTasksRotating(ctx, w.limit)
 	if err != nil {
 		return err
 	}
@@ -604,9 +606,10 @@ func (w *SingleURLWorker) fetchSingleURLTasksWithDatePresets(ctx context.Context
 					break
 				}
 			}
-			subset, err := taskagent.FetchFeishuTasksWithStrategy(
+			subset, _, err := taskagent.FetchFeishuTasksWithStrategyPage(
 				ctx, w.client, w.bitableURL, fields, w.appFilter, []string{status},
-				remaining, taskagent.SceneSingleURLCapture, preset)
+				remaining, taskagent.SceneSingleURLCapture, preset,
+				taskagent.FeishuTaskQueryOptions{IgnoreView: true})
 			if err != nil {
 				log.Warn().Err(err).
 					Str("status", status).
@@ -619,6 +622,74 @@ func (w *SingleURLWorker) fetchSingleURLTasksWithDatePresets(ctx context.Context
 			}
 			result = taskagent.AppendUniqueFeishuTasks(result, subset, limit, seen)
 		}
+	}
+	return result, nil
+}
+
+func (w *SingleURLWorker) fetchSingleURLActiveTasksRotating(ctx context.Context, limit int) ([]*FeishuTask, error) {
+	if w == nil {
+		return nil, errors.New("single url worker: nil instance")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if limit <= 0 {
+		limit = w.limit
+	}
+	if limit <= 0 {
+		limit = DefaultSingleURLWorkerLimit
+	}
+	statuses := w.activeTaskStatuses
+	if len(statuses) == 0 {
+		return nil, nil
+	}
+	perStatus := limit / len(statuses)
+	if perStatus <= 0 {
+		perStatus = 1
+	}
+	seen := make(map[int64]struct{}, limit)
+	result := make([]*FeishuTask, 0, limit)
+	fields := feishusdk.DefaultTaskFields
+	for _, status := range statuses {
+		if len(result) >= limit {
+			break
+		}
+		fetchCap := perStatus
+		remaining := limit - len(result)
+		if remaining > 0 && fetchCap > remaining {
+			fetchCap = remaining
+		}
+		if fetchCap <= 0 {
+			fetchCap = perStatus
+		}
+		pageToken := ""
+		if w.activePageTokens != nil {
+			pageToken = strings.TrimSpace(w.activePageTokens[status])
+		}
+		subset, pageInfo, err := taskagent.FetchFeishuTasksWithStrategyPage(
+			ctx, w.client, w.bitableURL, fields, w.appFilter, []string{status},
+			fetchCap, taskagent.SceneSingleURLCapture, taskagent.TaskDateAny,
+			taskagent.FeishuTaskQueryOptions{IgnoreView: true, PageToken: pageToken, MaxPages: 1},
+		)
+		if err != nil {
+			log.Warn().Err(err).
+				Str("status", status).
+				Str("page_token", pageToken).
+				Msg("single url worker active fetch failed")
+			continue
+		}
+		if w.activePageTokens != nil {
+			next := strings.TrimSpace(pageInfo.NextPageToken)
+			if pageInfo.HasMore && next != "" {
+				w.activePageTokens[status] = next
+			} else {
+				w.activePageTokens[status] = ""
+			}
+		}
+		if w.nodeTotal > 1 && len(subset) > 0 {
+			subset = filterFeishuTasksByShard(subset, w.nodeIndex, w.nodeTotal)
+		}
+		result = taskagent.AppendUniqueFeishuTasks(result, subset, limit, seen)
 	}
 	return result, nil
 }

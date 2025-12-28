@@ -465,7 +465,7 @@ func TestListBitableRecordsFilterConversion(t *testing.T) {
 		NewCondition(DefaultTaskFields.App, "is", "qqmusic"),
 	)
 	opts := &TaskQueryOptions{Filter: filter}
-	if _, err := client.listBitableRecords(ctx, ref, 200, opts); err != nil {
+	if _, _, err := client.listBitableRecords(ctx, ref, 200, opts); err != nil {
 		t.Fatalf("listBitableRecords returned error: %v", err)
 	}
 	if capturedFilter == nil || capturedFilter.Conjunction == nil || *capturedFilter.Conjunction != "and" {
@@ -923,6 +923,123 @@ func TestUpdateTaskStatuses(t *testing.T) {
 	}
 	if secondFields[customStatusField] != "done" {
 		t.Fatalf("unexpected second status %#v", secondFields[customStatusField])
+	}
+}
+
+func TestFetchTaskTableWithOptionsRespectsPagingCursor(t *testing.T) {
+	const wikiResponse = `{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnPage","obj_type":"bitable"}}}`
+	firstPage := map[string]any{
+		"code": 0,
+		"msg":  "success",
+		"data": map[string]any{
+			"items": []map[string]any{
+				{
+					"record_id": "recP1",
+					"fields": map[string]any{
+						DefaultTaskFields.TaskID: 201,
+						DefaultTaskFields.Status: "pending",
+					},
+				},
+			},
+			"has_more":   true,
+			"page_token": "p2",
+		},
+	}
+	secondPage := map[string]any{
+		"code": 0,
+		"msg":  "success",
+		"data": map[string]any{
+			"items": []map[string]any{
+				{
+					"record_id": "recP2",
+					"fields": map[string]any{
+						DefaultTaskFields.TaskID: 202,
+						DefaultTaskFields.Status: "pending",
+					},
+				},
+			},
+			"has_more":   false,
+			"page_token": "",
+		},
+	}
+	firstRaw, err := json.Marshal(firstPage)
+	if err != nil {
+		t.Fatalf("marshal first page: %v", err)
+	}
+	secondRaw, err := json.Marshal(secondPage)
+	if err != nil {
+		t.Fatalf("marshal second page: %v", err)
+	}
+
+	ctx := context.Background()
+	var (
+		wikiCalled bool
+		pageCalls  []string
+	)
+	client := &Client{
+		doJSONRequestFunc: func(ctx context.Context, method, path string, payload any) (*http.Response, []byte, error) {
+			switch {
+			case method == http.MethodGet && strings.Contains(path, "/wiki/v2/spaces/get_node"):
+				wikiCalled = true
+				return nil, []byte(wikiResponse), nil
+			case method == http.MethodPost && strings.Contains(path, "/bitable/v1/apps/") && strings.Contains(path, "/records/search"):
+				pageCalls = append(pageCalls, path)
+				if strings.Contains(path, "page_token=p2") {
+					return nil, secondRaw, nil
+				}
+				return nil, firstRaw, nil
+			default:
+				t.Fatalf("unexpected request %s %s", method, path)
+			}
+			return nil, nil, nil
+		},
+	}
+
+	table, err := client.FetchTaskTableWithOptions(ctx, liveReadableBitableURL, nil, &TaskQueryOptions{
+		Limit:    2000,
+		MaxPages: 1,
+	})
+	if err != nil {
+		t.Fatalf("FetchTaskTableWithOptions returned error: %v", err)
+	}
+	if !wikiCalled {
+		t.Fatalf("expected wiki call")
+	}
+	if table == nil {
+		t.Fatalf("expected table, got nil")
+	}
+	if len(table.Rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(table.Rows))
+	}
+	if !table.HasMore || table.NextPageToken != "p2" {
+		t.Fatalf("expected hasMore=true and nextPageToken=p2, got hasMore=%v token=%q", table.HasMore, table.NextPageToken)
+	}
+	if table.Pages != 1 {
+		t.Fatalf("expected Pages=1, got %d", table.Pages)
+	}
+
+	table, err = client.FetchTaskTableWithOptions(ctx, liveReadableBitableURL, nil, &TaskQueryOptions{
+		Limit:     2000,
+		MaxPages:  1,
+		PageToken: "p2",
+	})
+	if err != nil {
+		t.Fatalf("FetchTaskTableWithOptions returned error: %v", err)
+	}
+	if table == nil {
+		t.Fatalf("expected table, got nil")
+	}
+	if len(table.Rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(table.Rows))
+	}
+	if table.HasMore || table.NextPageToken != "" {
+		t.Fatalf("expected hasMore=false and empty nextPageToken, got hasMore=%v token=%q", table.HasMore, table.NextPageToken)
+	}
+	if table.Pages != 1 {
+		t.Fatalf("expected Pages=1, got %d", table.Pages)
+	}
+	if len(pageCalls) < 2 {
+		t.Fatalf("expected >=2 page calls, got %d", len(pageCalls))
 	}
 }
 

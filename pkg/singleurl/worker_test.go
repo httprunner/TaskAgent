@@ -801,6 +801,70 @@ func TestSingleURLWorkerPollsActiveTasksWithoutDatetimeFilter(t *testing.T) {
 	if !client.sawActiveWithoutDatetime {
 		t.Fatalf("expected active query without Datetime filter")
 	}
+	if !client.sawIgnoreView {
+		t.Fatalf("expected IgnoreView for singleurl fetch")
+	}
+}
+
+func TestSingleURLWorkerRotatesActivePagesAcrossStatuses(t *testing.T) {
+	client := newPagedSingleURLClient(t, map[string]pagedSingleURLStatus{
+		feishusdk.StatusDownloaderProcessing: {
+			page1: []feishusdk.TaskRow{
+				{TaskID: 1, Scene: SceneSingleURLCapture, Status: feishusdk.StatusDownloaderProcessing, BookID: "B001", UserID: "U001", App: "kuaishou", URL: "https://example.com/processing-1", Logs: `[{"task_id":"processing-1"}]`},
+			},
+			page2: []feishusdk.TaskRow{
+				{TaskID: 11, Scene: SceneSingleURLCapture, Status: feishusdk.StatusDownloaderProcessing, BookID: "B011", UserID: "U011", App: "kuaishou", URL: "https://example.com/processing-2", Logs: `[{"task_id":"processing-2"}]`},
+			},
+			nextToken: "p2",
+		},
+		feishusdk.StatusDownloaderQueued: {
+			page1: []feishusdk.TaskRow{
+				{TaskID: 2, Scene: SceneSingleURLCapture, Status: feishusdk.StatusDownloaderQueued, BookID: "B002", UserID: "U002", App: "kuaishou", URL: "https://example.com/queued-1", Logs: `[{"task_id":"queued-1"}]`},
+			},
+			page2: []feishusdk.TaskRow{
+				{TaskID: 22, Scene: SceneSingleURLCapture, Status: feishusdk.StatusDownloaderQueued, BookID: "B022", UserID: "U022", App: "kuaishou", URL: "https://example.com/queued-2", Logs: `[{"task_id":"queued-2"}]`},
+			},
+			nextToken: "q2",
+		},
+	})
+	crawler := &stubCrawlerClient{
+		statuses: map[string]*crawlerTaskStatus{
+			"processing-1": {TaskID: "processing-1", Status: "PROCESSING"},
+			"processing-2": {TaskID: "processing-2", Status: "PROCESSING"},
+			"queued-1":     {TaskID: "queued-1", Status: "WAITING"},
+			"queued-2":     {TaskID: "queued-2", Status: "WAITING"},
+		},
+	}
+	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
+		Client:        client,
+		CrawlerClient: crawler,
+		BitableURL:    "https://bitable.example",
+		Limit:         10,
+		PollInterval:  time.Second,
+	})
+	if err != nil {
+		t.Fatalf("new worker: %v", err)
+	}
+
+	if err := worker.ProcessOnce(context.Background()); err != nil {
+		t.Fatalf("process once: %v", err)
+	}
+	if got := client.pageTokens(feishusdk.StatusDownloaderProcessing); len(got) != 1 || got[0] != "" {
+		t.Fatalf("expected first dl-processing fetch from first page, got %v", got)
+	}
+	if got := client.pageTokens(feishusdk.StatusDownloaderQueued); len(got) != 1 || got[0] != "" {
+		t.Fatalf("expected first dl-queued fetch from first page, got %v", got)
+	}
+
+	if err := worker.ProcessOnce(context.Background()); err != nil {
+		t.Fatalf("process once: %v", err)
+	}
+	if got := client.pageTokens(feishusdk.StatusDownloaderProcessing); len(got) != 2 || got[1] != "p2" {
+		t.Fatalf("expected second dl-processing fetch from next page p2, got %v", got)
+	}
+	if got := client.pageTokens(feishusdk.StatusDownloaderQueued); len(got) != 2 || got[1] != "q2" {
+		t.Fatalf("expected second dl-queued fetch from next page q2, got %v", got)
+	}
 }
 
 type singleURLTestClient struct {
@@ -809,6 +873,8 @@ type singleURLTestClient struct {
 	groupRows                map[string][]feishusdk.TaskRow
 	updateCalls              []singleURLUpdateCall
 	sawActiveWithoutDatetime bool
+	sawIgnoreView            bool
+	pageCalls                map[string][]string
 }
 
 type singleURLUpdateCall struct {
@@ -826,6 +892,15 @@ func (c *singleURLTestClient) FetchTaskTableWithOptions(_ context.Context, _ str
 	scene := suExtractConditionValue(opts.Filter, feishusdk.DefaultTaskFields.Scene)
 	if scene != SceneSingleURLCapture {
 		return &feishusdk.TaskTable{Fields: feishusdk.DefaultTaskFields}, nil
+	}
+	if opts != nil && opts.IgnoreView {
+		c.sawIgnoreView = true
+	}
+	if opts != nil {
+		if c.pageCalls == nil {
+			c.pageCalls = make(map[string][]string)
+		}
+		c.pageCalls[status] = append(c.pageCalls[status], strings.TrimSpace(opts.PageToken))
 	}
 	datePreset := suExtractConditionValue(opts.Filter, feishusdk.DefaultTaskFields.Datetime)
 	if (status == feishusdk.StatusDownloaderProcessing || status == feishusdk.StatusDownloaderQueued) && strings.TrimSpace(datePreset) == "" {
@@ -936,6 +1011,73 @@ type stubCrawlerClient struct {
 	summaryPayloads []TaskSummaryPayload
 	summaryErr      error
 	queriedTaskID   []string
+}
+
+type pagedSingleURLStatus struct {
+	page1     []feishusdk.TaskRow
+	page2     []feishusdk.TaskRow
+	nextToken string
+}
+
+type pagedSingleURLClient struct {
+	t *testing.T
+
+	statuses map[string]pagedSingleURLStatus
+
+	callsMu sync.Mutex
+	calls   map[string][]string
+}
+
+func newPagedSingleURLClient(t *testing.T, statuses map[string]pagedSingleURLStatus) *pagedSingleURLClient {
+	return &pagedSingleURLClient{
+		t:        t,
+		statuses: statuses,
+		calls:    make(map[string][]string),
+	}
+}
+
+func (c *pagedSingleURLClient) pageTokens(status string) []string {
+	c.callsMu.Lock()
+	defer c.callsMu.Unlock()
+	out := make([]string, len(c.calls[status]))
+	copy(out, c.calls[status])
+	return out
+}
+
+func (c *pagedSingleURLClient) FetchTaskTableWithOptions(_ context.Context, _ string, _ *feishusdk.TaskFields, opts *feishusdk.TaskQueryOptions) (*feishusdk.TaskTable, error) {
+	status := suExtractConditionValue(opts.Filter, feishusdk.DefaultTaskFields.Status)
+	scene := suExtractConditionValue(opts.Filter, feishusdk.DefaultTaskFields.Scene)
+	if scene != SceneSingleURLCapture {
+		return &feishusdk.TaskTable{Fields: feishusdk.DefaultTaskFields}, nil
+	}
+	c.callsMu.Lock()
+	c.calls[status] = append(c.calls[status], strings.TrimSpace(opts.PageToken))
+	c.callsMu.Unlock()
+
+	cfg, ok := c.statuses[status]
+	if !ok {
+		return &feishusdk.TaskTable{Fields: feishusdk.DefaultTaskFields}, nil
+	}
+	token := strings.TrimSpace(opts.PageToken)
+	if token == "" {
+		rows := cloneTaskRows(cfg.page1)
+		table := &feishusdk.TaskTable{Fields: feishusdk.DefaultTaskFields, Rows: rows, HasMore: true, NextPageToken: cfg.nextToken, Pages: 1}
+		return table, nil
+	}
+	if token == strings.TrimSpace(cfg.nextToken) {
+		rows := cloneTaskRows(cfg.page2)
+		table := &feishusdk.TaskTable{Fields: feishusdk.DefaultTaskFields, Rows: rows, HasMore: false, NextPageToken: "", Pages: 1}
+		return table, nil
+	}
+	return &feishusdk.TaskTable{Fields: feishusdk.DefaultTaskFields}, nil
+}
+
+func (c *pagedSingleURLClient) UpdateTaskStatus(context.Context, *feishusdk.TaskTable, int64, string) error {
+	return nil
+}
+
+func (c *pagedSingleURLClient) UpdateTaskFields(context.Context, *feishusdk.TaskTable, int64, map[string]any) error {
+	return nil
 }
 
 func (c *stubCrawlerClient) CreateTask(_ context.Context, url string, meta map[string]string) (string, error) {
