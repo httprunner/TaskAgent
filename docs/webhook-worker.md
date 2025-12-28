@@ -98,7 +98,7 @@ creator 会在每轮扫描前把 `ScanDate` 更新为本地当天日期，从而
 
 worker 定时轮询 webhook 结果表：
 
-1. 候选行：`Status in {pending, failed}`（`error` 跳过）
+1. 候选行：`Status in {pending, failed}`（`error` 跳过）；可通过 `WebhookResultWorkerConfig.DatePresets` 限制只扫描特定日期（例如 `DatePresets=[Today, Yesterday]` 仅扫描“今天 + 昨天”）。
 2. 就绪判定：对候选行的 `TaskIDs` 到任务表按 TaskID 查询状态
    - 若所有 TaskID 的 `Status in {success, error}` → 触发推送
    - 若存在 `pending/failed/dispatched/running/空/缺失行` → 本轮跳过等待下一次轮询

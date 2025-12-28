@@ -23,6 +23,9 @@ type WebhookResultWorkerConfig struct {
 	PollInterval      time.Duration
 	BatchLimit        int
 	GroupCooldown     time.Duration
+	// DatePresets optionally limits scanning to specific date presets
+	// (e.g. Today/Yesterday). When empty, no Date filter is applied.
+	DatePresets []string
 	// TargetGroupID optionally narrows processing to a single webhook
 	// result group (matching the GroupID field on the result table).
 	TargetGroupID string
@@ -66,6 +69,7 @@ type WebhookResultWorker struct {
 
 	targetGroupID string
 	targetDate    string
+	datePresets   []string
 
 	singleRun bool
 }
@@ -118,6 +122,12 @@ func NewWebhookResultWorker(cfg WebhookResultWorkerConfig) (*WebhookResultWorker
 
 	targetGroupID := strings.TrimSpace(cfg.TargetGroupID)
 	targetDate := strings.TrimSpace(cfg.TargetDate)
+	datePresets := make([]string, 0, len(cfg.DatePresets))
+	for _, preset := range cfg.DatePresets {
+		if trimmed := strings.TrimSpace(preset); trimmed != "" {
+			datePresets = append(datePresets, trimmed)
+		}
+	}
 
 	return &WebhookResultWorker{
 		store:        store,
@@ -137,6 +147,7 @@ func NewWebhookResultWorker(cfg WebhookResultWorkerConfig) (*WebhookResultWorker
 
 		targetGroupID: targetGroupID,
 		targetDate:    targetDate,
+		datePresets:   datePresets,
 		singleRun:     targetGroupID != "" || targetDate != "",
 	}, nil
 }
@@ -196,7 +207,10 @@ func (w *WebhookResultWorker) processOnce(ctx context.Context) error {
 		fetchLimit = 200
 	}
 
-	rows, err := w.store.listCandidates(ctx, fetchLimit)
+	rows, err := w.store.listCandidates(ctx, listCandidatesOptions{
+		BatchLimit: fetchLimit,
+		DatePresets: w.datePresets,
+	})
 	if err != nil {
 		return err
 	}

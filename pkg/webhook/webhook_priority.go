@@ -238,7 +238,9 @@ func listWebhookResultTaskIDs(ctx context.Context, tableURL string, batchLimit i
 	if store == nil {
 		return nil, nil
 	}
-	rows, err := store.listCandidates(ctx, batchLimit)
+	rows, err := store.listCandidates(ctx, listCandidatesOptions{
+		BatchLimit: batchLimit,
+	})
 	if err != nil {
 		return nil, err
 	}

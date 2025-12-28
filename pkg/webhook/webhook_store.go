@@ -165,10 +165,16 @@ func (s *webhookResultStore) createPending(ctx context.Context, input webhookRes
 	return s.client.CreateBitableRecord(ctx, s.tableURL, fields)
 }
 
-func (s *webhookResultStore) listCandidates(ctx context.Context, batchLimit int) ([]webhookResultRow, error) {
+type listCandidatesOptions struct {
+	BatchLimit int
+	DatePresets []string
+}
+
+func (s *webhookResultStore) listCandidates(ctx context.Context, opts listCandidatesOptions) ([]webhookResultRow, error) {
 	if s == nil || s.client == nil {
 		return nil, errors.New("webhook result store is nil")
 	}
+	batchLimit := opts.BatchLimit
 	if batchLimit <= 0 {
 		batchLimit = 20
 	}
@@ -176,7 +182,8 @@ func (s *webhookResultStore) listCandidates(ctx context.Context, batchLimit int)
 	if statusField == "" {
 		return nil, errors.New("webhook result table status field is not configured")
 	}
-	filter := listCandidatesFilter(statusField)
+	dateField := strings.TrimSpace(s.fields.Date)
+	filter := listCandidatesFilter(statusField, dateField, opts.DatePresets)
 	rows, err := s.client.FetchBitableRows(ctx, s.tableURL, &taskagent.FeishuTaskQueryOptions{
 		Filter:     filter,
 		Limit:      batchLimit,
@@ -192,12 +199,29 @@ func (s *webhookResultStore) listCandidates(ctx context.Context, batchLimit int)
 	return out, nil
 }
 
-func listCandidatesFilter(statusField string) *taskagent.FeishuFilterInfo {
-	filter := taskagent.NewFeishuFilterInfo("or")
-	filter.Children = append(filter.Children,
-		taskagent.NewFeishuChildrenFilter("and", taskagent.NewFeishuCondition(statusField, "is", WebhookResultPending)),
-		taskagent.NewFeishuChildrenFilter("and", taskagent.NewFeishuCondition(statusField, "is", WebhookResultFailed)),
-	)
+func listCandidatesFilter(statusField, dateField string, datePresets []string) *taskagent.FeishuFilterInfo {
+	filter := taskagent.NewFeishuFilterInfo("and")
+	statusConds := []*taskagent.FeishuCondition{
+		taskagent.NewFeishuCondition(statusField, "is", WebhookResultPending),
+		taskagent.NewFeishuCondition(statusField, "is", WebhookResultFailed),
+	}
+	filter.Children = append(filter.Children, taskagent.NewFeishuChildrenFilter("or", statusConds...))
+
+	if strings.TrimSpace(dateField) == "" {
+		return filter
+	}
+	dateConds := make([]*taskagent.FeishuCondition, 0, len(datePresets))
+	for _, preset := range datePresets {
+		trimmed := strings.TrimSpace(preset)
+		if trimmed == "" {
+			continue
+		}
+		dateConds = append(dateConds, taskagent.NewFeishuCondition(dateField, "is", trimmed))
+	}
+	if len(dateConds) == 0 {
+		return filter
+	}
+	filter.Children = append(filter.Children, taskagent.NewFeishuChildrenFilter("or", dateConds...))
 	return filter
 }
 
