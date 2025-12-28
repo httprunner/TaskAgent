@@ -1425,8 +1425,23 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 		maxPages = opts.MaxPages
 	}
 
+	var filterInfo *FilterInfo
+	if opts != nil && opts.Filter != nil {
+		filterInfo = CloneFilter(opts.Filter)
+	}
+
+	filterQuery := (*TaskQueryOptions)(nil)
+	if filterInfo != nil && filterInfo.QueryOptions != nil {
+		filterQuery = filterInfo.QueryOptions
+	}
+	if maxPages <= 0 && filterQuery != nil && filterQuery.MaxPages > 0 {
+		maxPages = filterQuery.MaxPages
+	}
+
 	useView := true
 	if opts != nil && opts.IgnoreView {
+		useView = false
+	} else if filterQuery != nil && filterQuery.IgnoreView {
 		useView = false
 	}
 	viewID := ""
@@ -1434,12 +1449,9 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 		viewID = strings.TrimSpace(ref.ViewID)
 		if opts != nil && strings.TrimSpace(opts.ViewID) != "" {
 			viewID = strings.TrimSpace(opts.ViewID)
+		} else if filterQuery != nil && strings.TrimSpace(filterQuery.ViewID) != "" {
+			viewID = strings.TrimSpace(filterQuery.ViewID)
 		}
-	}
-
-	var filterInfo *FilterInfo
-	if opts != nil && opts.Filter != nil {
-		filterInfo = CloneFilter(opts.Filter)
 	}
 
 	var body map[string]any
@@ -1455,8 +1467,10 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 
 	all := make([]bitableRecord, 0, pageSize)
 	pageToken := ""
-	if opts != nil {
+	if opts != nil && strings.TrimSpace(opts.PageToken) != "" {
 		pageToken = strings.TrimSpace(opts.PageToken)
+	} else if filterQuery != nil && strings.TrimSpace(filterQuery.PageToken) != "" {
+		pageToken = strings.TrimSpace(filterQuery.PageToken)
 	}
 	pageInfo := bitablePageInfo{}
 

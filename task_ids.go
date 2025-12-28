@@ -107,7 +107,7 @@ func fetchFeishuTasksByIDsWithDatePreset(ctx context.Context, client TargetTable
 				break
 			}
 		}
-		batch, err := FetchFeishuTasksWithFilter(ctx, client, bitableURL, filter, remaining)
+		batch, _, err := FetchFeishuTasksWithFilter(ctx, client, bitableURL, filter, remaining)
 		if err != nil {
 			return nil, err
 		}

@@ -6,12 +6,23 @@ import (
 	bitablev1 "github.com/larksuite/oapi-sdk-go/v3/service/bitable/v1"
 )
 
-// FilterInfo aliases the Feishu SDK filter structure so callers don't have to import the SDK directly.
+// Condition and ChildrenFilter alias the Feishu SDK structures so callers don't have to import the SDK directly.
 type (
-	FilterInfo     = bitablev1.FilterInfo
 	Condition      = bitablev1.Condition
 	ChildrenFilter = bitablev1.ChildrenFilter
 )
+
+// FilterInfo wraps the SDK filter structure while allowing TaskAgent to attach
+// query options (e.g., paging, ignore-view) without affecting the JSON payload.
+type FilterInfo struct {
+	Conjunction *string           `json:"conjunction,omitempty"`
+	Conditions  []*Condition      `json:"conditions,omitempty"`
+	Children    []*ChildrenFilter `json:"children,omitempty"`
+
+	// QueryOptions is not part of Feishu filter JSON. It is used by TaskAgent as
+	// a convenient way to carry query knobs alongside the filter itself.
+	QueryOptions *TaskQueryOptions `json:"-"`
+}
 
 func newStringPtr(val string) *string {
 	v := val
@@ -75,6 +86,14 @@ func CloneFilter(filter *FilterInfo) *FilterInfo {
 	cloned := &FilterInfo{}
 	if filter.Conjunction != nil {
 		cloned.Conjunction = newStringPtr(strings.ToLower(strings.TrimSpace(*filter.Conjunction)))
+	}
+	if filter.QueryOptions != nil {
+		cloned.QueryOptions = &TaskQueryOptions{
+			ViewID:     strings.TrimSpace(filter.QueryOptions.ViewID),
+			IgnoreView: filter.QueryOptions.IgnoreView,
+			PageToken:  strings.TrimSpace(filter.QueryOptions.PageToken),
+			MaxPages:   filter.QueryOptions.MaxPages,
+		}
 	}
 	for _, cond := range filter.Conditions {
 		if cond == nil {
@@ -154,6 +173,14 @@ func appendFilterAND(base, extra *FilterInfo) *FilterInfo {
 	}
 	if ex.Conjunction == nil {
 		ex.Conjunction = newStringPtr("and")
+	}
+	if out.QueryOptions == nil && ex.QueryOptions != nil {
+		out.QueryOptions = &TaskQueryOptions{
+			ViewID:     strings.TrimSpace(ex.QueryOptions.ViewID),
+			IgnoreView: ex.QueryOptions.IgnoreView,
+			PageToken:  strings.TrimSpace(ex.QueryOptions.PageToken),
+			MaxPages:   ex.QueryOptions.MaxPages,
+		}
 	}
 	if strings.EqualFold(*ex.Conjunction, "and") {
 		out.Conditions = append(out.Conditions, ex.Conditions...)

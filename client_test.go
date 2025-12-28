@@ -62,7 +62,7 @@ func TestFetchFeishuTasksWithFilterAllowsBookOrURLOnlyRows(t *testing.T) {
 			},
 		},
 	}
-	tasks, err := FetchFeishuTasksWithFilter(ctx, client, "https://example.com/bitable/rows", nil, 10)
+	tasks, _, err := FetchFeishuTasksWithFilter(ctx, client, "https://example.com/bitable/rows", nil, 10)
 	if err != nil {
 		t.Fatalf("fetchFeishuTasksWithFilter returned error: %v", err)
 	}

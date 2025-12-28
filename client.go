@@ -704,6 +704,15 @@ func FetchFeishuTasksWithStrategyPage(ctx context.Context, client TargetTableCli
 	}
 
 	filter := buildFeishuFilterInfo(fields, app, statuses, scene, datePreset)
+	if filter != nil {
+		filterQuery := feishusdk.TaskQueryOptions{
+			ViewID:     strings.TrimSpace(queryOpts.ViewID),
+			IgnoreView: queryOpts.IgnoreView,
+			PageToken:  strings.TrimSpace(queryOpts.PageToken),
+			MaxPages:   queryOpts.MaxPages,
+		}
+		filter.QueryOptions = &filterQuery
+	}
 	log.Debug().
 		Str("app", app).
 		Strs("statuses", statuses).
@@ -714,7 +723,7 @@ func FetchFeishuTasksWithStrategyPage(ctx context.Context, client TargetTableCli
 		Int("max_pages", queryOpts.MaxPages).
 		Str("filter", formatFilterForLog(filter)).
 		Msg("fetching feishusdk tasks from bitable")
-	subset, pageInfo, err := FetchFeishuTasksWithFilterPage(ctx, client, bitableURL, filter, fetchLimit, queryOpts)
+	subset, pageInfo, err := FetchFeishuTasksWithFilter(ctx, client, bitableURL, filter, fetchLimit)
 	if err != nil {
 		return nil, FeishuFetchPageInfo{}, err
 	}
@@ -742,19 +751,25 @@ func FetchFeishuTasksWithStrategyPage(ctx context.Context, client TargetTableCli
 	return subset, pageInfo, nil
 }
 
-func FetchFeishuTasksWithFilter(ctx context.Context, client TargetTableClient, bitableURL string, filter *feishusdk.FilterInfo, limit int) ([]*FeishuTask, error) {
-	tasks, _, err := FetchFeishuTasksWithFilterPage(ctx, client, bitableURL, filter, limit, FeishuTaskQueryOptions{})
-	return tasks, err
-}
-
-func FetchFeishuTasksWithFilterPage(ctx context.Context, client TargetTableClient, bitableURL string, filter *feishusdk.FilterInfo, limit int, queryOpts FeishuTaskQueryOptions) ([]*FeishuTask, FeishuFetchPageInfo, error) {
+func FetchFeishuTasksWithFilter(ctx context.Context, client TargetTableClient, bitableURL string, filter *feishusdk.FilterInfo, limit int) ([]*FeishuTask, FeishuFetchPageInfo, error) {
 	opts := &feishusdk.TaskQueryOptions{
-		Filter:     filter,
-		Limit:      limit,
-		ViewID:     strings.TrimSpace(queryOpts.ViewID),
-		IgnoreView: queryOpts.IgnoreView,
-		PageToken:  strings.TrimSpace(queryOpts.PageToken),
-		MaxPages:   queryOpts.MaxPages,
+		Filter: filter,
+		Limit:  limit,
+	}
+	if filter != nil && filter.QueryOptions != nil {
+		queryOpts := filter.QueryOptions
+		if strings.TrimSpace(queryOpts.ViewID) != "" {
+			opts.ViewID = strings.TrimSpace(queryOpts.ViewID)
+		}
+		if queryOpts.IgnoreView {
+			opts.IgnoreView = true
+		}
+		if strings.TrimSpace(queryOpts.PageToken) != "" {
+			opts.PageToken = strings.TrimSpace(queryOpts.PageToken)
+		}
+		if queryOpts.MaxPages > 0 {
+			opts.MaxPages = queryOpts.MaxPages
+		}
 	}
 	table, err := client.FetchTaskTableWithOptions(ctx, bitableURL, nil, opts)
 	if err != nil {
