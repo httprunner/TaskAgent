@@ -849,21 +849,88 @@ func TestSingleURLWorkerRotatesActivePagesAcrossStatuses(t *testing.T) {
 	if err := worker.ProcessOnce(context.Background()); err != nil {
 		t.Fatalf("process once: %v", err)
 	}
-	if got := client.pageTokens(feishusdk.StatusDownloaderProcessing); len(got) != 1 || got[0] != "" {
-		t.Fatalf("expected first dl-processing fetch from first page, got %v", got)
+	if got := client.pageTokens(feishusdk.StatusDownloaderProcessing); len(got) < 2 || got[0] != "" || got[1] != "p2" {
+		t.Fatalf("expected dl-processing to scan first two pages in one pass, got %v", got)
 	}
-	if got := client.pageTokens(feishusdk.StatusDownloaderQueued); len(got) != 1 || got[0] != "" {
-		t.Fatalf("expected first dl-queued fetch from first page, got %v", got)
+	if got := client.pageTokens(feishusdk.StatusDownloaderQueued); len(got) < 2 || got[0] != "" || got[1] != "q2" {
+		t.Fatalf("expected dl-queued to scan first two pages in one pass, got %v", got)
 	}
 
 	if err := worker.ProcessOnce(context.Background()); err != nil {
 		t.Fatalf("process once: %v", err)
 	}
-	if got := client.pageTokens(feishusdk.StatusDownloaderProcessing); len(got) != 2 || got[1] != "p2" {
-		t.Fatalf("expected second dl-processing fetch from next page p2, got %v", got)
+	if got := client.pageTokens(feishusdk.StatusDownloaderProcessing); len(got) < 4 || got[2] != "" {
+		t.Fatalf("expected dl-processing to restart from first page on next pass, got %v", got)
 	}
-	if got := client.pageTokens(feishusdk.StatusDownloaderQueued); len(got) != 2 || got[1] != "q2" {
-		t.Fatalf("expected second dl-queued fetch from next page q2, got %v", got)
+	if got := client.pageTokens(feishusdk.StatusDownloaderQueued); len(got) < 4 || got[2] != "" {
+		t.Fatalf("expected dl-queued to restart from first page on next pass, got %v", got)
+	}
+}
+
+type alwaysWaitingCrawlerClient struct{}
+
+func (alwaysWaitingCrawlerClient) CreateTask(context.Context, string, map[string]string) (string, error) {
+	return "task-default", nil
+}
+
+func (alwaysWaitingCrawlerClient) GetTask(context.Context, string) (*crawlerTaskStatus, error) {
+	return &crawlerTaskStatus{Status: "WAITING"}, nil
+}
+
+func (alwaysWaitingCrawlerClient) SendTaskSummary(context.Context, TaskSummaryPayload) error {
+	return nil
+}
+
+func TestSingleURLWorkerActiveFetchScansMultiplePagesPerPass(t *testing.T) {
+	makeRows := func(taskStatus, prefix string, base, count int) []feishusdk.TaskRow {
+		rows := make([]feishusdk.TaskRow, 0, count)
+		for i := 0; i < count; i++ {
+			rows = append(rows, feishusdk.TaskRow{
+				TaskID: int64(base + i),
+				Scene:  SceneSingleURLCapture,
+				Status: taskStatus,
+				BookID: "B",
+				UserID: "U",
+				App:    "kuaishou",
+				URL:    "https://example.com/" + prefix,
+				Logs:   fmt.Sprintf(`[{"task_id":"%s-%d"}]`, prefix, i),
+			})
+		}
+		return rows
+	}
+
+	client := newPagedSingleURLClient(t, map[string]pagedSingleURLStatus{
+		feishusdk.StatusDownloaderProcessing: {
+			page1:     makeRows(feishusdk.StatusDownloaderProcessing, "processing", 100000, 120),
+			page2:     makeRows(feishusdk.StatusDownloaderProcessing, "processing2", 200000, 120),
+			nextToken: "p2",
+		},
+		feishusdk.StatusDownloaderQueued: {
+			page1:     makeRows(feishusdk.StatusDownloaderQueued, "queued", 300000, 120),
+			page2:     makeRows(feishusdk.StatusDownloaderQueued, "queued2", 400000, 120),
+			nextToken: "q2",
+		},
+	})
+	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
+		Client:        client,
+		CrawlerClient: alwaysWaitingCrawlerClient{},
+		BitableURL:    "https://bitable.example",
+		Limit:         100,
+		PollInterval:  time.Second,
+	})
+	if err != nil {
+		t.Fatalf("new worker: %v", err)
+	}
+	worker.newTaskStatuses = nil
+
+	if err := worker.ProcessOnce(context.Background()); err != nil {
+		t.Fatalf("process once: %v", err)
+	}
+	if got := client.pageTokens(feishusdk.StatusDownloaderProcessing); len(got) < 2 {
+		t.Fatalf("expected dl-processing to scan multiple pages in one pass, got %v", got)
+	}
+	if got := client.pageTokens(feishusdk.StatusDownloaderQueued); len(got) < 1 {
+		t.Fatalf("expected dl-queued to be scanned after dl-processing, got %v", got)
 	}
 }
 
@@ -1058,14 +1125,24 @@ func (c *pagedSingleURLClient) FetchTaskTableWithOptions(_ context.Context, _ st
 	if !ok {
 		return &feishusdk.TaskTable{Fields: feishusdk.DefaultTaskFields}, nil
 	}
+	limit := 0
+	if opts != nil {
+		limit = opts.Limit
+	}
 	token := strings.TrimSpace(opts.PageToken)
 	if token == "" {
 		rows := cloneTaskRows(cfg.page1)
+		if limit > 0 && len(rows) > limit {
+			rows = rows[:limit]
+		}
 		table := &feishusdk.TaskTable{Fields: feishusdk.DefaultTaskFields, Rows: rows, HasMore: true, NextPageToken: cfg.nextToken, Pages: 1}
 		return table, nil
 	}
 	if token == strings.TrimSpace(cfg.nextToken) {
 		rows := cloneTaskRows(cfg.page2)
+		if limit > 0 && len(rows) > limit {
+			rows = rows[:limit]
+		}
 		table := &feishusdk.TaskTable{Fields: feishusdk.DefaultTaskFields, Rows: rows, HasMore: false, NextPageToken: "", Pages: 1}
 		return table, nil
 	}

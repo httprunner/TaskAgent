@@ -27,6 +27,8 @@ const (
 	// MaxSingleURLWorkerFetchLimit caps a single fetch cycle to protect the Feishu API.
 	MaxSingleURLWorkerFetchLimit = 200
 	singleURLMaxAttempts         = 3
+	singleURLActiveFetchChunk    = 100
+	singleURLActiveMinPages      = 3
 )
 
 // SceneSingleURLCapture mirrors the Feishu scene name used for single URL capture tasks.
@@ -664,57 +666,90 @@ func (w *SingleURLWorker) fetchSingleURLActiveTasksRotating(ctx context.Context,
 	if limit <= 0 {
 		limit = DefaultSingleURLWorkerLimit
 	}
+	scanLimit := limit
+	if singleURLActiveFetchChunk > 0 && singleURLActiveMinPages > 0 {
+		minCap := singleURLActiveFetchChunk * singleURLActiveMinPages
+		if scanLimit < minCap {
+			scanLimit = minCap
+		}
+	}
 	statuses := w.activeTaskStatuses
 	if len(statuses) == 0 {
 		return nil, nil
 	}
-	perStatus := limit / len(statuses)
-	if perStatus <= 0 {
-		perStatus = 1
-	}
-	seen := make(map[int64]struct{}, limit)
-	result := make([]*FeishuTask, 0, limit)
+	seen := make(map[int64]struct{}, scanLimit)
+	result := make([]*FeishuTask, 0, scanLimit)
 	fields := feishusdk.DefaultTaskFields
 	for _, status := range statuses {
-		if len(result) >= limit {
+		if len(result) >= scanLimit {
 			break
 		}
-		fetchCap := perStatus
-		remaining := limit - len(result)
-		if remaining > 0 && fetchCap > remaining {
-			fetchCap = remaining
+		remaining := scanLimit - len(result)
+		if remaining <= 0 {
+			break
 		}
-		if fetchCap <= 0 {
-			fetchCap = perStatus
+		fetchCap := remaining
+		if singleURLActiveFetchChunk > 0 && singleURLActiveMinPages > 0 {
+			minCap := singleURLActiveFetchChunk * singleURLActiveMinPages
+			if fetchCap < minCap {
+				fetchCap = minCap
+			}
 		}
+
 		pageToken := ""
 		if w.activePageTokens != nil {
 			pageToken = strings.TrimSpace(w.activePageTokens[status])
 		}
-		subset, pageInfo, err := taskagent.FetchFeishuTasksWithStrategyPage(
-			ctx, w.client, w.bitableURL, fields, w.appFilter, []string{status},
-			fetchCap, taskagent.SceneSingleURLCapture, taskagent.TaskDateAny,
-			taskagent.FeishuTaskQueryOptions{IgnoreView: true, PageToken: pageToken, MaxPages: 1},
-		)
-		if err != nil {
-			log.Warn().Err(err).
-				Str("status", status).
-				Str("page_token", pageToken).
-				Msg("single url worker active fetch failed")
-			continue
-		}
-		if w.activePageTokens != nil {
-			next := strings.TrimSpace(pageInfo.NextPageToken)
-			if pageInfo.HasMore && next != "" {
-				w.activePageTokens[status] = next
-			} else {
-				w.activePageTokens[status] = ""
+
+		fetched := 0
+		maxPages := 1
+		if singleURLActiveFetchChunk > 0 && fetchCap > singleURLActiveFetchChunk {
+			maxPages = (fetchCap + singleURLActiveFetchChunk - 1) / singleURLActiveFetchChunk
+			if maxPages < 1 {
+				maxPages = 1
 			}
 		}
-		if w.nodeTotal > 1 && len(subset) > 0 {
-			subset = filterFeishuTasksByShard(subset, w.nodeIndex, w.nodeTotal)
+		if singleURLActiveMinPages > 0 && maxPages < singleURLActiveMinPages {
+			maxPages = singleURLActiveMinPages
 		}
-		result = taskagent.AppendUniqueFeishuTasks(result, subset, limit, seen)
+		for page := 0; page < maxPages && fetched < fetchCap; page++ {
+			pageLimit := fetchCap - fetched
+			if singleURLActiveFetchChunk > 0 && pageLimit > singleURLActiveFetchChunk {
+				pageLimit = singleURLActiveFetchChunk
+			}
+			if pageLimit <= 0 {
+				break
+			}
+			subset, pageInfo, err := taskagent.FetchFeishuTasksWithStrategyPage(
+				ctx, w.client, w.bitableURL, fields, w.appFilter, []string{status},
+				pageLimit, taskagent.SceneSingleURLCapture, taskagent.TaskDateAny,
+				taskagent.FeishuTaskQueryOptions{IgnoreView: true, PageToken: pageToken, MaxPages: 1},
+			)
+			if err != nil {
+				log.Warn().Err(err).
+					Str("status", status).
+					Str("page_token", pageToken).
+					Msg("single url worker active fetch failed")
+				break
+			}
+			if w.nodeTotal > 1 && len(subset) > 0 {
+				subset = filterFeishuTasksByShard(subset, w.nodeIndex, w.nodeTotal)
+			}
+			before := len(result)
+			result = taskagent.AppendUniqueFeishuTasks(result, subset, scanLimit, seen)
+			fetched += len(result) - before
+
+			next := strings.TrimSpace(pageInfo.NextPageToken)
+			if pageInfo.HasMore && next != "" && next != pageToken {
+				pageToken = next
+				continue
+			}
+			pageToken = ""
+			break
+		}
+		if w.activePageTokens != nil {
+			w.activePageTokens[status] = pageToken
+		}
 	}
 	return result, nil
 }
