@@ -352,7 +352,8 @@ func (w *SingleURLWorker) ProcessOnce(ctx context.Context) error {
 	}
 	// Always poll active tasks first so dl-processing tasks don't get starved when
 	// the table is dominated by ready/queued tasks.
-	activeTasks, err := w.fetchSingleURLTasks(ctx, w.activeTaskStatuses, w.limit)
+	activeTasks, err := w.fetchSingleURLTasksWithDatePresets(
+		ctx, w.activeTaskStatuses, w.limit, []string{taskagent.TaskDateAny})
 	if err != nil {
 		return err
 	}
@@ -559,7 +560,13 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 	return work.apply(ctx)
 }
 
-func (w *SingleURLWorker) fetchSingleURLTasks(ctx context.Context, statuses []string, limit int) ([]*FeishuTask, error) {
+func (w *SingleURLWorker) fetchSingleURLTasks(ctx context.Context,
+	statuses []string, limit int) ([]*FeishuTask, error) {
+	return w.fetchSingleURLTasksWithDatePresets(ctx, statuses, limit, nil)
+}
+
+func (w *SingleURLWorker) fetchSingleURLTasksWithDatePresets(ctx context.Context,
+	statuses []string, limit int, datePresets []string) ([]*FeishuTask, error) {
 	if limit <= 0 {
 		limit = w.limit
 	}
@@ -576,9 +583,11 @@ func (w *SingleURLWorker) fetchSingleURLTasks(ctx context.Context, statuses []st
 	if limit <= 0 {
 		limit = DefaultSingleURLWorkerLimit
 	}
-	datePresets := w.datePresets
 	if len(datePresets) == 0 {
-		datePresets = []string{taskagent.TaskDateToday}
+		datePresets = w.datePresets
+		if len(datePresets) == 0 {
+			datePresets = []string{taskagent.TaskDateToday}
+		}
 	}
 	result := make([]*FeishuTask, 0, limit)
 	seen := make(map[int64]struct{}, limit)

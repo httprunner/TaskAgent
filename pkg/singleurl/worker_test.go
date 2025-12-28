@@ -772,11 +772,43 @@ func TestSingleURLWorkerPollsActiveTasksBeforeDispatchingNewTasks(t *testing.T) 
 	}
 }
 
+func TestSingleURLWorkerPollsActiveTasksWithoutDatetimeFilter(t *testing.T) {
+	client := &singleURLTestClient{
+		rows: map[string][]feishusdk.TaskRow{
+			feishusdk.StatusDownloaderProcessing: {
+				{TaskID: 2, Scene: SceneSingleURLCapture, Status: feishusdk.StatusDownloaderProcessing, BookID: "B002", UserID: "U002", App: "kuaishou", URL: "https://example.com/processing", Logs: `[{"task_id":"processing-1"}]`},
+			},
+		},
+	}
+	crawler := &stubCrawlerClient{
+		statuses: map[string]*crawlerTaskStatus{
+			"processing-1": {TaskID: "processing-1", Status: "PROCESSING"},
+		},
+	}
+	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
+		Client:        client,
+		CrawlerClient: crawler,
+		BitableURL:    "https://bitable.example",
+		Limit:         5,
+		PollInterval:  time.Second,
+	})
+	if err != nil {
+		t.Fatalf("new worker: %v", err)
+	}
+	if err := worker.ProcessOnce(context.Background()); err != nil {
+		t.Fatalf("process once: %v", err)
+	}
+	if !client.sawActiveWithoutDatetime {
+		t.Fatalf("expected active query without Datetime filter")
+	}
+}
+
 type singleURLTestClient struct {
-	rows             map[string][]feishusdk.TaskRow
-	rowsByDatePreset map[string]map[string][]feishusdk.TaskRow
-	groupRows        map[string][]feishusdk.TaskRow
-	updateCalls      []singleURLUpdateCall
+	rows                     map[string][]feishusdk.TaskRow
+	rowsByDatePreset         map[string]map[string][]feishusdk.TaskRow
+	groupRows                map[string][]feishusdk.TaskRow
+	updateCalls              []singleURLUpdateCall
+	sawActiveWithoutDatetime bool
 }
 
 type singleURLUpdateCall struct {
@@ -795,9 +827,12 @@ func (c *singleURLTestClient) FetchTaskTableWithOptions(_ context.Context, _ str
 	if scene != SceneSingleURLCapture {
 		return &feishusdk.TaskTable{Fields: feishusdk.DefaultTaskFields}, nil
 	}
+	datePreset := suExtractConditionValue(opts.Filter, feishusdk.DefaultTaskFields.Datetime)
+	if (status == feishusdk.StatusDownloaderProcessing || status == feishusdk.StatusDownloaderQueued) && strings.TrimSpace(datePreset) == "" {
+		c.sawActiveWithoutDatetime = true
+	}
 	var rows []feishusdk.TaskRow
 	if len(c.rowsByDatePreset) > 0 {
-		datePreset := suExtractConditionValue(opts.Filter, feishusdk.DefaultTaskFields.Datetime)
 		rows = cloneTaskRows(c.rowsByDatePreset[datePreset][status])
 	} else {
 		rows = cloneTaskRows(c.rows[status])

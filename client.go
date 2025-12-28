@@ -31,7 +31,7 @@ type FeishuTaskClientOptions struct {
 const (
 	TaskDateToday     = "Today"
 	TaskDateYesterday = "Yesterday"
-	// TaskDateAny means no date constraint; used when callers pass explicit TaskIDs.
+	// TaskDateAny means no date constraint.
 	TaskDateAny = "Any"
 )
 
