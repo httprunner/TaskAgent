@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -346,13 +347,19 @@ func (w *SingleURLWorker) Run(ctx context.Context) error {
 }
 
 // ProcessOnce executes a single fetch-and-dispatch cycle.
-func (w *SingleURLWorker) ProcessOnce(ctx context.Context) error {
+func (w *SingleURLWorker) ProcessOnce(ctx context.Context) (retErr error) {
 	if w == nil {
 		return errors.New("single url worker: nil instance")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "single url worker panic (ProcessOnce): %v\n", r)
+			retErr = errors.Errorf("single url worker panic: %v", r)
+		}
+	}()
 	// Always poll active tasks first so dl-processing tasks don't get starved when
 	// the table is dominated by ready/queued tasks.
 	activeTasks, err := w.fetchSingleURLActiveTasksRotating(ctx, w.limit)
@@ -404,6 +411,24 @@ func (w *SingleURLWorker) dispatchSingleURLTasks(ctx context.Context, tasks []*F
 		idx := idx
 		task := task
 		group.Go(func() error {
+			defer func() {
+				if r := recover(); r != nil {
+					taskID := int64(0)
+					if task != nil {
+						taskID = task.TaskID
+					}
+					fmt.Fprintf(os.Stderr, "single url worker panic (dispatch task_id=%d): %v\n", taskID, r)
+					if task != nil {
+						reason := fmt.Sprintf("panic: %v", r)
+						works[idx] = singleURLUpdateWork{
+							taskID: taskID,
+							apply: func(ctx context.Context) error {
+								return w.failSingleURLTask(ctx, task, reason, nil)
+							},
+						}
+					}
+				}
+			}()
 			if task == nil {
 				return nil
 			}

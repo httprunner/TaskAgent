@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -53,6 +54,7 @@ var errCrawlerTaskNotFound = errors.New("crawler task not found")
 type restCrawlerTaskClient struct {
 	baseURL    string
 	httpClient *http.Client
+	logger     zerolog.Logger
 }
 
 func newRESTCrawlerTaskClient(baseURL string, httpClient *http.Client) (crawlerTaskClient, error) {
@@ -64,11 +66,10 @@ func newRESTCrawlerTaskClient(baseURL string, httpClient *http.Client) (crawlerT
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 60 * time.Second}
 	}
-	return &restCrawlerTaskClient{baseURL: baseURL, httpClient: httpClient}, nil
+	return &restCrawlerTaskClient{baseURL: baseURL, httpClient: httpClient, logger: log.Logger}, nil
 }
 
 func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, meta map[string]string) (string, error) {
-	logEvent := log.Info().Str("url", url)
 	cleanMeta := make(map[string]string, len(meta))
 	for k, v := range meta {
 		trimmedKey := strings.TrimSpace(k)
@@ -77,7 +78,10 @@ func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, meta
 			continue
 		}
 		cleanMeta[trimmedKey] = trimmedVal
-		logEvent = logEvent.Str(trimmedKey, trimmedVal)
+	}
+	logEvent := c.logger.Info().Str("url", url)
+	for k, v := range cleanMeta {
+		logEvent = logEvent.Str(k, v)
 	}
 	logEvent.Msg("creating crawler task")
 
@@ -113,10 +117,10 @@ func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, meta
 		return "", errors.Wrap(err, "encode create task payload")
 	}
 	endpoint := fmt.Sprintf("%s/download/tasks", c.baseURL)
-	log.Info().
+	c.logger.Info().
 		Str("method", http.MethodPost).
 		Str("url", endpoint).
-		Any("payload", payload).
+		RawJSON("payload", body).
 		Msg("crawler create tasks request")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
@@ -126,7 +130,7 @@ func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, meta
 	startedAt := time.Now()
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		log.Error().
+		c.logger.Error().
 			Str("method", http.MethodPost).
 			Str("url", endpoint).
 			Int64("elapsed_ms", time.Since(startedAt).Milliseconds()).
@@ -152,12 +156,14 @@ func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, meta
 		return "", errors.Wrap(err, "decode create task response")
 	}
 	taskID := stringifyJSONID(parsed.Data.TaskID)
-	log.Info().
+	c.logger.Info().
 		Str("method", http.MethodPost).
 		Str("url", endpoint).
 		Int("http_status", resp.StatusCode).
 		Int64("elapsed_ms", elapsed.Milliseconds()).
-		Any("response", parsed).
+		Int("code", parsed.Code).
+		Str("msg", strings.TrimSpace(parsed.Msg)).
+		Str("task_id", strings.TrimSpace(taskID)).
 		Msg("crawler create tasks response")
 	if parsed.Code != 0 {
 		return "", errors.Errorf("crawler create task failed: code=%d msg=%s", parsed.Code, strings.TrimSpace(parsed.Msg))
@@ -171,7 +177,7 @@ func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, meta
 func (c *restCrawlerTaskClient) GetTask(ctx context.Context, taskID string) (*crawlerTaskStatus, error) {
 	requestedTaskID := strings.TrimSpace(taskID)
 	endpoint := fmt.Sprintf("%s/download/tasks/%s", c.baseURL, requestedTaskID)
-	log.Info().
+	c.logger.Info().
 		Str("method", http.MethodGet).
 		Str("url", endpoint).
 		Str("task_id", requestedTaskID).
@@ -183,7 +189,7 @@ func (c *restCrawlerTaskClient) GetTask(ctx context.Context, taskID string) (*cr
 	startedAt := time.Now()
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		log.Error().
+		c.logger.Error().
 			Str("method", http.MethodGet).
 			Str("url", endpoint).
 			Str("task_id", requestedTaskID).
@@ -195,7 +201,7 @@ func (c *restCrawlerTaskClient) GetTask(ctx context.Context, taskID string) (*cr
 	defer resp.Body.Close()
 	elapsed := time.Since(startedAt)
 	if resp.StatusCode == http.StatusNotFound {
-		log.Info().
+		c.logger.Info().
 			Str("method", http.MethodGet).
 			Str("url", endpoint).
 			Str("task_id", requestedTaskID).
@@ -226,17 +232,20 @@ func (c *restCrawlerTaskClient) GetTask(ctx context.Context, taskID string) (*cr
 	if err := decoder.Decode(&parsed); err != nil {
 		return nil, errors.Wrap(err, "decode get task response")
 	}
-	log.Info().
+	parsedTaskID := stringifyJSONID(parsed.Data.TaskID)
+	c.logger.Info().
 		Str("method", http.MethodGet).
 		Str("url", endpoint).
 		Int("http_status", resp.StatusCode).
 		Int64("elapsed_ms", elapsed.Milliseconds()).
-		Any("response", parsed).
+		Int("code", parsed.Code).
+		Str("msg", strings.TrimSpace(parsed.Msg)).
+		Str("task_id", strings.TrimSpace(parsedTaskID)).
+		Str("task_status", strings.TrimSpace(parsed.Data.TaskStatus)).
 		Msg("crawler get task response")
 	if parsed.Code != 0 {
 		return nil, errors.Errorf("crawler get task failed: code=%d msg=%s", parsed.Code, strings.TrimSpace(parsed.Msg))
 	}
-	parsedTaskID := stringifyJSONID(parsed.Data.TaskID)
 	if parsedTaskID == "" {
 		parsedTaskID = requestedTaskID
 	}
@@ -257,7 +266,7 @@ func (c *restCrawlerTaskClient) errorFromResponse(resp *http.Response, elapsed t
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 	bodyStr := strings.TrimSpace(string(body))
 	bodyStr = truncateString(bodyStr, 512)
-	log.Error().
+	c.logger.Error().
 		Str("method", resp.Request.Method).
 		Str("path", resp.Request.URL.Path).
 		Int("http_status", resp.StatusCode).
@@ -281,10 +290,10 @@ func (c *restCrawlerTaskClient) SendTaskSummary(ctx context.Context, payload Tas
 		return errors.Wrap(err, "encode task summary payload")
 	}
 	endpoint := fmt.Sprintf("%s/download/tasks/finish", c.baseURL)
-	log.Info().
+	c.logger.Info().
 		Str("method", http.MethodPost).
 		Str("url", endpoint).
-		Any("payload", normalized).
+		RawJSON("payload", body).
 		Msg("crawler task summary request")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
@@ -294,7 +303,7 @@ func (c *restCrawlerTaskClient) SendTaskSummary(ctx context.Context, payload Tas
 	startedAt := time.Now()
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		log.Error().
+		c.logger.Error().
 			Str("method", http.MethodPost).
 			Str("url", endpoint).
 			Int64("elapsed_ms", time.Since(startedAt).Milliseconds()).
@@ -316,12 +325,13 @@ func (c *restCrawlerTaskClient) SendTaskSummary(ctx context.Context, payload Tas
 	if err := decoder.Decode(&parsed); err != nil && !errors.Is(err, io.EOF) {
 		return errors.Wrap(err, "decode task summary response")
 	}
-	log.Info().
+	c.logger.Info().
 		Str("method", http.MethodPost).
 		Str("url", endpoint).
 		Int("http_status", resp.StatusCode).
 		Int64("elapsed_ms", elapsed.Milliseconds()).
-		Any("response", parsed).
+		Int("code", parsed.Code).
+		Str("msg", strings.TrimSpace(parsed.Msg)).
 		Msg("crawler task summary response")
 	if parsed.Code != 0 {
 		return errors.Errorf("crawler task summary failed: code=%d msg=%s", parsed.Code, strings.TrimSpace(parsed.Msg))
