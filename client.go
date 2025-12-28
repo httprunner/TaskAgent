@@ -710,6 +710,7 @@ func FetchFeishuTasksWithStrategyPage(ctx context.Context, client TargetTableCli
 			IgnoreView: queryOpts.IgnoreView,
 			PageToken:  strings.TrimSpace(queryOpts.PageToken),
 			MaxPages:   queryOpts.MaxPages,
+			Limit:      fetchLimit,
 		}
 		filter.QueryOptions = &filterQuery
 	}
@@ -723,7 +724,7 @@ func FetchFeishuTasksWithStrategyPage(ctx context.Context, client TargetTableCli
 		Int("max_pages", queryOpts.MaxPages).
 		Str("filter", formatFilterForLog(filter)).
 		Msg("fetching feishusdk tasks from bitable")
-	subset, pageInfo, err := FetchFeishuTasksWithFilter(ctx, client, bitableURL, filter, fetchLimit)
+	subset, pageInfo, err := FetchFeishuTasksWithFilter(ctx, client, bitableURL, filter)
 	if err != nil {
 		return nil, FeishuFetchPageInfo{}, err
 	}
@@ -751,7 +752,11 @@ func FetchFeishuTasksWithStrategyPage(ctx context.Context, client TargetTableCli
 	return subset, pageInfo, nil
 }
 
-func FetchFeishuTasksWithFilter(ctx context.Context, client TargetTableClient, bitableURL string, filter *feishusdk.FilterInfo, limit int) ([]*FeishuTask, FeishuFetchPageInfo, error) {
+func FetchFeishuTasksWithFilter(ctx context.Context, client TargetTableClient, bitableURL string, filter *feishusdk.FilterInfo) ([]*FeishuTask, FeishuFetchPageInfo, error) {
+	limit := 0
+	if filter != nil && filter.QueryOptions != nil {
+		limit = filter.QueryOptions.Limit
+	}
 	opts := &feishusdk.TaskQueryOptions{
 		Filter: filter,
 		Limit:  limit,
