@@ -556,14 +556,14 @@ const (
 	SceneVideoScreenCapture = "视频录屏采集"
 	SceneSingleURLCapture   = "单个链接采集"
 
-	// maxTaskRetries controls how many failed→running transitions are allowed
+	// MaxTaskRetries controls how many failed→running transitions are allowed
 	// before a failed task is permanently marked as error.
 	//
 	// "At most retry once" means:
 	// - first run: pending -> running -> failed (RetryCount=0)
 	// - one retry: failed -> running (RetryCount=1) -> failed
 	// - next cycle: failed tasks with RetryCount>=1 will be marked error
-	maxTaskRetries = 1
+	MaxTaskRetries = 1
 )
 
 var defaultDeviceScenes = []string{
@@ -655,7 +655,7 @@ func fetchPendingFeishuTasksByDatePreset(ctx context.Context, client TargetTable
 				continue
 			}
 			status := strings.TrimSpace(t.Status)
-			if status == feishusdk.StatusFailed && t.RetryCount >= maxTaskRetries {
+			if status == feishusdk.StatusFailed && t.RetryCount >= MaxTaskRetries {
 				toError = append(toError, t)
 				continue
 			}
@@ -678,7 +678,7 @@ func fetchPendingFeishuTasksByDatePreset(ctx context.Context, client TargetTable
 				log.Info().
 					Int("task_count", len(ids)).
 					Interface("task_ids", ids).
-					Int("max_retries", maxTaskRetries).
+					Int("max_retries", MaxTaskRetries).
 					Msg("feishusdk: tasks exceeded retry limit and were marked error")
 			}
 		}
