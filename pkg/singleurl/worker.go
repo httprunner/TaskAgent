@@ -26,7 +26,6 @@ const (
 	DefaultSingleURLWorkerLimit = 20
 	// MaxSingleURLWorkerFetchLimit caps a single fetch cycle to protect the Feishu API.
 	MaxSingleURLWorkerFetchLimit = 200
-	singleURLMaxAttempts         = 3
 	singleURLActiveFetchChunk    = 100
 	singleURLActiveMinPages      = 3
 )
@@ -81,26 +80,6 @@ func (m *singleURLMetadata) latestAttempt() *singleURLAttempt {
 		return nil
 	}
 	return &m.Attempts[len(m.Attempts)-1]
-}
-
-func (m *singleURLMetadata) attemptsWithTaskID() int {
-	if m == nil || len(m.Attempts) == 0 {
-		return 0
-	}
-	count := 0
-	for _, attempt := range m.Attempts {
-		if strings.TrimSpace(attempt.TaskID) != "" {
-			count++
-		}
-	}
-	return count
-}
-
-func (m *singleURLMetadata) reachedRetryCap(limit int) bool {
-	if limit <= 0 {
-		return false
-	}
-	return m.attemptsWithTaskID() >= limit
 }
 
 func (m *singleURLMetadata) appendAttempt(jobID string, status string, ts time.Time) *singleURLAttempt {
@@ -462,27 +441,9 @@ func (w *SingleURLWorker) buildSingleURLDispatchWork(ctx context.Context, task *
 		return work
 	}
 	meta := decodeSingleURLMetadata(task.Logs)
-	if meta.reachedRetryCap(singleURLMaxAttempts) {
-		reason := fmt.Sprintf("retry limit reached after %d attempts", meta.attemptsWithTaskID())
-		bookID := strings.TrimSpace(task.BookID)
-		userID := strings.TrimSpace(task.UserID)
-		attempts := meta.attemptsWithTaskID()
-		if latest := meta.latestAttempt(); latest != nil {
-			latest.Error = reason
-			if latest.CompletedAt == 0 {
-				if ts := w.clock(); !ts.IsZero() {
-					latest.CompletedAt = ts.UTC().Unix()
-				}
-			}
-		}
+	if strings.TrimSpace(task.Status) == feishusdk.StatusDownloaderFailed {
 		work.apply = func(ctx context.Context) error {
-			log.Warn().
-				Int64("task_id", task.TaskID).
-				Str("book_id", bookID).
-				Str("user_id", userID).
-				Int("attempts", attempts).
-				Msg("single url worker retry cap reached; marking task error")
-			return w.markSingleURLTaskError(ctx, task, meta)
+			return w.markSingleURLTaskFailedForDeviceStage(ctx, task, true)
 		}
 		return work
 	}
@@ -532,12 +493,6 @@ func (w *SingleURLWorker) buildSingleURLDispatchWork(ctx context.Context, task *
 	metaPayload["bid"] = bookID
 	metaPayload["uid"] = userID
 	cdnURL := extractSingleURLCDNURL(task.Extra)
-	if (strings.TrimSpace(task.Status) == feishusdk.StatusReady || strings.TrimSpace(task.Status) == feishusdk.StatusDownloaderFailed) && cdnURL == "" {
-		work.apply = func(ctx context.Context) error {
-			return w.markSingleURLTaskFailedForDeviceStage(ctx, task)
-		}
-		return work
-	}
 	if cdnURL != "" {
 		metaPayload["cdn_url"] = cdnURL
 	}
@@ -772,7 +727,7 @@ func filterFeishuTasksByShard(tasks []*FeishuTask, nodeIndex, nodeTotal int) []*
 	return out
 }
 
-func (w *SingleURLWorker) markSingleURLTaskFailedForDeviceStage(ctx context.Context, task *FeishuTask) error {
+func (w *SingleURLWorker) markSingleURLTaskFailedForDeviceStage(ctx context.Context, task *FeishuTask, resetLogs bool) error {
 	_, table, err := taskagent.TaskSourceContext(task)
 	if err != nil {
 		return err
@@ -782,10 +737,22 @@ func (w *SingleURLWorker) markSingleURLTaskFailedForDeviceStage(ctx context.Cont
 		return errors.New("single url worker: status field is empty")
 	}
 	fields := map[string]any{statusField: feishusdk.StatusFailed}
+	if resetLogs {
+		if logsField := strings.TrimSpace(table.Fields.Logs); logsField != "" {
+			fields[logsField] = "[]"
+		}
+	}
 	if err := taskagent.UpdateTaskFields(ctx, task, fields); err != nil {
 		return err
 	}
 	task.Status = feishusdk.StatusFailed
+	if resetLogs {
+		if logsField := strings.TrimSpace(table.Fields.Logs); logsField != "" {
+			if val, ok := fields[logsField].(string); ok {
+				task.Logs = val
+			}
+		}
+	}
 	return nil
 }
 
@@ -963,34 +930,6 @@ func (w *SingleURLWorker) failSingleURLTask(ctx context.Context, task *FeishuTas
 	if logsField := strings.TrimSpace(table.Fields.Logs); logsField != "" {
 		if logs, ok := fields[logsField].(string); ok {
 			task.Logs = logs
-		}
-	}
-	return nil
-}
-
-func (w *SingleURLWorker) markSingleURLTaskError(ctx context.Context, task *FeishuTask, meta singleURLMetadata) error {
-	_, table, err := taskagent.TaskSourceContext(task)
-	if err != nil {
-		return err
-	}
-	fields := map[string]any{}
-	statusField := strings.TrimSpace(table.Fields.Status)
-	if statusField != "" {
-		fields[statusField] = feishusdk.StatusError
-	}
-	if logsField := strings.TrimSpace(table.Fields.Logs); logsField != "" {
-		fields[logsField] = encodeSingleURLMetadata(meta)
-	}
-	if len(fields) == 0 {
-		return errors.New("single url worker: no fields to update for error state")
-	}
-	if err := taskagent.UpdateTaskFields(ctx, task, fields); err != nil {
-		return err
-	}
-	task.Status = feishusdk.StatusError
-	if logsField := strings.TrimSpace(table.Fields.Logs); logsField != "" {
-		if val, ok := fields[logsField].(string); ok {
-			task.Logs = val
 		}
 	}
 	return nil

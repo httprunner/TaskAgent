@@ -318,6 +318,53 @@ func TestSingleURLWorkerMarksCrawlerFailure(t *testing.T) {
 	}
 }
 
+func TestSingleURLWorkerMovesDownloaderFailedToDeviceStage(t *testing.T) {
+	meta := singleURLMetadata{Attempts: []singleURLAttempt{{TaskID: "job-1", Error: "boom"}}}
+	client := &singleURLTestClient{
+		rows: map[string][]feishusdk.TaskRow{
+			feishusdk.StatusDownloaderFailed: {
+				{
+					TaskID: 50,
+					Scene:  SceneSingleURLCapture,
+					Status: feishusdk.StatusDownloaderFailed,
+					Params: "capture",
+					BookID: "B050",
+					UserID: "U050",
+					URL:    "https://example.com/retry-dl",
+					Logs:   encodeSingleURLMetadata(meta),
+				},
+			},
+		},
+	}
+	crawler := &stubCrawlerClient{createTaskID: "task-should-not-create"}
+	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
+		Client:        client,
+		CrawlerClient: crawler,
+		BitableURL:    "https://bitable.example",
+		Limit:         5,
+		PollInterval:  time.Second,
+	})
+	if err != nil {
+		t.Fatalf("new worker: %v", err)
+	}
+	if err := worker.ProcessOnce(context.Background()); err != nil {
+		t.Fatalf("process once: %v", err)
+	}
+	if len(crawler.createdURLs) != 0 {
+		t.Fatalf("expected no crawler task when dl-failed is reset, got %d", len(crawler.createdURLs))
+	}
+	if len(client.updateCalls) == 0 {
+		t.Fatalf("expected update calls")
+	}
+	last := client.updateCalls[len(client.updateCalls)-1]
+	if status := last.fields[feishusdk.DefaultTaskFields.Status]; status != feishusdk.StatusFailed {
+		t.Fatalf("expected status %q, got %#v", feishusdk.StatusFailed, status)
+	}
+	if logs, ok := last.fields[feishusdk.DefaultTaskFields.Logs].(string); !ok || strings.TrimSpace(logs) != "[]" {
+		t.Fatalf("expected logs to be reset, got %#v", last.fields[feishusdk.DefaultTaskFields.Logs])
+	}
+}
+
 func TestSingleURLWorkerSendsGroupSummaryWhenAllSuccess(t *testing.T) {
 	// Legacy group summary + Webhook column updates have been removed.
 	// This test now verifies that SingleURLWorker completes tasks without
@@ -479,7 +526,7 @@ func TestSingleURLWorkerRetriesFailedTaskWithExistingTaskID(t *testing.T) {
 	}
 }
 
-func TestSingleURLWorkerStopsAfterMaxAttempts(t *testing.T) {
+func TestSingleURLWorkerIgnoresAttemptCap(t *testing.T) {
 	meta := singleURLMetadata{Attempts: []singleURLAttempt{{TaskID: "job-1"}, {TaskID: "job-2"}, {TaskID: "job-3"}}}
 	client := &singleURLTestClient{
 		rows: map[string][]feishusdk.TaskRow{
@@ -497,7 +544,7 @@ func TestSingleURLWorkerStopsAfterMaxAttempts(t *testing.T) {
 			},
 		},
 	}
-	crawler := &stubCrawlerClient{}
+	crawler := &stubCrawlerClient{createTaskID: "job-4"}
 	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
 		Client:        client,
 		CrawlerClient: crawler,
@@ -512,23 +559,8 @@ func TestSingleURLWorkerStopsAfterMaxAttempts(t *testing.T) {
 	if err := worker.ProcessOnce(context.Background()); err != nil {
 		t.Fatalf("process once: %v", err)
 	}
-	if len(crawler.createdURLs) != 0 {
-		t.Fatalf("expected no new crawler jobs, got %d", len(crawler.createdURLs))
-	}
-	var encoded string
-	for _, call := range client.updateCalls {
-		if val, ok := call.fields[feishusdk.DefaultTaskFields.Logs]; ok {
-			if s, ok := val.(string); ok {
-				encoded = s
-			}
-		}
-	}
-	if encoded == "" {
-		t.Fatalf("expected extra to be updated")
-	}
-	decoded := decodeSingleURLMetadata(encoded)
-	if decoded.attemptsWithTaskID() != singleURLMaxAttempts {
-		t.Fatalf("expected metadata to retain %d attempts, got %d", singleURLMaxAttempts, decoded.attemptsWithTaskID())
+	if len(crawler.createdURLs) != 1 {
+		t.Fatalf("expected new crawler job despite attempts, got %d", len(crawler.createdURLs))
 	}
 }
 

@@ -15,7 +15,7 @@
 | `Params` | 备用 JSON 字段，可携带额外上下文。|
 | `Logs` | 文本字段，用于存储单链任务的内部日志（JSON），包括 task_id/vid/错误信息等。|
 
-`SingleURLWorker` 会校验以上字段：缺少 `BookID`/`UserID`/`URL` 任意一项时，任务将被标记为 `failed`，并在 `Logs` 中记录失败原因，防止重复重试。
+`SingleURLWorker` 会校验以上字段：缺少 `BookID`/`UserID`/`URL` 任意一项时，任务会先被标记为 `dl-failed` 并写入失败原因，随后回退为 `failed` 进入设备侧重试；最终是否进入 `error` 由 `RetryCount` 决定。
 
 ## Cookies 管理
 
@@ -23,13 +23,21 @@
 
 ## 调度与状态流转
 
-1. 设备池（`DevicePoolAgent`）默认通过 `task.Config.AllowedScenes` 仅消费需要物理设备的场景（比如综合页/个人页/录屏/合集/锚点），`Scene=单个链接采集` 不在列表中，因此完全交给 `SingleURLWorker`（内部仍使用 `task` 的相同查询逻辑），不会再占用设备拉取额度。
-2. `SingleURLWorker`（核心实现位于 `pkg/singleurl`，通过 `singleurl.NewSingleURLWorker` / `singleurl.NewSingleURLWorkerFromEnv` 使用）按照 `pending → failed` 顺序批量拉取任务，每轮最多 `fetch-tasks-limit` 条，可通过 `--single-url-poll-interval` 改写扫描频率。
-   - 为了加速 `ready/pending → dl-queued` 的入队吞吐，可以通过 `SINGLE_URL_CONCURRENCY`（或 `cmd singleurl --concurrency`）并发调用下载服务的 `POST /download/tasks`；但对 Feishu 的状态写回仍保持串行以避免触发频率限制。
-3. 对于所有字段完整的任务：
+以下流程图对应「设备侧 + 下载侧」组合链路（fox 场景）：
+
+![single url status flow](status-flow.png)
+
+1. 设备侧（`DevicePoolAgent`）负责 `pending → dispatched → running` 的执行与回写：
+   - `running` 失败直接标记 `failed`；
+   - 若为单链采集，设备侧会等待 `cdn_url` 写入：
+     - `cdn_url` 缺失则标记 `failed`；
+     - `cdn_url` 存在则标记 `ready` 并写入 `Extra.cdn_url`。
+2. 下载侧（`SingleURLWorker`）建议使用 ready 模式（`singleurl.NewSingleURLReadyWorkerFromEnv...`），批量拉取 `ready` 任务并入队下载服务：
+   - 为了加速 `ready → dl-queued` 的入队吞吐，可以通过 `SINGLE_URL_CONCURRENCY`（或 `cmd singleurl --concurrency`）并发调用下载服务的 `POST /download/tasks`；但对 Feishu 的状态写回仍保持串行以避免触发频率限制。
+3. 对于 `ready` 且字段完整的任务：
    - Worker 会调用下载服务 `POST /download/tasks`，请求体包含 `{platform,bid,uid,url}`（可选 `cdn_url`）；
    - 成功后会把任务 `Status` 更新为 `dl-queued`，将 `GroupID` 写成 `BookID_UserID`，并把 `{task_id: <xxx>}` 序列化到 `Logs`；
-   - `DispatchedAt/StartAt` 同步为当前时间，用于后续统计；若创建失败则立即标记 `failed` 并写入错误信息。
+   - `DispatchedAt/StartAt` 同步为当前时间，用于后续统计；若创建失败则标记 `dl-failed` 并写入错误信息（随后回退为 `failed`）。
 4. `SingleURLWorker` 继续在每轮 `ProcessOnce` 中拉取 `Status ∈ {dl-queued,dl-processing}` 的任务并轮询 `GET /download/tasks/<task_id>`：
    - 为避免跨天任务（例如任务 `Datetime=2025-12-27`，但在 `2025-12-28` 仍处于 `dl-queued/dl-processing`）因 `Datetime` 过滤导致永远拉不到，**active 状态轮询不会附加 Datetime 条件**；
    - active 状态轮询按 `dl-processing → dl-queued` 顺序拉取，本轮配额优先用于 `dl-processing`，其余再分配给 `dl-queued`；
@@ -42,7 +50,7 @@
 | `WAITING` | `dl-queued` | 维持排队状态，如缺失 task_id 会自动补齐/报错。 |
 | `PROCESSING` | `dl-processing` | 通过 `UpdateFeishuTaskStatuses` 更新状态，保持原始时间戳。 |
 | `COMPLETED` | `success` | 写入 `vid` 到 `Logs`（`{"task_id":"...","vid":"..."}`），并把 `EndAt`/`ElapsedSeconds` 补齐。 |
-| `FAILED` / 404 | `failed` | 将失败原因附加到 `Logs`，同时保留 `task_id` 方便排查。 |
+| `FAILED` / 404 | `dl-failed` | 将失败原因附加到 `Logs`，同时保留 `task_id` 方便排查；随后回退为 `failed` 交给设备侧重试。 |
 
 这样即可形成 `pending → queued → running → success/failed` 的闭环，无需人工介入。单链任务完成后的汇总推送与 `Webhook` 字段更新不再由 `SingleURLWorker` 直接触发，而是统一交给 `pkg/webhook` 中的 `WebhookResultCreator/Worker` 通过「推送结果表」驱动：
 
