@@ -720,7 +720,18 @@ func (c *Client) storeAppTokenCache(wikiToken, appToken string) {
 
 // FetchBitableRows downloads raw records from a Feishu bitable so callers can read any column.
 func (c *Client) FetchBitableRows(ctx context.Context, rawURL string, opts *TaskQueryOptions) ([]BitableRow, error) {
-	log.Info().Str("url", rawURL).Interface("options", opts).Msg("fetching bitable rows")
+	event := log.Info().Str("url", rawURL)
+	if opts != nil {
+		optionsPayload := ""
+		if payload, err := json.Marshal(opts); err == nil {
+			optionsPayload = string(payload)
+		} else {
+			optionsPayload = fmt.Sprintf("marshal options failed: %v", err)
+		}
+		event = event.Str("options", optionsPayload)
+	}
+	event.Msg("fetching bitable rows")
+
 	if c == nil {
 		return nil, errors.New("feishu: client is nil")
 	}
