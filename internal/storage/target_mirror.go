@@ -109,7 +109,7 @@ func buildTaskColumnOrder(fields feishusdk.TaskFields) []string {
 		fields.Scene,
 		fields.StartAt,
 		fields.EndAt,
-		fields.Datetime,
+		fields.Date,
 		fields.Status,
 		fields.Webhook,
 		fields.UserID,
@@ -136,7 +136,7 @@ func ensureTaskSchema(db *sql.DB, table string, fields feishusdk.TaskFields, col
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.Scene)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.StartAt)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.EndAt)),
-		fmt.Sprintf("%s TEXT", quoteIdent(fields.Datetime)),
+		fmt.Sprintf("%s TEXT", quoteIdent(fields.Date)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.Status)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.Webhook)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.UserID)),
@@ -170,6 +170,9 @@ func ensureTaskSchema(db *sql.DB, table string, fields feishusdk.TaskFields, col
 		return err
 	}
 	if err := ensureColumnExists(db, table, fields.EndAt, "TEXT"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(db, table, fields.Date, "TEXT"); err != nil {
 		return err
 	}
 	if err := ensureColumnExists(db, table, fields.Logs, "TEXT"); err != nil {

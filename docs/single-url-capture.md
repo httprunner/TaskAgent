@@ -39,7 +39,7 @@
    - 成功后会把任务 `Status` 更新为 `dl-queued`，将 `GroupID` 写成 `BookID_UserID`，并把 `{task_id: <xxx>}` 序列化到 `Logs`；
    - `DispatchedAt/StartAt` 同步为当前时间，用于后续统计；若创建失败则标记 `dl-failed` 并写入错误信息（随后回退为 `failed`）。
 4. `SingleURLWorker` 继续在每轮 `ProcessOnce` 中拉取 `Status ∈ {dl-queued,dl-processing}` 的任务并轮询 `GET /download/tasks/<task_id>`：
-   - 为避免跨天任务（例如任务 `Datetime=2025-12-27`，但在 `2025-12-28` 仍处于 `dl-queued/dl-processing`）因 `Datetime` 过滤导致永远拉不到，**active 状态轮询不会附加 Datetime 条件**；
+   - 为避免跨天任务（例如任务 `Date=2025-12-27`，但在 `2025-12-28` 仍处于 `dl-queued/dl-processing`）因 `Date` 过滤导致永远拉不到，**active 状态轮询不会附加 Date 条件**；
    - active 状态轮询按 `dl-processing → dl-queued` 顺序拉取，本轮配额优先用于 `dl-processing`，其余再分配给 `dl-queued`；
    - 为避免任务量过大时始终只轮询前 `fetch-limit` 条导致“后续页任务永远不更新”，active 状态轮询每轮至少翻 `3` 页，单页默认 `100` 条，并在进程内维护 `page_token` 轮转扫描；
    - 为避免 bitable URL 自带的 view 过滤/排序影响任务可见性，singleurl worker 查询任务表时会忽略 view（只依赖 filter 条件）。

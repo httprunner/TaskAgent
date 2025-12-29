@@ -39,7 +39,7 @@ type WebhookResultWorkerConfig struct {
 	// When nil, it defaults to true for backward compatibility.
 	AllowErrorStatusAsReady bool
 	// AllowFailedStatusBeforeToday controls whether status "failed" can be treated as ready
-	// when the task's Datetime is strictly before today (local time).
+	// when the task's Date is strictly before today (local time).
 	AllowFailedStatusBeforeToday bool
 
 	// NodeIndex and NodeTotal control optional sharding for piracy webhook processing.
@@ -208,7 +208,7 @@ func (w *WebhookResultWorker) processOnce(ctx context.Context) error {
 	}
 
 	rows, err := w.store.listCandidates(ctx, listCandidatesOptions{
-		BatchLimit: fetchLimit,
+		BatchLimit:  fetchLimit,
 		DatePresets: w.datePresets,
 	})
 	if err != nil {

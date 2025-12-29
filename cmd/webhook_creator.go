@@ -76,7 +76,7 @@ func newWebhookCreatorCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flagApp, "app", "", "Optional App filter (defaults to root --app or BUNDLE_ID env)")
 	cmd.Flags().DurationVar(&flagPollInterval, "poll-interval", 0, "Enable polling with the given interval (e.g. 30s); default runs once")
 	cmd.Flags().IntVar(&flagBatchLimit, "batch-limit", 50, "Maximum number of tasks processed per scan")
-	cmd.Flags().StringVar(&flagDate, "date", "", "Filter tasks by Datetime=ExactDate (YYYY-MM-DD); defaults to today")
+	cmd.Flags().StringVar(&flagDate, "date", "", "Filter tasks by Date=ExactDate (YYYY-MM-DD); defaults to today")
 	cmd.Flags().StringVar(&flagBizType, "biz-type", "", "BizType to process: piracy_general_search, video_screen_capture, or single_url_capture")
 	cmd.Flags().BoolVar(&flagSkipExisting, "skip-existing", false, "Skip webhook rows when <BizType, GroupID, Date> already exists")
 

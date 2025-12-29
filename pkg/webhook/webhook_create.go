@@ -284,7 +284,7 @@ func fetchGroupTaskIDs(ctx context.Context, client *taskagent.FeishuClient, task
 	}
 	filter := taskagent.NewFeishuFilterInfo("and")
 	filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(groupField, "is", strings.TrimSpace(groupID)))
-	if datetimeField := strings.TrimSpace(fields.Datetime); datetimeField != "" && strings.TrimSpace(day) != "" {
+	if datetimeField := strings.TrimSpace(fields.Date); datetimeField != "" && strings.TrimSpace(day) != "" {
 		if dayTime, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(day), time.Local); err == nil {
 			tsMs := strconv.FormatInt(dayTime.UnixMilli(), 10)
 			filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(datetimeField, "is", "ExactDate", tsMs))
@@ -375,15 +375,15 @@ type WebhookResultCreatorConfig struct {
 	// BatchLimit caps how many tasks are processed per scan.
 	BatchLimit int
 
-	// ScanDate applies Datetime=ExactDate(YYYY-MM-DD, local time) filter when querying Feishu.
-	// When empty, no Datetime filter is applied.
+	// ScanDate applies Date=ExactDate(YYYY-MM-DD, local time) filter when querying Feishu.
+	// When empty, no Date filter is applied.
 	ScanDate string
 	// ScanDateToday overwrites ScanDate with today's local date on each iteration.
 	// When true, the creator only scans tasks for the current day.
 	ScanDateToday bool
 
 	// EnableSingleURLCapture enables creating rows for Scene=单个链接采集
-	// (BizType=single_url_capture). Rows are keyed by (GroupID, DatetimeDay).
+	// (BizType=single_url_capture). Rows are keyed by (GroupID, DateDay).
 	EnableSingleURLCapture bool
 
 	// BizType controls which biz type the creator should process. When empty, the
@@ -986,7 +986,7 @@ func (c *WebhookResultCreator) fetchVideoScreenCaptureTasks(ctx context.Context,
 	filter := taskagent.NewFeishuFilterInfo("and")
 	filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(sceneField, "is", taskagent.SceneVideoScreenCapture))
 	filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(statusField, "is", taskagent.StatusSuccess))
-	if dtField := strings.TrimSpace(fields.Datetime); dtField != "" {
+	if dtField := strings.TrimSpace(fields.Date); dtField != "" {
 		if cond := exactDateCondition(dtField, c.scanDate); cond != nil {
 			filter.Conditions = append(filter.Conditions, cond)
 		}
@@ -1017,9 +1017,9 @@ func (c *WebhookResultCreator) fetchPiracyTasksForDay(ctx context.Context) ([]ta
 	}
 	fields := taskagent.DefaultTaskFields()
 	sceneField := strings.TrimSpace(fields.Scene)
-	datetimeField := strings.TrimSpace(fields.Datetime)
+	datetimeField := strings.TrimSpace(fields.Date)
 	if sceneField == "" || datetimeField == "" {
-		return nil, errors.New("task table field mapping is missing (Scene/Datetime)")
+		return nil, errors.New("task table field mapping is missing (Scene/Date)")
 	}
 
 	filter := taskagent.NewFeishuFilterInfo("and")
@@ -1058,7 +1058,7 @@ func (c *WebhookResultCreator) fetchPiracyTasksForDay(ctx context.Context) ([]ta
 	}
 
 	// Extra safety: re-filter by scanDate on the client side to ensure the
-	// behavior matches the expected "Datetime = ExactDate(ScanDate)" semantics,
+	// behavior matches the expected "Date = ExactDate(ScanDate)" semantics,
 	// even if the upstream filter behaves differently.
 	targetDay := strings.TrimSpace(c.scanDate)
 	if targetDay == "" {
@@ -1139,7 +1139,7 @@ func buildSingleURLCaptureTaskFilter(fields taskagent.FeishuTaskFields, appFilte
 	if sceneField != "" {
 		filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(sceneField, "is", taskagent.SceneSingleURLCapture))
 	}
-	if dtField := strings.TrimSpace(fields.Datetime); dtField != "" {
+	if dtField := strings.TrimSpace(fields.Date); dtField != "" {
 		if cond := exactDateCondition(dtField, scanDate); cond != nil {
 			filter.Conditions = append(filter.Conditions, cond)
 		}

@@ -1001,7 +1001,7 @@ func (c *singleURLTestClient) FetchTaskTableWithOptions(_ context.Context, _ str
 		}
 		c.pageCalls[status] = append(c.pageCalls[status], strings.TrimSpace(opts.PageToken))
 	}
-	datePreset := suExtractConditionValue(opts.Filter, feishusdk.DefaultTaskFields.Datetime)
+	datePreset := suExtractConditionValue(opts.Filter, feishusdk.DefaultTaskFields.Date)
 	if (status == feishusdk.StatusDownloaderProcessing || status == feishusdk.StatusDownloaderQueued) && strings.TrimSpace(datePreset) == "" {
 		c.sawActiveWithoutDatetime = true
 	}

@@ -26,7 +26,7 @@ Webhook 结果表用于存储 webhook 的关联信息和推送结果，核心字
 - `DramaInfo`：文本（JSON），创建时按 `BookID` 从剧单表拉取整行 fields 后序列化
 - `UserInfo`：文本（JSON，占位）
 - `Records`：文本（JSON，占位/或写入扁平化 records）
-- `Date`：任务逻辑日期（从任务表 `Datetime` 派生的 ExactDate，用于去重/按日筛选）
+- `Date`：任务逻辑日期（从任务表 `Date` 派生的 ExactDate，用于去重/按日筛选）
 - `CreateAt`：记录创建时间
 - `StartAt`：首次开始处理时间（只写一次）
 - `EndAt`：最后一次处理完成时间（每次尝试都会更新）
@@ -57,7 +57,7 @@ Webhook 结果表用于存储 webhook 的关联信息和推送结果，核心字
   - `Status=pending`
   - `TaskIDs`：该组所有需要聚合的子任务 TaskID（1-N）**以及**同一 BookID + 当日下所有「综合页搜索」父任务的 TaskID，去重后写入
   - `DramaInfo`：按 `BookID` 从剧单表查询整行 fields 后序列化写入
-  - `Date`：父任务/子任务所在业务日期（任务表 `Datetime` 的日粒度）
+  - `Date`：父任务/子任务所在业务日期（任务表 `Date` 的日粒度）
   - `CreateAt`：记录创建时间
 
 #### 视频录屏采集（Single，外部系统创建任务）
@@ -70,7 +70,7 @@ Webhook 结果表用于存储 webhook 的关联信息和推送结果，核心字
   - `Status=pending`
   - `TaskIDs`：文本字段，填入该 TaskID 的数字字符串（例如 `123`）
   - `DramaInfo`：若任务表已填 `BookID`，可按 `BookID` 查询剧单表并序列化写入；若缺失 `BookID` 则先写 `{}`，worker 仍可继续推送（仅 drama 维度信息为空）
-  - `Date`：任务表 `Datetime` 的日粒度值（ExactDate），用于后续按日筛选
+  - `Date`：任务表 `Date` 的日粒度值（ExactDate），用于后续按日筛选
   - `CreateAt`：记录创建时间
 - 建议的扫描条件（可按实际落地调整）：
   - 只处理 `Status=success` 的任务（避免对未完成任务提前创建/重复创建）
@@ -80,17 +80,17 @@ Webhook 结果表用于存储 webhook 的关联信息和推送结果，核心字
 
 #### 单个链接采集（SingleURL Capture，可选）
 
-`pkg/webhook.WebhookResultCreator` 支持可选扫描任务表中的 `Scene=单个链接采集` 任务并按 `(GroupID, DatetimeDay)` 聚合创建 webhook 结果表记录（用于上层业务把“单链采集”也纳入统一的 webhook 结果表机制）。
+`pkg/webhook.WebhookResultCreator` 支持可选扫描任务表中的 `Scene=单个链接采集` 任务并按 `(GroupID, DateDay)` 聚合创建 webhook 结果表记录（用于上层业务把“单链采集”也纳入统一的 webhook 结果表机制）。
 
 该能力由 `WebhookResultCreatorConfig.EnableSingleURLCapture=true` 开启。开启后 creator 会额外向 Feishu 发起一条筛选查询，过滤条件包含：
 
 - `Scene is "单个链接采集"`
-- `Datetime is ExactDate(YYYY-MM-DD)`（若配置了 `ScanDate`）
+- `Date is ExactDate(YYYY-MM-DD)`（若配置了 `ScanDate`）
 - `Status in {"success","failed","error"}`（通过 `children(or)` 组合实现）
 
 如果希望常驻进程**仅扫描当天任务**，可配置 `WebhookResultCreatorConfig.ScanDateToday=true`。  
 creator 会在每轮扫描前把 `ScanDate` 更新为本地当天日期，从而只拉取当天的单链任务；  
-但 webhook 结果表 `Date` 字段仍以**任务自身的 `Datetime`** 为准（仅在任务缺失 `Datetime` 时才回退到 `ScanDate`）。
+但 webhook 结果表 `Date` 字段仍以**任务自身的 `Date`** 为准（仅在任务缺失 `Date` 时才回退到 `ScanDate`）。
 
 注意：若任务表中 `Scene`/`Status` 是单选（枚举）字段，且其选项里不包含上述 value（最常见是 `Status` 没有 `error` 选项），Feishu 会返回 `code=1254018 msg=InvalidFilter`，导致本轮扫描失败。此时请在任务表中补齐对应枚举选项（确保 `Scene`/`Status` 的选项包含筛选值），再开启该功能。
 

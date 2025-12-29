@@ -41,7 +41,7 @@ type TaskFields struct {
 	URL              string
 	UserID           string
 	UserName         string
-	Datetime         string
+	Date             string
 	Status           string
 	Webhook          string
 	Extra            string
@@ -1024,9 +1024,9 @@ func (fields TaskFields) merge(override TaskFields) TaskFields {
 		log.Warn().Str("new", override.EndAt).Msg("overriding field EndAt")
 		result.EndAt = override.EndAt
 	}
-	if strings.TrimSpace(override.Datetime) != "" {
-		log.Warn().Str("new", override.Datetime).Msg("overriding field Datetime")
-		result.Datetime = override.Datetime
+	if strings.TrimSpace(override.Date) != "" {
+		log.Warn().Str("new", override.Date).Msg("overriding field Date")
+		result.Date = override.Date
 	}
 	if strings.TrimSpace(override.DispatchedAt) != "" {
 		log.Warn().Str("new", override.DispatchedAt).Msg("overriding field DispatchedAt")
@@ -1180,8 +1180,8 @@ func buildTaskRecordPayloads(records []TaskRecordInput, fields TaskFields) ([]ma
 		if end := formatRecordDatetimeString(rec.EndAt, rec.EndAtRaw); end != "" && strings.TrimSpace(fields.EndAt) != "" {
 			row[fields.EndAt] = normalizeDatetimePayload(end)
 		}
-		if dt := formatRecordDatetimeString(rec.Datetime, rec.DatetimeRaw); dt != "" && strings.TrimSpace(fields.Datetime) != "" {
-			row[fields.Datetime] = normalizeDatetimePayload(dt)
+		if dt := formatRecordDatetimeString(rec.Datetime, rec.DatetimeRaw); dt != "" && strings.TrimSpace(fields.Date) != "" {
+			row[fields.Date] = normalizeDatetimePayload(dt)
 		}
 		if dispatched := formatRecordDatetimeString(rec.DispatchedAt, rec.DispatchedAtRaw); dispatched != "" && strings.TrimSpace(fields.DispatchedAt) != "" {
 			row[fields.DispatchedAt] = normalizeDatetimePayload(dispatched)
@@ -1623,7 +1623,7 @@ func decodeTaskRow(rec bitableRecord, fields TaskFields) (TaskRow, error) {
 		}
 	}
 
-	if dt := bitableOptionalString(rec.Fields, fields.Datetime); dt != "" {
+	if dt := bitableOptionalString(rec.Fields, fields.Date); dt != "" {
 		row.DatetimeRaw = dt
 		if parsed, err := parseBitableTime(dt); err == nil {
 			row.Datetime = &parsed

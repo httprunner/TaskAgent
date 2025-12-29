@@ -160,7 +160,7 @@ func TestDecodeTaskRow(t *testing.T) {
 			DefaultTaskFields.Params:           []any{"{\"song\":\"foo\"}"},
 			DefaultTaskFields.App:              "netease",
 			DefaultTaskFields.Scene:            "auto",
-			DefaultTaskFields.Datetime:         "2025-11-08 10:30:00",
+			DefaultTaskFields.Date:             "2025-11-08 10:30:00",
 			DefaultTaskFields.Status:           "pending",
 			DefaultTaskFields.UserID:           "user-123",
 			DefaultTaskFields.UserName:         "tester",
@@ -213,7 +213,7 @@ func TestDecodeTaskRowAllowsEmptyStatus(t *testing.T) {
 			DefaultTaskFields.Params:           "{}",
 			DefaultTaskFields.App:              "netease",
 			DefaultTaskFields.Scene:            "auto",
-			DefaultTaskFields.Datetime:         "2025-11-08",
+			DefaultTaskFields.Date:             "2025-11-08",
 			DefaultTaskFields.Status:           "",
 			DefaultTaskFields.UserID:           "",
 			DefaultTaskFields.UserName:         "",
@@ -259,11 +259,11 @@ func TestDecodeTaskRowMissingStatus(t *testing.T) {
 	rec := bitableRecord{
 		RecordID: "recMissing",
 		Fields: map[string]any{
-			DefaultTaskFields.TaskID:   float64(44),
-			DefaultTaskFields.Params:   "{}",
-			DefaultTaskFields.App:      "netease",
-			DefaultTaskFields.Scene:    "auto",
-			DefaultTaskFields.Datetime: "2025-11-08",
+			DefaultTaskFields.TaskID: float64(44),
+			DefaultTaskFields.Params: "{}",
+			DefaultTaskFields.App:    "netease",
+			DefaultTaskFields.Scene:  "auto",
+			DefaultTaskFields.Date:   "2025-11-08",
 		},
 	}
 	if _, err := decodeTaskRow(rec, DefaultTaskFields); err == nil {
@@ -304,23 +304,23 @@ func TestFetchTaskTableExampleMock(t *testing.T) {
 				{
 					"record_id": "recYUOQd9",
 					"fields": map[string]any{
-						DefaultTaskFields.TaskID:   101,
-						DefaultTaskFields.Params:   "{\"song\":\"foo\"}",
-						DefaultTaskFields.App:      "netease",
-						DefaultTaskFields.Scene:    "batch",
-						DefaultTaskFields.Datetime: "2025-11-07 12:30:00",
-						DefaultTaskFields.Status:   "pending",
+						DefaultTaskFields.TaskID: 101,
+						DefaultTaskFields.Params: "{\"song\":\"foo\"}",
+						DefaultTaskFields.App:    "netease",
+						DefaultTaskFields.Scene:  "batch",
+						DefaultTaskFields.Date:   "2025-11-07 12:30:00",
+						DefaultTaskFields.Status: "pending",
 					},
 				},
 				{
 					"record_id": "recTy0283",
 					"fields": map[string]any{
-						DefaultTaskFields.TaskID:   102,
-						DefaultTaskFields.Params:   "{\"song\":\"bar\"}",
-						DefaultTaskFields.App:      "qqmusic",
-						DefaultTaskFields.Scene:    "batch",
-						DefaultTaskFields.Datetime: "2025-11-07 13:00:00",
-						DefaultTaskFields.Status:   "done",
+						DefaultTaskFields.TaskID: 102,
+						DefaultTaskFields.Params: "{\"song\":\"bar\"}",
+						DefaultTaskFields.App:    "qqmusic",
+						DefaultTaskFields.Scene:  "batch",
+						DefaultTaskFields.Date:   "2025-11-07 13:00:00",
+						DefaultTaskFields.Status: "done",
 					},
 				},
 			},
@@ -543,8 +543,8 @@ func TestCreateTaskRecords(t *testing.T) {
 	if _, exists := firstFields[DefaultTaskFields.Status]; exists {
 		t.Fatalf("default status field should be absent when override is set")
 	}
-	if firstFields[DefaultTaskFields.Datetime] != when.Format(time.RFC3339) {
-		t.Fatalf("unexpected datetime %v", firstFields[DefaultTaskFields.Datetime])
+	if firstFields[DefaultTaskFields.Date] != when.Format(time.RFC3339) {
+		t.Fatalf("unexpected datetime %v", firstFields[DefaultTaskFields.Date])
 	}
 	secondFields, ok := recordPayloads[1]["fields"].(map[string]any)
 	if !ok {
@@ -553,8 +553,8 @@ func TestCreateTaskRecords(t *testing.T) {
 	if _, exists := secondFields[DefaultTaskFields.TaskID]; exists {
 		t.Fatalf("TaskID should be omitted for auto-increment scenario, got %#v", secondFields[DefaultTaskFields.TaskID])
 	}
-	if secondFields[DefaultTaskFields.Datetime] != "2024-10-02 08:00:00" {
-		t.Fatalf("expected raw datetime preserved, got %#v", secondFields[DefaultTaskFields.Datetime])
+	if secondFields[DefaultTaskFields.Date] != "2024-10-02 08:00:00" {
+		t.Fatalf("expected raw datetime preserved, got %#v", secondFields[DefaultTaskFields.Date])
 	}
 }
 
@@ -587,7 +587,7 @@ func TestBuildTaskRecordPayloadsDatetimeMs(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("unexpected payload length %d", len(rows))
 	}
-	val, ok := rows[0][DefaultTaskFields.Datetime]
+	val, ok := rows[0][DefaultTaskFields.Date]
 	if !ok {
 		t.Fatalf("datetime field missing in payload")
 	}

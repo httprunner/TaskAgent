@@ -233,7 +233,7 @@ func (c *sceneStatusTargetClient) FetchTaskTableWithOptions(ctx context.Context,
 	scene := extractConditionValue(opts.Filter, feishusdk.DefaultTaskFields.Scene)
 	status := extractConditionValue(opts.Filter, feishusdk.DefaultTaskFields.Status)
 	dt := "without"
-	if filterHasDatetime(opts.Filter, feishusdk.DefaultTaskFields.Datetime) {
+	if filterHasDatetime(opts.Filter, feishusdk.DefaultTaskFields.Date) {
 		dt = "with"
 	}
 	key := strings.TrimSpace(scene) + "|" + strings.TrimSpace(status) + "|" + dt
@@ -400,7 +400,7 @@ func TestBuildFeishuFilterInfoWithStatusesEmbedsBaseConditions(t *testing.T) {
 	child := filter.Children[0]
 	assertConditionValue(t, child.Conditions, fields.App, "com.app")
 	assertConditionValue(t, child.Conditions, fields.Scene, SceneSingleURLCapture)
-	assertConditionValue(t, child.Conditions, fields.Datetime, TaskDateToday)
+	assertConditionValue(t, child.Conditions, fields.Date, TaskDateToday)
 	assertConditionValue(t, child.Conditions, fields.Status, feishusdk.StatusPending)
 }
 
@@ -414,7 +414,7 @@ func TestBuildFeishuFilterInfoTaskDateAnySkipsDatetime(t *testing.T) {
 		t.Fatalf("expected status children, got none")
 	}
 	for _, child := range filter.Children {
-		if len(findConditions(child.Conditions, fields.Datetime)) != 0 {
+		if len(findConditions(child.Conditions, fields.Date)) != 0 {
 			t.Fatalf("expected no datetime condition when TaskDateAny is used")
 		}
 	}
@@ -441,7 +441,7 @@ func TestBuildFeishuFilterInfoBlankStatusAddsVariants(t *testing.T) {
 			opSeen[strings.ToLower(strings.TrimSpace(*cond.Operator))] = struct{}{}
 		}
 		assertConditionValue(t, child.Conditions, fields.Scene, SceneSingleURLCapture)
-		assertConditionValue(t, child.Conditions, fields.Datetime, TaskDateToday)
+		assertConditionValue(t, child.Conditions, fields.Date, TaskDateToday)
 	}
 	if len(opSeen) != 2 {
 		t.Fatalf("expected both isEmpty and is operators, got %v", opSeen)
@@ -468,7 +468,7 @@ func TestBuildFeishuFilterInfoWithoutStatusesUsesBaseConditions(t *testing.T) {
 	}
 	assertConditionValue(t, filter.Conditions, fields.App, "com.app")
 	assertConditionValue(t, filter.Conditions, fields.Scene, SceneSingleURLCapture)
-	assertConditionValue(t, filter.Conditions, fields.Datetime, TaskDateToday)
+	assertConditionValue(t, filter.Conditions, fields.Date, TaskDateToday)
 }
 
 func assertConditionValue(t *testing.T, conds []*feishusdk.Condition, field, want string) {

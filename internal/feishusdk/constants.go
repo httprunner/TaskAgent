@@ -86,7 +86,7 @@ var (
 		URL:              "URL",              // 视频 URL
 		UserID:           "UserID",           // 用户 ID
 		UserName:         "UserName",         // 用户名称
-		Datetime:         "Datetime",         // 任务执行时间配置
+		Date:             "Date",             // 任务执行时间配置
 		Status:           "Status",           // 任务状态
 		Webhook:          "Webhook",          // Webhook 同步状态
 		Logs:             "Logs",             // 日志目录
@@ -181,7 +181,7 @@ func applyTaskFieldEnvOverrides(fields *TaskFields) {
 	overrideFieldFromEnv("TASK_FIELD_URL", &fields.URL)
 	overrideFieldFromEnv("TASK_FIELD_USERID", &fields.UserID)
 	overrideFieldFromEnv("TASK_FIELD_USERNAME", &fields.UserName)
-	overrideFieldFromEnv("TASK_FIELD_DATETIME", &fields.Datetime)
+	overrideFieldFromEnv("TASK_FIELD_DATE", &fields.Date)
 	overrideFieldFromEnv("TASK_FIELD_STATUS", &fields.Status)
 	overrideFieldFromEnv("TASK_FIELD_WEBHOOK", &fields.Webhook)
 	overrideFieldFromEnv("TASK_FIELD_LOGS", &fields.Logs)
