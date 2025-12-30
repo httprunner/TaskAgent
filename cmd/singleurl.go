@@ -85,7 +85,7 @@ func newSingleURLCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flagCrawlerBaseURL, "crawler-base-url", "", "Crawler service endpoint overriding $CRAWLER_SERVICE_BASE_URL")
 	cmd.Flags().DurationVar(&flagPollInterval, "poll-interval", 30*time.Second, "Polling interval when running continuously")
 	cmd.Flags().IntVar(&flagFetchLimit, "fetch-limit", singleurl.DefaultSingleURLWorkerLimit, "Maximum tasks to fetch per cycle")
-	cmd.Flags().IntVar(&flagConcurrency, "concurrency", 0, "Parallelism for crawler CreateTask calls (0 uses $SINGLE_URL_CONCURRENCY)")
+	cmd.Flags().IntVar(&flagConcurrency, "concurrency", 0, "Parallelism for crawler API calls (0 uses $SINGLE_URL_CONCURRENCY)")
 	cmd.Flags().BoolVar(&flagOnce, "once", false, "Run only one ProcessOnce cycle and exit")
 
 	return cmd

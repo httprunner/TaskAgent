@@ -21,6 +21,7 @@ const (
 	crawlerServiceBaseURLEnv     = "CRAWLER_SERVICE_BASE_URL"
 	singleURLConcurrencyEnv      = "SINGLE_URL_CONCURRENCY"
 	defaultCrawlerServiceBaseURL = "http://localhost:8000"
+	defaultSingleURLConcurrency  = 10
 	// DefaultSingleURLWorkerLimit is the per-device multiplier used when the worker
 	// auto-resolves fetch limits (Limit<=0).
 	DefaultSingleURLWorkerLimit = 20
@@ -207,7 +208,7 @@ func NewSingleURLWorker(cfg SingleURLWorkerConfig) (*SingleURLWorker, error) {
 	}
 	concurrency := cfg.Concurrency
 	if concurrency <= 0 {
-		concurrency = env.Int(singleURLConcurrencyEnv, 10)
+		concurrency = env.Int(singleURLConcurrencyEnv, defaultSingleURLConcurrency)
 	}
 	if concurrency <= 0 {
 		concurrency = 1
