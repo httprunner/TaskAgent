@@ -207,7 +207,7 @@ func NewSingleURLWorker(cfg SingleURLWorkerConfig) (*SingleURLWorker, error) {
 	}
 	concurrency := cfg.Concurrency
 	if concurrency <= 0 {
-		concurrency = env.Int(singleURLConcurrencyEnv, 1)
+		concurrency = env.Int(singleURLConcurrencyEnv, 10)
 	}
 	if concurrency <= 0 {
 		concurrency = 1
@@ -313,6 +313,10 @@ func (w *SingleURLWorker) Run(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// Run one pass immediately so the worker doesn't sit idle for a full poll interval.
+	if err := w.ProcessOnce(ctx); err != nil {
+		log.Error().Err(err).Msg("single url worker pass failed")
+	}
 	ticker := time.NewTicker(w.pollInterval)
 	defer ticker.Stop()
 	for {
@@ -335,10 +339,18 @@ func (w *SingleURLWorker) ProcessOnce(ctx context.Context) (retErr error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	startedAt := time.Now()
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Fprintf(os.Stderr, "single url worker panic (ProcessOnce): %v\n", r)
 			retErr = errors.Errorf("single url worker panic: %v", r)
+		}
+		elapsed := time.Since(startedAt)
+		if w.pollInterval > 0 && elapsed > w.pollInterval {
+			log.Warn().
+				Dur("elapsed", elapsed).
+				Dur("poll_interval", w.pollInterval).
+				Msg("single url worker pass exceeded poll interval; ticks may be skipped")
 		}
 	}()
 	// Always poll active tasks first so dl-processing tasks don't get starved when
@@ -347,13 +359,7 @@ func (w *SingleURLWorker) ProcessOnce(ctx context.Context) (retErr error) {
 	if err != nil {
 		return err
 	}
-	for _, task := range activeTasks {
-		if err := w.reconcileSingleURLTask(ctx, task); err != nil {
-			log.Error().Err(err).
-				Int64("task_id", task.TaskID).
-				Msg("single url worker polling failed")
-		}
-	}
+	w.reconcileSingleURLActiveTasks(ctx, activeTasks)
 
 	newTasks, err := w.fetchSingleURLTasks(ctx, w.newTaskStatuses, w.limit)
 	if err != nil {
@@ -370,12 +376,222 @@ func (w *SingleURLWorker) ProcessOnce(ctx context.Context) (retErr error) {
 	} else {
 		w.dispatchSingleURLTasks(ctx, newTasks)
 	}
+	log.Debug().
+		Int("active_tasks", len(activeTasks)).
+		Int("new_tasks", len(newTasks)).
+		Int("limit", w.limit).
+		Int("concurrency", w.concurrency).
+		Dur("elapsed", time.Since(startedAt)).
+		Msg("single url worker pass finished")
 	return nil
 }
 
 type singleURLUpdateWork struct {
 	taskID int64
 	apply  func(context.Context) error
+	err    error
+}
+
+func (w *SingleURLWorker) reconcileSingleURLActiveTasks(ctx context.Context, tasks []*FeishuTask) {
+	if w == nil || len(tasks) == 0 {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if w.concurrency <= 1 || len(tasks) <= 1 {
+		for _, task := range tasks {
+			work := w.buildSingleURLReconcileWork(ctx, task)
+			if work.err != nil {
+				log.Error().Err(work.err).
+					Int64("task_id", work.taskID).
+					Msg("single url worker polling failed")
+			}
+			if work.apply == nil {
+				continue
+			}
+			if err := work.apply(ctx); err != nil {
+				log.Error().Err(err).
+					Int64("task_id", work.taskID).
+					Msg("single url worker update failed")
+			}
+		}
+		return
+	}
+
+	works := make([]singleURLUpdateWork, len(tasks))
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(w.concurrency)
+	for idx, task := range tasks {
+		idx := idx
+		task := task
+		group.Go(func() error {
+			defer func() {
+				if r := recover(); r != nil {
+					taskID := int64(0)
+					if task != nil {
+						taskID = task.TaskID
+					}
+					fmt.Fprintf(os.Stderr, "single url worker panic (reconcile task_id=%d): %v\n", taskID, r)
+					if task != nil {
+						reason := fmt.Sprintf("panic: %v", r)
+						works[idx] = singleURLUpdateWork{
+							taskID: taskID,
+							apply: func(ctx context.Context) error {
+								return w.failSingleURLTask(ctx, task, reason, nil)
+							},
+						}
+					}
+				}
+			}()
+			if task == nil {
+				return nil
+			}
+			works[idx] = w.buildSingleURLReconcileWork(groupCtx, task)
+			return nil
+		})
+	}
+	_ = group.Wait()
+	for _, work := range works {
+		if work.err != nil {
+			log.Error().Err(work.err).
+				Int64("task_id", work.taskID).
+				Msg("single url worker polling failed")
+		}
+		if work.apply == nil {
+			continue
+		}
+		if err := work.apply(ctx); err != nil {
+			log.Error().Err(err).
+				Int64("task_id", work.taskID).
+				Msg("single url worker update failed")
+		}
+	}
+}
+
+func (w *SingleURLWorker) buildSingleURLReconcileWork(ctx context.Context, task *FeishuTask) singleURLUpdateWork {
+	work := singleURLUpdateWork{taskID: 0}
+	if task == nil {
+		return work
+	}
+	work.taskID = task.TaskID
+	if w == nil {
+		work.apply = func(context.Context) error { return errors.New("single url worker: nil instance") }
+		return work
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	meta := decodeSingleURLMetadata(task.Logs)
+	crawlerTaskID := meta.latestTaskID()
+	if crawlerTaskID == "" {
+		work.apply = func(ctx context.Context) error {
+			return w.failSingleURLTask(ctx, task, "missing task_id for queued task", nil)
+		}
+		return work
+	}
+
+	status, err := w.crawler.GetTask(ctx, crawlerTaskID)
+	if err != nil {
+		if errors.Is(err, errCrawlerTaskNotFound) {
+			meta.markFailure("crawler task not found", w.clock())
+			work.apply = func(ctx context.Context) error {
+				return w.failSingleURLTask(ctx, task, "crawler task not found", &meta)
+			}
+			return work
+		}
+		work.err = err
+		return work
+	}
+
+	switch strings.ToUpper(strings.TrimSpace(status.Status)) {
+	case "WAITING":
+		if strings.TrimSpace(task.Status) == feishusdk.StatusDownloaderQueued {
+			return work
+		}
+		groupID := strings.TrimSpace(task.GroupID)
+		if groupID == "" {
+			groupID = buildSingleURLGroupID(task.App, strings.TrimSpace(task.BookID), strings.TrimSpace(task.UserID))
+		}
+		work.apply = func(ctx context.Context) error {
+			return w.markSingleURLTaskQueued(ctx, task, groupID, meta)
+		}
+		return work
+	case "PROCESSING":
+		meta.markRunning()
+		work.apply = func(ctx context.Context) error {
+			if err := w.updateTaskExtra(ctx, task, meta); err != nil {
+				return err
+			}
+			if err := taskagent.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishusdk.StatusDownloaderProcessing, "", nil); err != nil {
+				return err
+			}
+			task.Status = feishusdk.StatusDownloaderProcessing
+			return nil
+		}
+		return work
+	case "COMPLETED":
+		vid := strings.TrimSpace(status.VID)
+		if vid == "" {
+			meta.markRunning()
+			if latest := meta.latestAttempt(); latest != nil {
+				if latest.CompletedAt != 0 {
+					latest.CompletedAt = 0
+				}
+				if strings.TrimSpace(latest.Error) == "" {
+					latest.Error = "waiting for vid"
+				}
+			}
+			log.Warn().
+				Int64("task_id", task.TaskID).
+				Str("crawler_task_id", crawlerTaskID).
+				Msg("single url worker: crawler returned completed but vid is empty; keep polling")
+			work.apply = func(ctx context.Context) error {
+				if err := w.updateTaskExtra(ctx, task, meta); err != nil {
+					return err
+				}
+				if strings.TrimSpace(task.Status) != feishusdk.StatusDownloaderProcessing {
+					if err := taskagent.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishusdk.StatusDownloaderProcessing, "", nil); err != nil {
+						return err
+					}
+					task.Status = feishusdk.StatusDownloaderProcessing
+				}
+				return nil
+			}
+			return work
+		}
+		completed := w.clock()
+		meta.markSuccess(vid, completed)
+		work.apply = func(ctx context.Context) error {
+			if err := w.updateTaskExtra(ctx, task, meta); err != nil {
+				return err
+			}
+			if err := taskagent.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishusdk.StatusSuccess, "", &taskagent.TaskStatusMeta{CompletedAt: &completed}); err != nil {
+				return err
+			}
+			task.Status = feishusdk.StatusSuccess
+			return nil
+		}
+		return work
+	case "FAILED":
+		reason := strings.TrimSpace(status.Error)
+		if reason == "" {
+			reason = "crawler task failed"
+		}
+		meta.markFailure(reason, w.clock())
+		work.apply = func(ctx context.Context) error {
+			return w.failSingleURLTask(ctx, task, reason, &meta)
+		}
+		return work
+	default:
+		log.Warn().
+			Int64("task_id", task.TaskID).
+			Str("crawler_task_id", crawlerTaskID).
+			Str("status", status.Status).
+			Msg("single url worker: unknown crawler status")
+		return work
+	}
 }
 
 func (w *SingleURLWorker) dispatchSingleURLTasks(ctx context.Context, tasks []*FeishuTask) {
@@ -493,6 +709,12 @@ func (w *SingleURLWorker) buildSingleURLDispatchWork(ctx context.Context, task *
 	metaPayload["bid"] = bookID
 	metaPayload["uid"] = userID
 	cdnURL := extractSingleURLCDNURL(task.Extra)
+	if strings.TrimSpace(task.Status) == feishusdk.StatusReady && cdnURL == "" {
+		work.apply = func(ctx context.Context) error {
+			return w.markSingleURLTaskFailedForDeviceStage(ctx, task, false)
+		}
+		return work
+	}
 	if cdnURL != "" {
 		metaPayload["cdn_url"] = cdnURL
 	}
@@ -760,93 +982,14 @@ func (w *SingleURLWorker) reconcileSingleURLTask(ctx context.Context, task *Feis
 	if task == nil {
 		return errors.New("single url worker: nil task")
 	}
-	meta := decodeSingleURLMetadata(task.Logs)
-	taskID := meta.latestTaskID()
-	if taskID == "" {
-		return w.failSingleURLTask(ctx, task, "missing task_id for queued task", nil)
+	work := w.buildSingleURLReconcileWork(ctx, task)
+	if work.err != nil {
+		return work.err
 	}
-	status, err := w.crawler.GetTask(ctx, taskID)
-	if err != nil {
-		if errors.Is(err, errCrawlerTaskNotFound) {
-			meta.markFailure("crawler task not found", w.clock())
-			return w.failSingleURLTask(ctx, task, "crawler task not found", &meta)
-		}
-		return err
-	}
-	switch strings.ToUpper(strings.TrimSpace(status.Status)) {
-	case "WAITING":
-		if task.Status != feishusdk.StatusDownloaderQueued {
-			groupID := strings.TrimSpace(task.GroupID)
-			if groupID == "" {
-				groupID = buildSingleURLGroupID(task.App, strings.TrimSpace(task.BookID), strings.TrimSpace(task.UserID))
-			}
-			return w.markSingleURLTaskQueued(ctx, task, groupID, meta)
-		}
-		return nil
-	case "PROCESSING":
-		meta.markRunning()
-		if err := w.updateTaskExtra(ctx, task, meta); err != nil {
-			return err
-		}
-		if err := taskagent.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishusdk.StatusDownloaderProcessing, "", nil); err != nil {
-			return err
-		}
-		task.Status = feishusdk.StatusDownloaderProcessing
-		return nil
-	case "COMPLETED":
-		vid := strings.TrimSpace(status.VID)
-		if vid == "" {
-			// Downloader may briefly return status=done before persisting vid.
-			// Only mark success when vid is present; otherwise keep polling.
-			meta.markRunning()
-			if latest := meta.latestAttempt(); latest != nil {
-				if latest.CompletedAt != 0 {
-					latest.CompletedAt = 0
-				}
-				if strings.TrimSpace(latest.Error) == "" {
-					latest.Error = "waiting for vid"
-				}
-			}
-			log.Warn().
-				Int64("task_id", task.TaskID).
-				Str("crawler_task_id", taskID).
-				Msg("single url worker: crawler returned completed but vid is empty; keep polling")
-			if err := w.updateTaskExtra(ctx, task, meta); err != nil {
-				return err
-			}
-			if task.Status != feishusdk.StatusDownloaderProcessing {
-				if err := taskagent.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishusdk.StatusDownloaderProcessing, "", nil); err != nil {
-					return err
-				}
-				task.Status = feishusdk.StatusDownloaderProcessing
-			}
-			return nil
-		}
-		completed := w.clock()
-		meta.markSuccess(vid, completed)
-		if err := w.updateTaskExtra(ctx, task, meta); err != nil {
-			return err
-		}
-		if err := taskagent.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishusdk.StatusSuccess, "", &taskagent.TaskStatusMeta{CompletedAt: &completed}); err != nil {
-			return err
-		}
-		task.Status = feishusdk.StatusSuccess
-		return nil
-	case "FAILED":
-		reason := strings.TrimSpace(status.Error)
-		if reason == "" {
-			reason = "crawler task failed"
-		}
-		meta.markFailure(reason, w.clock())
-		return w.failSingleURLTask(ctx, task, reason, &meta)
-	default:
-		log.Warn().
-			Int64("task_id", task.TaskID).
-			Str("crawler_task_id", taskID).
-			Str("status", status.Status).
-			Msg("single url worker: unknown crawler status")
+	if work.apply == nil {
 		return nil
 	}
+	return work.apply(ctx)
 }
 
 func extractSingleURLCDNURL(raw string) string {

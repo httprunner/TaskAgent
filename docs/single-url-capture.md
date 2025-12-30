@@ -34,6 +34,7 @@
      - `cdn_url` 存在则标记 `ready` 并写入 `Extra.cdn_url`。
 2. 下载侧（`SingleURLWorker`）建议使用 ready 模式（`singleurl.NewSingleURLReadyWorkerFromEnv...`），批量拉取 `ready` 任务并入队下载服务：
    - 为了加速 `ready → dl-queued` 的入队吞吐，可以通过 `SINGLE_URL_CONCURRENCY`（或 `cmd singleurl --concurrency`）并发调用下载服务的 `POST /download/tasks`；但对 Feishu 的状态写回仍保持串行以避免触发频率限制。
+   - Worker 启动后会先立即执行一轮 `ProcessOnce`，避免等待一个完整的 poll interval 才开始处理任务。
 3. 对于 `ready` 且字段完整的任务：
    - Worker 会调用下载服务 `POST /download/tasks`，请求体包含 `{platform,bid,uid,url}`（可选 `cdn_url`）；
    - 成功后会把任务 `Status` 更新为 `dl-queued`，将 `GroupID` 写成 `BookID_UserID`，并把 `{task_id: <xxx>}` 序列化到 `Logs`；
@@ -44,6 +45,7 @@
    - 为避免任务量过大时始终只轮询前 `fetch-limit` 条导致“后续页任务永远不更新”，active 状态轮询每轮至少翻 `3` 页，单页默认 `100` 条，并在进程内维护 `page_token` 轮转扫描；
    - 为避免 bitable URL 自带的 view 过滤/排序影响任务可见性，singleurl worker 查询任务表时会忽略 view（只依赖 filter 条件）。
    - `ready → dl-queued` 的入队阶段仍默认只扫描 `Today + Yesterday`，避免全表扫描带来的频率/性能风险。
+   - 若某一轮 `ProcessOnce` 执行耗时超过 `poll interval`，后续 tick 可能会被跳过（日志会提示 `single url worker pass exceeded poll interval; ticks may be skipped`）。
 
 | 下载服务状态 | Task 表 Status | 行为 |
 | --- | --- | --- |
