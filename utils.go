@@ -11,29 +11,38 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// GroupGoSafe runs fn in an errgroup goroutine, logs panics to stderr, and
-// restarts the goroutine with exponential backoff.
-//
-// Notes:
-//   - Panics are treated as recoverable: they will not cancel sibling goroutines.
-//   - Returned errors preserve errgroup semantics: returning a non-nil error will
-//     cancel the group's derived context (when using errgroup.WithContext) and
-//     make Wait() return that error.
-//   - ctx cancellation stops the restart loop so Wait() can return promptly.
-//
-// We intentionally avoid structured logging here: panics may be caused by the
-// logger itself, so printing to stderr is the safest fallback.
-func GroupGoSafe(ctx context.Context, group *errgroup.Group, name string, fn func(context.Context) error) {
-	if group == nil || fn == nil {
+func NewSafeGroup(ctx context.Context) *SafeGroup {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	parent := ctx
+	group, groupCtx := errgroup.WithContext(ctx)
+	return &SafeGroup{Group: group, ctx: groupCtx, parent: parent}
+}
+
+type SafeGroup struct {
+	*errgroup.Group
+	// ctx is the errgroup-derived context (canceled on parent cancellation or first error).
+	ctx context.Context
+	// parent is the caller-provided context (typically signal.NotifyContext).
+	// WaitOrInterrupt uses this to avoid treating "errgroup canceled because of worker error"
+	// as an external interrupt.
+	parent context.Context
+}
+
+func (sg *SafeGroup) GoSafe(name string, fn func(context.Context) error) {
+	if sg == nil || sg.Group == nil || fn == nil {
 		return
 	}
-	group.Go(func() (err error) {
+	sg.Group.Go(func() (err error) {
+		// Restart the goroutine on panic, log to stderr, and keep other goroutines running.
+		// Exit promptly when ctx is canceled so errgroup.Wait() can return.
 		backoff := 200 * time.Millisecond
 		const maxBackoff = 30 * time.Second
 		for {
-			if ctx != nil {
+			if sg.ctx != nil {
 				select {
-				case <-ctx.Done():
+				case <-sg.ctx.Done():
 					return nil
 				default:
 				}
@@ -48,10 +57,11 @@ func GroupGoSafe(ctx context.Context, group *errgroup.Group, name string, fn fun
 						recovered = r
 					}
 				}()
-				err = fn(ctx)
+				err = fn(sg.ctx)
 			}()
 
 			if panicked {
+				// Avoid structured logging here: the panic might be caused by the logger itself.
 				_, _ = fmt.Fprintf(os.Stderr, "WARN: %s panicked: %v\n%s\n", name, recovered, debug.Stack())
 
 				// Add a small deterministic jitter without relying on math/rand.
@@ -69,21 +79,18 @@ func GroupGoSafe(ctx context.Context, group *errgroup.Group, name string, fn fun
 				continue
 			}
 
+			// If the worker returns an error, preserve errgroup semantics (cancel siblings).
 			return err
 		}
 	})
 }
 
-// WaitOrInterrupt waits for wait() to return, but returns ctx.Err() if ctx is done.
-//
-// Behavior:
-// - If ctx is nil, it simply returns wait().
-// - If ctx is done before wait() returns:
-//   - If gracePeriod <= 0, returns ctx.Err() immediately.
-//   - Otherwise waits up to gracePeriod for wait() to finish; if it doesn't, returns ctx.Err().
-//
-// - If wait() returns an error that is (or matches) ctx.Err(), it is normalized to ctx.Err().
-func WaitOrInterrupt(ctx context.Context, wait func() error, gracePeriod time.Duration) error {
+func (sg *SafeGroup) WaitOrInterrupt(gracePeriod time.Duration) error {
+	if sg == nil || sg.Group == nil {
+		return nil
+	}
+	ctx := sg.parent
+	wait := sg.Group.Wait
 	if ctx == nil {
 		return wait()
 	}
