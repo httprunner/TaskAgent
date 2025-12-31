@@ -2,6 +2,7 @@ package taskagent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -71,4 +72,56 @@ func GroupGoSafe(ctx context.Context, group *errgroup.Group, name string, fn fun
 			return err
 		}
 	})
+}
+
+// WaitOrInterrupt waits for wait() to return, but returns ctx.Err() if ctx is done.
+//
+// Behavior:
+// - If ctx is nil, it simply returns wait().
+// - If ctx is done before wait() returns:
+//   - If gracePeriod <= 0, returns ctx.Err() immediately.
+//   - Otherwise waits up to gracePeriod for wait() to finish; if it doesn't, returns ctx.Err().
+//
+// - If wait() returns an error that is (or matches) ctx.Err(), it is normalized to ctx.Err().
+func WaitOrInterrupt(ctx context.Context, wait func() error, gracePeriod time.Duration) error {
+	if ctx == nil {
+		return wait()
+	}
+
+	waitCh := make(chan error, 1)
+	go func() {
+		waitCh <- wait()
+	}()
+
+	select {
+	case err := <-waitCh:
+		return normalizeInterruptError(ctx, err)
+	case <-ctx.Done():
+		if gracePeriod <= 0 {
+			return ctx.Err()
+		}
+		select {
+		case err := <-waitCh:
+			return normalizeInterruptError(ctx, err)
+		case <-time.After(gracePeriod):
+			return ctx.Err()
+		}
+	}
+}
+
+// normalizeInterruptError maps context-cancellation errors to ctx.Err().
+func normalizeInterruptError(ctx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if ctx != nil && ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return err
+	}
+	if ctx != nil && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+		return ctx.Err()
+	}
+	return err
 }
