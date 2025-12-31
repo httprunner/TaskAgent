@@ -295,6 +295,10 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 			return errors.Wrap(err, "fetch available tasks failed")
 		}
 		if len(tasks) == 0 {
+			event := log.Info()
+			if round > 1 {
+				event = log.Debug()
+			}
 			event.
 				Int("dispatch_round", round).
 				Int("idle_devices", len(idle)).
