@@ -257,6 +257,7 @@ func (a *DevicePoolAgent) OnlineDeviceCount() int {
 func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 	dispatchStart := time.Now()
 	dispatchedInCycle := make(map[string]struct{})
+	fetchedInCycle := 0
 
 	round := 0
 	for {
@@ -274,8 +275,19 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 
 		maxTasks := len(idle) * a.cfg.MaxTasksPerJob
 		fetchCap := a.cfg.MaxFetchPerPoll
-		if fetchCap > 0 && maxTasks > fetchCap {
-			maxTasks = fetchCap
+		if fetchCap > 0 {
+			remaining := fetchCap - fetchedInCycle
+			if remaining <= 0 {
+				log.Debug().
+					Int("dispatch_round", round).
+					Int("fetch_cap", fetchCap).
+					Int("fetched_in_cycle", fetchedInCycle).
+					Msg("device pool dispatch reached fetch cap; stopping")
+				return nil
+			}
+			if maxTasks > remaining {
+				maxTasks = remaining
+			}
 		}
 
 		event := log.Info()
@@ -294,6 +306,7 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 		if err != nil {
 			return errors.Wrap(err, "fetch available tasks failed")
 		}
+		fetchedInCycle += len(tasks)
 		if len(tasks) == 0 {
 			event := log.Info()
 			if round > 1 {
@@ -327,10 +340,7 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 			return nil
 		}
 
-		// Respect per-poll caps and avoid spending too long looping within a single cycle.
-		if a.cfg.MaxFetchPerPoll > 0 {
-			return nil
-		}
+		// Avoid spending too long looping within a single cycle.
 		if time.Since(dispatchStart) > 10*time.Second {
 			log.Debug().
 				Dur("elapsed", time.Since(dispatchStart)).
