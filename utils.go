@@ -11,6 +11,12 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// NewSafeGroup creates a SafeGroup backed by errgroup.WithContext.
+//
+// The returned SafeGroup:
+// - shares a derived context across goroutines (canceled on parent cancellation or first non-nil error),
+// - can restart goroutines on panic via GoSafe,
+// - can wait with interruption semantics via WaitOrInterrupt.
 func NewSafeGroup(ctx context.Context) *SafeGroup {
 	if ctx == nil {
 		ctx = context.Background()
@@ -20,16 +26,32 @@ func NewSafeGroup(ctx context.Context) *SafeGroup {
 	return &SafeGroup{Group: group, ctx: groupCtx, parent: parent}
 }
 
+// SafeGroup is an errgroup.Group with safer defaults for long-running workers.
+//
+// It provides:
+// - GoSafe: runs a worker with panic recovery + restart backoff.
+// - WaitOrInterrupt: waits for group completion, returning early on external interruption.
 type SafeGroup struct {
 	*errgroup.Group
-	// ctx is the errgroup-derived context (canceled on parent cancellation or first error).
+	// ctx is the errgroup-derived context (canceled on parent cancellation or first non-nil error).
 	ctx context.Context
 	// parent is the caller-provided context (typically signal.NotifyContext).
-	// WaitOrInterrupt uses this to avoid treating "errgroup canceled because of worker error"
-	// as an external interrupt.
+	// WaitOrInterrupt uses this (instead of sg.ctx) so "errgroup canceled because a worker returned an error"
+	// is preserved as a real error rather than being normalized into context.Canceled.
 	parent context.Context
 }
 
+// GoSafe runs fn in an errgroup goroutine, logs panics to stderr, and restarts
+// the goroutine with exponential backoff.
+//
+// Notes:
+//   - Panics are treated as recoverable: they will not cancel sibling goroutines.
+//   - Returned errors preserve errgroup semantics: returning a non-nil error will cancel the
+//     group's derived context and make Wait() return that error.
+//   - Context cancellation stops the restart loop so Wait() can return promptly.
+//
+// We intentionally avoid structured logging here: panics may be caused by the
+// logger itself, so printing to stderr is the safest fallback.
 func (sg *SafeGroup) GoSafe(name string, fn func(context.Context) error) {
 	if sg == nil || sg.Group == nil || fn == nil {
 		return
@@ -85,6 +107,16 @@ func (sg *SafeGroup) GoSafe(name string, fn func(context.Context) error) {
 	})
 }
 
+// WaitOrInterrupt waits for the group's goroutines to finish, but returns early
+// with sg.parent.Err() if the parent context is canceled.
+//
+// Behavior:
+// - If the parent context is nil, it simply waits for group completion.
+// - If the parent context is done before Wait returns:
+//   - If gracePeriod <= 0, returns parent.Err() immediately.
+//   - Otherwise waits up to gracePeriod for Wait to finish; if it doesn't, returns parent.Err().
+//
+// - If Wait returns an error that is (or matches) parent.Err(), it is normalized to parent.Err().
 func (sg *SafeGroup) WaitOrInterrupt(gracePeriod time.Duration) error {
 	if sg == nil || sg.Group == nil {
 		return nil
@@ -116,7 +148,7 @@ func (sg *SafeGroup) WaitOrInterrupt(gracePeriod time.Duration) error {
 	}
 }
 
-// normalizeInterruptError maps context-cancellation errors to ctx.Err().
+// normalizeInterruptError maps context cancellation errors to ctx.Err().
 func normalizeInterruptError(ctx context.Context, err error) error {
 	if err == nil {
 		return nil
