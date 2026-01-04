@@ -472,23 +472,19 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 		return w.markFailed(ctx, row, fmt.Errorf("decode drama info failed: %v", err))
 	}
 
-	if bizType == WebhookBizTypePiracyGeneralSearch && w.nodeTotal > 1 {
-		bookID := ""
-		if dramaRaw != nil {
-			if v, ok := dramaRaw["DramaID"]; ok {
-				bookID = strings.TrimSpace(fmt.Sprint(v))
-			}
-		}
-		app := strings.TrimSpace(meta.App)
+	if w.nodeTotal > 1 {
+		bookID, app := shardKeyForWebhookPlan(bizType, row, tasks, meta, dramaRaw)
 		if bookID != "" && app != "" && !w.shouldHandleShard(bookID, app) {
 			log.Debug().
 				Str("record_id", strings.TrimSpace(row.RecordID)).
+				Str("biz_type", bizType).
 				Str("group_id", strings.TrimSpace(row.GroupID)).
 				Str("book_id", bookID).
 				Str("app", app).
 				Int("node_index", w.nodeIndex).
 				Int("node_total", w.nodeTotal).
-				Msg("webhook: skip piracy group due to shard mismatch")
+				Interface("task_ids", taskIDs).
+				Msg("webhook: skip result row due to shard mismatch")
 			return nil
 		}
 	}
@@ -502,16 +498,6 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 		}
 	case WebhookBizTypeVideoScreenCapture:
 		task := pickVideoScreenCaptureTask(tasks)
-		if !w.shouldHandleShard(task.BookID, task.App) {
-			log.Debug().
-				Str("record_id", strings.TrimSpace(row.RecordID)).
-				Str("group_id", strings.TrimSpace(row.GroupID)).
-				Int("node_index", w.nodeIndex).
-				Int("node_total", w.nodeTotal).
-				Interface("task_ids", taskIDs).
-				Msg("webhook: skip video screen capture row due to shard mismatch")
-			return nil
-		}
 		groupUserID := strings.TrimSpace(task.UserID)
 
 		records, err = fetchCaptureRecordsByTaskIDs(ctx, taskIDs, groupUserID)
@@ -931,6 +917,55 @@ func (w *WebhookResultWorker) markFailed(ctx context.Context, row webhookResultR
 		RetryCount: &next,
 		LastError:  &msg,
 	})
+}
+
+func shardKeyForWebhookPlan(
+	bizType string,
+	row webhookResultRow,
+	tasks []taskagent.FeishuTaskRow,
+	meta taskMeta,
+	dramaRaw map[string]any,
+) (bookID, app string) {
+	for _, t := range tasks {
+		if app == "" {
+			app = strings.TrimSpace(t.App)
+		}
+		if bookID == "" {
+			bookID = strings.TrimSpace(t.BookID)
+		}
+		if app != "" && bookID != "" {
+			return bookID, app
+		}
+	}
+	if app == "" {
+		app = strings.TrimSpace(meta.App)
+	}
+
+	if bookID == "" && dramaRaw != nil {
+		if v, ok := dramaRaw["DramaID"]; ok {
+			bookID = strings.TrimSpace(fmt.Sprint(v))
+		}
+	}
+
+	if app != "" && bookID != "" {
+		return bookID, app
+	}
+	// Fallback to GroupID parsing: "{App}_{BookID}_{UserID}".
+	trimmed := strings.TrimSpace(row.GroupID)
+	if trimmed == "" {
+		return bookID, app
+	}
+	parts := strings.Split(trimmed, "_")
+	if len(parts) >= 2 {
+		if app == "" {
+			app = strings.TrimSpace(parts[0])
+		}
+		if bookID == "" {
+			bookID = strings.TrimSpace(parts[1])
+		}
+	}
+	_ = bizType
+	return bookID, app
 }
 
 type taskMeta struct {
