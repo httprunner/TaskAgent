@@ -719,18 +719,29 @@ func (c *Client) storeAppTokenCache(wikiToken, appToken string) {
 }
 
 // FetchBitableRows downloads raw records from a Feishu bitable so callers can read any column.
-func (c *Client) FetchBitableRows(ctx context.Context, rawURL string, opts *TaskQueryOptions) ([]BitableRow, error) {
-	event := log.Info().Str("url", rawURL)
+func (c *Client) FetchBitableRows(ctx context.Context, rawURL string, opts *TaskQueryOptions) (rows []BitableRow, err error) {
+	optionsPayload := ""
 	if opts != nil {
-		optionsPayload := ""
 		if payload, err := json.Marshal(opts); err == nil {
 			optionsPayload = string(payload)
 		} else {
 			optionsPayload = fmt.Sprintf("marshal options failed: %v", err)
 		}
-		event = event.Str("options", optionsPayload)
 	}
-	event.Msg("fetching bitable rows")
+
+	startTime := time.Now()
+	defer func() {
+		elapsedSeconds := time.Since(startTime).Seconds()
+		if err != nil {
+			log.Error().Err(err).Str("url", rawURL).Str("options", optionsPayload).
+				Float64("elapsed_seconds", elapsedSeconds).
+				Int("rows_fetched", len(rows)).Msg("fetched bitable rows failed")
+		} else {
+			log.Info().Str("url", rawURL).Str("options", optionsPayload).
+				Float64("elapsed_seconds", elapsedSeconds).
+				Int("rows_fetched", len(rows)).Msg("fetched bitable rows succeeded")
+		}
+	}()
 
 	if c == nil {
 		return nil, errors.New("feishu: client is nil")
@@ -750,7 +761,7 @@ func (c *Client) FetchBitableRows(ctx context.Context, rawURL string, opts *Task
 	if err != nil {
 		return nil, err
 	}
-	rows := make([]BitableRow, 0, len(records))
+	rows = make([]BitableRow, 0, len(records))
 	for _, rec := range records {
 		rows = append(rows, BitableRow(rec))
 	}
