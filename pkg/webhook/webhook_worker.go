@@ -439,6 +439,17 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 			return err
 		}
 	}
+
+	// Mark the row as started as soon as we can successfully resolve tasks for it.
+	// This helps operators distinguish "not being picked up" from "picked up but waiting".
+	if row.StartAtMs == 0 {
+		nowMs := time.Now().UTC().UnixMilli()
+		if err := w.store.update(ctx, row.RecordID, webhookResultUpdate{StartAtMs: &nowMs}); err != nil {
+			return err
+		}
+		row.StartAtMs = nowMs
+	}
+
 	log.Debug().
 		Str("record_id", strings.TrimSpace(row.RecordID)).
 		Str("biz_type", bizType).
@@ -454,16 +465,16 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 		AllowFailedBeforeToday: w.allowStale,
 	}
 	if !allTasksTerminal(tasks, day, time.Now(), policy) {
+		log.Info().
+			Str("record_id", strings.TrimSpace(row.RecordID)).
+			Str("biz_type", bizType).
+			Str("group_id", groupID).
+			Str("date", day).
+			Interface("task_ids_by_status", nextTaskIDsByStatus).
+			Msg("webhook: plan tasks not ready; waiting for terminal states")
 		logTaskTerminalDebug(tasks, day, time.Now(), policy)
 		w.markCooldown(row.RecordID, "tasks_not_ready")
 		return nil
-	}
-
-	nowMs := time.Now().UTC().UnixMilli()
-	if row.StartAtMs == 0 {
-		if err := w.store.update(ctx, row.RecordID, webhookResultUpdate{StartAtMs: &nowMs}); err != nil {
-			return err
-		}
 	}
 
 	meta := pickTaskMeta(tasks)
