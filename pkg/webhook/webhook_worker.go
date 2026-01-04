@@ -314,10 +314,22 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 		})
 	}
 
+	bizType := strings.TrimSpace(row.BizType)
+	if bizType == "" {
+		bizType = WebhookBizTypePiracyGeneralSearch
+	}
+
 	taskIDs := row.TaskIDs
 	if len(taskIDs) == 0 {
 		w.markCooldown(row.RecordID, "empty_task_ids")
 		return nil
+	}
+	if bizType == WebhookBizTypeSingleURLCapture {
+		merged, err := w.reconcileSingleURLCaptureTaskIDs(ctx, row, taskIDs)
+		if err != nil {
+			return err
+		}
+		taskIDs = merged
 	}
 	tasks, err := w.fetchTasksByIDs(ctx, taskIDs)
 	if err != nil {
@@ -356,11 +368,6 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 		if err := w.store.update(ctx, row.RecordID, webhookResultUpdate{StartAtMs: &nowMs}); err != nil {
 			return err
 		}
-	}
-
-	bizType := strings.TrimSpace(row.BizType)
-	if bizType == "" {
-		bizType = WebhookBizTypePiracyGeneralSearch
 	}
 
 	meta := pickTaskMeta(tasks)
@@ -1059,6 +1066,60 @@ func (w *WebhookResultWorker) fetchPiracyGeneralSearchRecords(
 ) ([]CaptureRecordPayload, error) {
 	userID := strings.TrimSpace(meta.UserID)
 	return fetchCaptureRecordsByTaskIDs(ctx, taskIDs, userID)
+}
+
+func (w *WebhookResultWorker) reconcileSingleURLCaptureTaskIDs(ctx context.Context, row webhookResultRow, taskIDs []int64) ([]int64, error) {
+	if w == nil || w.taskClient == nil {
+		return taskIDs, nil
+	}
+	groupID := strings.TrimSpace(row.GroupID)
+	if groupID == "" || row.DateMs <= 0 {
+		return taskIDs, nil
+	}
+	day := time.UnixMilli(row.DateMs).In(time.Local).Format("2006-01-02")
+	if strings.TrimSpace(day) == "" {
+		return taskIDs, nil
+	}
+
+	fields := taskagent.DefaultTaskFields()
+	groupField := strings.TrimSpace(fields.GroupID)
+	sceneField := strings.TrimSpace(fields.Scene)
+	dateField := strings.TrimSpace(fields.Date)
+	if groupField == "" || sceneField == "" || dateField == "" {
+		return taskIDs, nil
+	}
+
+	filter := taskagent.NewFeishuFilterInfo("and")
+	filter.Conditions = append(filter.Conditions,
+		taskagent.NewFeishuCondition(sceneField, "is", taskagent.SceneSingleURLCapture),
+		taskagent.NewFeishuCondition(groupField, "is", groupID),
+	)
+	if cond := exactDateCondition(dateField, day); cond != nil {
+		filter.Conditions = append(filter.Conditions, cond)
+	}
+
+	table, err := w.taskClient.FetchTaskTableWithOptions(ctx, w.taskTableURL, nil, &taskagent.FeishuTaskQueryOptions{
+		Filter:     filter,
+		Limit:      0,
+		IgnoreView: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if table == nil || len(table.Rows) == 0 {
+		return taskIDs, nil
+	}
+
+	merged := make([]int64, 0, len(taskIDs)+len(table.Rows))
+	merged = append(merged, taskIDs...)
+	for _, t := range table.Rows {
+		if t.TaskID > 0 {
+			merged = append(merged, t.TaskID)
+		}
+	}
+	merged = uniqueInt64(merged)
+	sort.Slice(merged, func(i, j int) bool { return merged[i] < merged[j] })
+	return merged, nil
 }
 
 // filterRecordsByTaskAndUser narrows capture records using TaskID and UserID
