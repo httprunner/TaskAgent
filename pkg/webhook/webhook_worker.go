@@ -323,6 +323,14 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 	if err != nil {
 		return err
 	}
+	nextTaskIDsByStatus := buildTaskIDsByStatus(taskIDs, tasks)
+	if !equalTaskIDsByStatus(row.TaskIDsByStatus, nextTaskIDsByStatus) {
+		if err := w.store.update(ctx, row.RecordID, webhookResultUpdate{
+			TaskIDsByStatus: &nextTaskIDsByStatus,
+		}); err != nil {
+			return err
+		}
+	}
 	policy := taskReadyPolicy{
 		AllowEmpty:             w.allowEmpty,
 		AllowError:             w.allowError,
@@ -897,6 +905,34 @@ func allTasksReady(tasks []taskagent.FeishuTaskRow, taskIDs []int64, now time.Ti
 		}
 	}
 	return true
+}
+
+func buildTaskIDsByStatus(taskIDs []int64, tasks []taskagent.FeishuTaskRow) map[string][]int64 {
+	if len(taskIDs) == 0 {
+		return nil
+	}
+	byID := make(map[int64]taskagent.FeishuTaskRow, len(tasks))
+	for _, t := range tasks {
+		if t.TaskID == 0 {
+			continue
+		}
+		byID[t.TaskID] = t
+	}
+
+	out := make(map[string][]int64)
+	for _, id := range taskIDs {
+		if id <= 0 {
+			continue
+		}
+		task, ok := byID[id]
+		if !ok {
+			out[taskIDsUnknownStatus] = append(out[taskIDsUnknownStatus], id)
+			continue
+		}
+		status := normalizeTaskIDsStatusKey(task.Status)
+		out[status] = append(out[status], id)
+	}
+	return normalizeTaskIDsByStatus(out)
 }
 
 func logTaskReadinessDebug(tasks []taskagent.FeishuTaskRow, taskIDs []int64, now time.Time, policy taskReadyPolicy) {

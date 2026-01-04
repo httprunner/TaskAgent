@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -17,7 +18,6 @@ type webhookResultRow struct {
 	BizType    string
 	GroupID    string
 	Status     string
-	TaskIDs    []int64
 	DramaInfo  string
 	UserInfo   string
 	Records    string
@@ -27,6 +27,11 @@ type webhookResultRow struct {
 	EndAtMs    int64
 	RetryCount int
 	LastError  string
+
+	TaskIDs []int64
+	// TaskIDsByStatus stores a decoded view of TaskIDs field when it is encoded as
+	// a JSON object mapping status -> task id list.
+	TaskIDsByStatus map[string][]int64
 }
 
 type webhookResultStore struct {
@@ -160,13 +165,15 @@ func (s *webhookResultStore) createPending(ctx context.Context, input webhookRes
 		fields[field] = ""
 	}
 	if trimmed := strings.TrimSpace(s.fields.TaskIDs); trimmed != "" {
-		fields[trimmed] = encodeTaskIDsForFeishu(input.TaskIDs)
+		fields[trimmed] = encodeTaskIDsByStatusForFeishu(map[string][]int64{
+			taskIDsDefaultStatus: input.TaskIDs,
+		})
 	}
 	return s.client.CreateBitableRecord(ctx, s.tableURL, fields)
 }
 
 type listCandidatesOptions struct {
-	BatchLimit int
+	BatchLimit  int
 	DatePresets []string
 }
 
@@ -227,7 +234,6 @@ func listCandidatesFilter(statusField, dateField string, datePresets []string) *
 
 type webhookResultUpdate struct {
 	Status     *string
-	TaskIDs    *[]int64
 	DramaInfo  *string
 	StartAtMs  *int64
 	EndAtMs    *int64
@@ -235,6 +241,11 @@ type webhookResultUpdate struct {
 	LastError  *string
 	UserInfo   *string
 	Records    *string
+
+	TaskIDs *[]int64
+	// TaskIDsByStatus, when provided, takes precedence over TaskIDs and is stored
+	// as a JSON object mapping status -> task ids.
+	TaskIDsByStatus *map[string][]int64
 }
 
 func (s *webhookResultStore) update(ctx context.Context, recordID string, upd webhookResultUpdate) error {
@@ -248,8 +259,14 @@ func (s *webhookResultStore) update(ctx context.Context, recordID string, upd we
 	if upd.Status != nil && strings.TrimSpace(s.fields.Status) != "" {
 		fields[s.fields.Status] = strings.TrimSpace(*upd.Status)
 	}
-	if upd.TaskIDs != nil && strings.TrimSpace(s.fields.TaskIDs) != "" {
-		fields[s.fields.TaskIDs] = encodeTaskIDsForFeishu(*upd.TaskIDs)
+	if strings.TrimSpace(s.fields.TaskIDs) != "" {
+		if upd.TaskIDsByStatus != nil {
+			fields[s.fields.TaskIDs] = encodeTaskIDsByStatusForFeishu(*upd.TaskIDsByStatus)
+		} else if upd.TaskIDs != nil {
+			fields[s.fields.TaskIDs] = encodeTaskIDsByStatusForFeishu(map[string][]int64{
+				taskIDsDefaultStatus: *upd.TaskIDs,
+			})
+		}
 	}
 	if upd.DramaInfo != nil && strings.TrimSpace(s.fields.DramaInfo) != "" {
 		fields[s.fields.DramaInfo] = strings.TrimSpace(*upd.DramaInfo)
@@ -287,6 +304,7 @@ func decodeWebhookResultRow(row taskagent.BitableRow, fields webhookResultFields
 	out.GroupID = strings.TrimSpace(toString(row.Fields[fields.GroupID]))
 	out.Status = strings.ToLower(strings.TrimSpace(toString(row.Fields[fields.Status])))
 	out.TaskIDs = parseTaskIDs(row.Fields[fields.TaskIDs])
+	out.TaskIDsByStatus = parseTaskIDsStatusMap(row.Fields[fields.TaskIDs])
 	out.DramaInfo = strings.TrimSpace(toJSONString(row.Fields[fields.DramaInfo]))
 	out.UserInfo = strings.TrimSpace(toJSONString(row.Fields[fields.UserInfo]))
 	out.Records = strings.TrimSpace(toJSONString(row.Fields[fields.Records]))
@@ -304,6 +322,11 @@ func parseTaskIDs(raw any) []int64 {
 	case nil:
 		return nil
 	case string:
+		if m := parseTaskIDsStatusMap(v); len(m) > 0 {
+			ids := uniqueInt64(flattenTaskIDsStatusMap(m))
+			sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+			return ids
+		}
 		return parseTaskIDsFromString(v)
 	case []any:
 		ids := make([]int64, 0, len(v))
@@ -317,9 +340,159 @@ func parseTaskIDs(raw any) []int64 {
 			ids = append(ids, parseTaskIDsFromString(item)...)
 		}
 		return uniqueInt64(ids)
+	case map[string]any:
+		if m := parseTaskIDsStatusMap(v); len(m) > 0 {
+			ids := uniqueInt64(flattenTaskIDsStatusMap(m))
+			sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+			return ids
+		}
+		return nil
 	default:
 		return parseTaskIDsFromString(toString(v))
 	}
+}
+
+const (
+	taskIDsUnknownStatus = "unknown"
+	// taskIDsDefaultStatus is used for newly created webhook rows. It represents
+	// the initial state before the worker refreshes task statuses.
+	taskIDsDefaultStatus = WebhookResultPending
+)
+
+func parseTaskIDsStatusMap(raw any) map[string][]int64 {
+	switch v := raw.(type) {
+	case nil:
+		return nil
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return nil
+		}
+		if !strings.HasPrefix(trimmed, "{") || !strings.HasSuffix(trimmed, "}") {
+			return nil
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
+			return nil
+		}
+		return normalizeTaskIDsStatusMap(decoded)
+	case map[string]any:
+		return normalizeTaskIDsStatusMap(v)
+	default:
+		return nil
+	}
+}
+
+func normalizeTaskIDsStatusMap(raw map[string]any) map[string][]int64 {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make(map[string][]int64, len(raw))
+	for k, v := range raw {
+		status := normalizeTaskIDsStatusKey(k)
+		ids := parseTaskIDs(v)
+		if len(ids) == 0 {
+			continue
+		}
+		out[status] = append(out[status], ids...)
+	}
+	return normalizeTaskIDsByStatus(out)
+}
+
+func normalizeTaskIDsStatusKey(status string) string {
+	trimmed := strings.ToLower(strings.TrimSpace(status))
+	if trimmed == "" {
+		return taskIDsUnknownStatus
+	}
+	return trimmed
+}
+
+func normalizeTaskIDsByStatus(in map[string][]int64) map[string][]int64 {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string][]int64, len(in))
+	for k, ids := range in {
+		status := normalizeTaskIDsStatusKey(k)
+		if len(ids) == 0 {
+			continue
+		}
+		seen := make(map[int64]struct{}, len(ids))
+		uniq := make([]int64, 0, len(ids))
+		for _, id := range ids {
+			if id <= 0 {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			uniq = append(uniq, id)
+		}
+		if len(uniq) == 0 {
+			continue
+		}
+		sort.Slice(uniq, func(i, j int) bool { return uniq[i] < uniq[j] })
+		out[status] = uniq
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func equalTaskIDsByStatus(a, b map[string][]int64) bool {
+	if len(a) == 0 && len(b) == 0 {
+		return true
+	}
+	if len(a) != len(b) {
+		return false
+	}
+	for k, av := range a {
+		bv, ok := b[k]
+		if !ok {
+			return false
+		}
+		if len(av) != len(bv) {
+			return false
+		}
+		for i := range av {
+			if av[i] != bv[i] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func flattenTaskIDsStatusMap(m map[string][]int64) []int64 {
+	if len(m) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	out := make([]int64, 0, len(m)*4)
+	for _, k := range keys {
+		ids := m[k]
+		out = append(out, ids...)
+	}
+	return out
+}
+
+func encodeTaskIDsByStatusForFeishu(m map[string][]int64) string {
+	normalized := normalizeTaskIDsByStatus(m)
+	if len(normalized) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(normalized)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 func parseTaskIDsFromString(v string) []int64 {
@@ -360,25 +533,6 @@ func uniqueInt64(v []int64) []int64 {
 		out = append(out, n)
 	}
 	return out
-}
-
-func encodeTaskIDsForFeishu(taskIDs []int64) string {
-	if len(taskIDs) == 0 {
-		return ""
-	}
-	seen := make(map[int64]struct{}, len(taskIDs))
-	out := make([]string, 0, len(taskIDs))
-	for _, id := range taskIDs {
-		if id <= 0 {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		out = append(out, fmt.Sprintf("%d", id))
-	}
-	return strings.Join(out, ",")
 }
 
 func toString(v any) string {

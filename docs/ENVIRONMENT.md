@@ -78,7 +78,7 @@ TaskAgent exposes per-table override knobs so you can align with custom schemas 
 | `WEBHOOK_FIELD_PARENT_TASK_ID` | `ParentTaskID` | Parent task ID (综合页搜索 TaskID). |
 | `WEBHOOK_FIELD_GROUPID` | `GroupID` | Group identifier (`{App}_{BookID}_{UserID}`). |
 | `WEBHOOK_FIELD_STATUS` | `Status` | Webhook delivery state (pending/success/failed/error). |
-| `WEBHOOK_FIELD_TASKIDS` | `TaskIDs` | Text TaskID list (comma-separated numeric IDs like `123,456`). |
+| `WEBHOOK_FIELD_TASKIDS` | `TaskIDs` | Text JSON map `{status: [taskID...]}` (e.g. `{"pending":[123,456],"success":[789],"unknown":[999]}`). |
 | `WEBHOOK_FIELD_DRAMAINFO` | `DramaInfo` | Raw drama row fields JSON (text). |
 | `WEBHOOK_FIELD_USERINFO` | `UserInfo` | Reserved user info JSON (text). |
 | `WEBHOOK_FIELD_RECORDS` | `Records` | Flattened capture records JSON (text). |

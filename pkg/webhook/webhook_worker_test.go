@@ -1,6 +1,8 @@
 package webhook
 
 import (
+	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
@@ -24,6 +26,19 @@ func TestParseTaskIDs(t *testing.T) {
 				map[string]any{"text": "123"},
 				map[string]any{"value": "456"},
 				map[string]any{"text": "123"},
+			},
+			want: []int64{123, 456},
+		},
+		{
+			name: "json_status_map_string",
+			in:   `{"success":[123],"failed":["456","123"],"unknown":[0]}`,
+			want: []int64{123, 456},
+		},
+		{
+			name: "json_status_map_object",
+			in: map[string]any{
+				"success": []any{json.Number("123")},
+				"failed":  []any{"456", "123"},
 			},
 			want: []int64{123, 456},
 		},
@@ -79,6 +94,23 @@ func TestAllTasksReady(t *testing.T) {
 	}
 	if allTasksReady(tasks[:2], []int64{1, 999}, now, taskReadyPolicy{AllowError: true}) {
 		t.Fatalf("expected not ready when task missing")
+	}
+}
+
+func TestBuildTaskIDsByStatus(t *testing.T) {
+	tasks := []taskagent.FeishuTaskRow{
+		{TaskID: 1, Status: "Running"},
+		{TaskID: 2, Status: ""},
+		{TaskID: 3, Status: taskagent.StatusSuccess},
+	}
+	got := buildTaskIDsByStatus([]int64{1, 2, 3, 999}, tasks)
+	want := map[string][]int64{
+		"running": []int64{1},
+		"success": []int64{3},
+		"unknown": []int64{2, 999},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got=%v want=%v", got, want)
 	}
 }
 

@@ -22,7 +22,9 @@ Webhook 结果表用于存储 webhook 的关联信息和推送结果，核心字
 - `ParentTaskID`：综合页搜索 TaskID（用于区分同一个 GroupID 在不同父任务下的唯一性）
 - `GroupID`：`{App}_{BookID}_{UserID}`
 - `Status`：`pending/success/failed/error`
-- `TaskIDs`：文本（逗号分隔的 TaskID 列表，例如 `123,456`）
+- `TaskIDs`：文本（JSON），存储为 `{status: [taskID...]}` 的 map，用于展示该 webhook 推送计划下各任务的状态分布
+  - 示例：`{"pending":[123,456],"running":[789],"success":[321],"failed":[654],"error":[987],"unknown":[999]}`
+  - 说明：`unknown` 表示任务行缺失（TaskID 回查不到）或任务 Status 为空
 - `DramaInfo`：文本（JSON），创建时按 `BookID` 从剧单表拉取整行 fields 后序列化
 - `UserInfo`：文本（JSON，占位）
 - `Records`：文本（JSON，占位/或写入扁平化 records）
@@ -35,7 +37,7 @@ Webhook 结果表用于存储 webhook 的关联信息和推送结果，核心字
 
 字段含义补充（按 BizType）：
 - `BizType=piracy_general_search`：`ParentTaskID`、`GroupID` 必填，用于确定“同一父任务下的同一组”。
-- `BizType=video_screen_capture`：当前只强依赖 `TaskIDs=[TaskID]`；`ParentTaskID/GroupID/DramaInfo` 可先为空（后续 BookID 修复后再补齐）。
+- `BizType=video_screen_capture`：当前只强依赖单个 TaskID（写入 `TaskIDs={"pending":[TaskID]}`）；`ParentTaskID/GroupID/DramaInfo` 可先为空（后续 BookID 修复后再补齐）。
 - `BizType=single_url_capture`：`TaskIDs` 按 `(GroupID, Date)` 聚合单链任务 ID 列表；`GroupID` 与 SingleURLWorker 中的 group 规则保持一致。
 
 环境变量：
@@ -68,7 +70,7 @@ Webhook 结果表用于存储 webhook 的关联信息和推送结果，核心字
 - 每个录屏 TaskID 对应结果表一条记录：
   - `BizType=video_screen_capture`
   - `Status=pending`
-  - `TaskIDs`：文本字段，填入该 TaskID 的数字字符串（例如 `123`）
+  - `TaskIDs`：文本字段，写入状态 map（例如 `{"pending":[123]}`）
   - `DramaInfo`：若任务表已填 `BookID`，可按 `BookID` 查询剧单表并序列化写入；若缺失 `BookID` 则先写 `{}`，worker 仍可继续推送（仅 drama 维度信息为空）
   - `Date`：任务表 `Date` 的日粒度值（ExactDate），用于后续按日筛选
   - `CreateAt`：记录创建时间
@@ -107,7 +109,7 @@ worker 定时轮询 webhook 结果表：
      - `Drama`：优先使用结果表里的 `DramaInfo`（fields JSON）构造 payload
      - `Records`：按 `TaskIDs` 从 SQLite（优先）或 Feishu 结果表汇总记录
    - `BizType=video_screen_capture`：
-     - 结果表仅提供单个 TaskID（写入 `TaskIDs` 文本字段）；worker 需要回查任务表拿到该 TaskID 的 `App/Scene/Params/ItemID/...`
+     - 结果表仅提供单个 TaskID（写入 `TaskIDs={"pending":[TaskID]}`）；worker 需要回查任务表拿到该 TaskID 的 `App/Scene/Params/ItemID/...`
      - `Records`：按 “`Scene=视频录屏采集` + `ItemID`” 查询采集结果表，仅取最新 1 条
      - `Drama`：可先为空或由 Params 兜底（当前 BookID 为空，暂不强依赖剧单表）
    - `BizType=single_url_capture`：
@@ -149,7 +151,7 @@ TaskAgent CLI（可选）：
 ## 故障排查速查表
 
 - 若 `WEBHOOK_BITABLE_URL` 行长期 `pending/failed`：
-  - 检查 `TaskIDs` 是否完整且为数字字符串；worker 会以该列表为准做就绪判定
+  - 检查 `TaskIDs` JSON 是否包含所有应关联的 TaskID；worker 会以该集合为准做就绪判定，并持续回写状态分布
   - 检查任务表中这些 TaskID 的 `Status` 是否已到 `success/error`
   - 查看 `LastError` 和 `RetryCount`，达到 3 次后会转 `error`
 - `BizType=video_screen_capture` 额外检查项（统一方案）：

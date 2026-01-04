@@ -2,22 +2,21 @@ package webhook
 
 import "testing"
 
-func TestEncodeTaskIDsForFeishu(t *testing.T) {
+func TestEncodeTaskIDsByStatusForFeishu(t *testing.T) {
 	cases := []struct {
 		name string
-		in   []int64
+		in   map[string][]int64
 		want string
 	}{
 		{name: "empty", in: nil, want: ""},
-		{name: "single", in: []int64{123}, want: "123"},
-		{name: "multiple", in: []int64{123, 456}, want: "123,456"},
-		{name: "dedupe_and_filter_non_positive", in: []int64{0, 123, 123, -1, 456}, want: "123,456"},
+		{name: "pending_single", in: map[string][]int64{"pending": []int64{123}}, want: "{\"pending\":[123]}"},
+		{name: "normalize_and_sort", in: map[string][]int64{"SUCCESS": []int64{456, 123, 123, 0}, "failed": []int64{999, -1}}, want: "{\"failed\":[999],\"success\":[123,456]}"},
 	}
 
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := encodeTaskIDsForFeishu(tc.in)
+			got := encodeTaskIDsByStatusForFeishu(tc.in)
 			if got != tc.want {
 				t.Fatalf("got=%q want=%q", got, tc.want)
 			}
