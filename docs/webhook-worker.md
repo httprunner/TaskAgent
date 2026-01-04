@@ -4,7 +4,7 @@ TaskAgent webhook 推送机制统一为「Webhook 结果表」：
 
 - **统一机制**：Webhook 结果表（`WEBHOOK_BITABLE_URL`）+ `WebhookResultWorker`
   - 以结果表行的 `Status in {pending, failed}` 作为触发器；
-  - 以结果表行的 `TaskIDs`（1-N）作为就绪判定与数据汇总主键；
+  - 以结果表行的 `BizType+GroupID+Date` 在任务状态表中聚合该组所有任务，作为就绪判定与数据汇总主键；
   - 通过 `BizType` 区分不同业务的汇总策略（例如：综合页搜索→盗版筛查的 Group 聚合、视频录屏采集的 Single 任务）。
 
 ## 统一机制：Webhook 结果表（WEBHOOK_BITABLE_URL）
@@ -12,7 +12,7 @@ TaskAgent webhook 推送机制统一为「Webhook 结果表」：
 说明：
 - `BizType=piracy_general_search`（综合页搜索→盗版筛查，Group 聚合推送）。
 - `BizType=video_screen_capture`（视频录屏采集，Single 推送）及其 Creator/回填器（外部系统创建任务时需要）。
-- `BizType=single_url_capture`（单个链接采集），由 `WebhookResultCreator` 从任务表聚合 TaskIDs，`WebhookResultWorker` 直接基于任务状态构造 payload 并推送。
+- `BizType=single_url_capture`（单个链接采集），推送计划可由外部工作流或 `WebhookResultCreator` 创建；`WebhookResultWorker` 按 `BizType+GroupID+Date` 聚合任务状态并推送，同时回写 `TaskIDs` 状态分布。
 
 ### 表定义（Feishu 多维表格）
 
@@ -22,9 +22,9 @@ Webhook 结果表用于存储 webhook 的关联信息和推送结果，核心字
 - `ParentTaskID`：综合页搜索 TaskID（用于区分同一个 GroupID 在不同父任务下的唯一性）
 - `GroupID`：`{App}_{BookID}_{UserID}`
 - `Status`：`pending/success/failed/error`
-- `TaskIDs`：文本（JSON），存储为 `{status: [taskID...]}` 的 map，用于展示该 webhook 推送计划下各任务的状态分布
+- `TaskIDs`：文本（JSON），存储为 `{status: [taskID...]}` 的 map，用于展示该 webhook 推送计划下各任务的状态分布（由 worker 回写）
   - 示例：`{"pending":[123,456],"running":[789],"success":[321],"failed":[654],"error":[987],"unknown":[999]}`
-  - 说明：`unknown` 表示任务行缺失（TaskID 回查不到）或任务 Status 为空
+  - 说明：`unknown` 表示任务 Status 为空（或历史数据/异常数据导致无法解析）
 - `DramaInfo`：文本（JSON），创建时按 `BookID` 从剧单表拉取整行 fields 后序列化
 - `UserInfo`：文本（JSON，占位）
 - `Records`：文本（JSON，占位/或写入扁平化 records）
@@ -38,7 +38,7 @@ Webhook 结果表用于存储 webhook 的关联信息和推送结果，核心字
 字段含义补充（按 BizType）：
 - `BizType=piracy_general_search`：`ParentTaskID`、`GroupID` 必填，用于确定“同一父任务下的同一组”。
 - `BizType=video_screen_capture`：当前只强依赖单个 TaskID（写入 `TaskIDs={"pending":[TaskID]}`）；`ParentTaskID/GroupID/DramaInfo` 可先为空（后续 BookID 修复后再补齐）。
-- `BizType=single_url_capture`：`TaskIDs` 按 `(GroupID, Date)` 聚合单链任务 ID 列表；`GroupID` 与 SingleURLWorker 中的 group 规则保持一致。
+- `BizType=single_url_capture`：推送计划按 `(BizType, GroupID, Date)` 去重；任务集合由 worker 在任务表中按 `BizType+GroupID+Date` 聚合并回写到 `TaskIDs`。
 
 环境变量：
 - `WEBHOOK_BITABLE_URL`：Webhook 结果表链接
@@ -90,8 +90,8 @@ Webhook 结果表用于存储 webhook 的关联信息和推送结果，核心字
 - `Date is ExactDate(YYYY-MM-DD)`（若配置了 `ScanDate`）
 - `Status in {"success","failed","error"}`（通过 `children(or)` 组合实现）
 
-如果希望常驻进程**仅扫描当天任务**，可配置 `WebhookResultCreatorConfig.ScanDateToday=true`。  
-creator 会在每轮扫描前把 `ScanDate` 更新为本地当天日期，从而只拉取当天的单链任务；  
+如果希望常驻进程**仅扫描当天任务**，可配置 `WebhookResultCreatorConfig.ScanDateToday=true`。
+creator 会在每轮扫描前把 `ScanDate` 更新为本地当天日期，从而只拉取当天的单链任务；
 但 webhook 结果表 `Date` 字段仍以**任务自身的 `Date`** 为准（仅在任务缺失 `Date` 时才回退到 `ScanDate`）。
 
 注意：若任务表中 `Scene`/`Status` 是单选（枚举）字段，且其选项里不包含上述 value（最常见是 `Status` 没有 `error` 选项），Feishu 会返回 `code=1254018 msg=InvalidFilter`，导致本轮扫描失败。此时请在任务表中补齐对应枚举选项（确保 `Scene`/`Status` 的选项包含筛选值），再开启该功能。
@@ -101,9 +101,10 @@ creator 会在每轮扫描前把 `ScanDate` 更新为本地当天日期，从而
 worker 定时轮询 webhook 结果表：
 
 1. 候选行：`Status in {pending, failed}`（`error` 跳过）；可通过 `WebhookResultWorkerConfig.DatePresets` 限制只扫描特定日期（例如 `DatePresets=[Today, Yesterday]` 仅扫描“今天 + 昨天”）。
-2. 就绪判定：对候选行的 `TaskIDs` 到任务表按 TaskID 查询状态
-   - 若所有 TaskID 的 `Status in {success, error}` → 触发推送
-   - 若存在 `pending/failed/dispatched/running/空/缺失行` → 本轮跳过等待下一次轮询
+2. 就绪判定：对候选行按 `BizType+GroupID+Date` 到任务表筛选出该组所有任务并查询状态
+   - 若所有任务的 `Status in {success, error}` → 触发推送
+   - 若存在 `pending/failed/dispatched/running/空` 等非终态 → 本轮跳过等待下一次轮询
+   - 若按筛选条件查不到任何任务行 → 将该结果行标记为 `Status=error` 并写入 `LastError`
 3. 推送 payload：结构保持不变（drama fields + records）
    - `BizType=piracy_general_search`：
      - `Drama`：优先使用结果表里的 `DramaInfo`（fields JSON）构造 payload
@@ -151,8 +152,8 @@ TaskAgent CLI（可选）：
 ## 故障排查速查表
 
 - 若 `WEBHOOK_BITABLE_URL` 行长期 `pending/failed`：
-  - 检查 `TaskIDs` JSON 是否包含所有应关联的 TaskID；worker 会以该集合为准做就绪判定，并持续回写状态分布
-  - 检查任务表中这些 TaskID 的 `Status` 是否已到 `success/error`
+  - 检查任务表中该 `BizType+GroupID+Date` 下的任务 `Status` 是否已全部到 `success/error`
+  - 检查结果表的 `TaskIDs` 状态分布（由 worker 回写），确认是否仍存在 `dispatched/running/pending/failed` 等非终态
   - 查看 `LastError` 和 `RetryCount`，达到 3 次后会转 `error`
 - `BizType=video_screen_capture` 额外检查项（统一方案）：
   - Creator/回填器是否已覆盖到该 TaskID（否则结果表不会出现待推送行）

@@ -59,41 +59,42 @@ func TestParseTaskIDs(t *testing.T) {
 	}
 }
 
-func TestAllTasksReady(t *testing.T) {
-	now := time.Date(2025, 12, 16, 10, 0, 0, 0, time.Local)
-	yesterday := now.Add(-24 * time.Hour)
-
+func TestAllTasksTerminal(t *testing.T) {
+	now := time.Date(2026, 1, 4, 10, 0, 0, 0, time.Local)
 	tasks := []taskagent.FeishuTaskRow{
 		{TaskID: 1, Status: taskagent.StatusSuccess},
 		{TaskID: 2, Status: taskagent.StatusError},
-		{TaskID: 3, Status: ""},
-		{TaskID: 4, Status: taskagent.StatusFailed, Datetime: &yesterday},
-		{TaskID: 5, Status: taskagent.StatusFailed, Datetime: &now},
+		{TaskID: 3, Status: "dispatched"},
+		{TaskID: 4, Status: ""},
+		{TaskID: 5, Status: taskagent.StatusFailed},
 	}
 
-	if !allTasksReady(tasks[:2], []int64{1, 2}, now, taskReadyPolicy{AllowError: true}) {
-		t.Fatalf("expected ready for success/error")
+	if !allTasksTerminal(tasks[:2], "2026-01-04", now, taskTerminalPolicy{AllowError: true}) {
+		t.Fatalf("expected terminal for success/error only")
 	}
-	if allTasksReady(tasks, []int64{1, 2, 3}, now, taskReadyPolicy{AllowError: true}) {
-		t.Fatalf("expected not ready when empty status disallowed")
+	if allTasksTerminal(tasks[:3], "2026-01-04", now, taskTerminalPolicy{AllowError: true}) {
+		t.Fatalf("expected not terminal when dispatched exists")
 	}
-	if !allTasksReady(tasks, []int64{1, 2, 3}, now, taskReadyPolicy{AllowEmpty: true, AllowError: true}) {
-		t.Fatalf("expected ready when empty status allowed")
+	if allTasksTerminal(tasks[:4], "2026-01-04", now, taskTerminalPolicy{AllowError: true}) {
+		t.Fatalf("expected not terminal when empty status exists")
 	}
-	if allTasksReady(tasks, []int64{1, 2, 4}, now, taskReadyPolicy{AllowEmpty: true, AllowError: true}) {
-		t.Fatalf("expected not ready when failed not allowed")
+	if !allTasksTerminal([]taskagent.FeishuTaskRow{
+		{TaskID: 1, Status: taskagent.StatusSuccess},
+		{TaskID: 2, Status: taskagent.StatusError},
+		{TaskID: 4, Status: ""},
+	}, "2026-01-04", now, taskTerminalPolicy{AllowError: true, AllowEmpty: true}) {
+		t.Fatalf("expected terminal when empty status is allowed")
 	}
-	if !allTasksReady(tasks, []int64{1, 2, 4}, now, taskReadyPolicy{AllowEmpty: true, AllowError: true, AllowFailedBeforeToday: true}) {
-		t.Fatalf("expected ready when failed is before today and allowed")
+	if allTasksTerminal(tasks[:2], "2026-01-04", now, taskTerminalPolicy{AllowError: false}) {
+		t.Fatalf("expected not terminal when error is disallowed")
 	}
-	if allTasksReady(tasks, []int64{1, 2, 5}, now, taskReadyPolicy{AllowEmpty: true, AllowError: true, AllowFailedBeforeToday: true}) {
-		t.Fatalf("expected not ready when failed is today")
+
+	day := "2026-01-03"
+	if !allTasksTerminal([]taskagent.FeishuTaskRow{{TaskID: 5, Status: taskagent.StatusFailed}}, day, now, taskTerminalPolicy{AllowFailedBeforeToday: true}) {
+		t.Fatalf("expected terminal when failed is before today and allowed")
 	}
-	if allTasksReady(tasks[:2], []int64{1, 2}, now, taskReadyPolicy{AllowError: false}) {
-		t.Fatalf("expected not ready when error is disallowed")
-	}
-	if allTasksReady(tasks[:2], []int64{1, 999}, now, taskReadyPolicy{AllowError: true}) {
-		t.Fatalf("expected not ready when task missing")
+	if allTasksTerminal([]taskagent.FeishuTaskRow{{TaskID: 5, Status: taskagent.StatusFailed}}, "2026-01-04", now, taskTerminalPolicy{AllowFailedBeforeToday: true}) {
+		t.Fatalf("expected not terminal when failed is today")
 	}
 }
 
@@ -101,13 +102,14 @@ func TestBuildTaskIDsByStatus(t *testing.T) {
 	tasks := []taskagent.FeishuTaskRow{
 		{TaskID: 1, Status: "Running"},
 		{TaskID: 2, Status: ""},
+		{TaskID: 999, Status: "unknown"},
 		{TaskID: 3, Status: taskagent.StatusSuccess},
 	}
-	got := buildTaskIDsByStatus([]int64{1, 2, 3, 999}, tasks)
+	got := buildTaskIDsByStatusFromTasks(tasks)
 	want := map[string][]int64{
-		"running": []int64{1},
-		"success": []int64{3},
-		"unknown": []int64{2, 999},
+		"running": {1},
+		"success": {3},
+		"unknown": {2, 999},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got=%v want=%v", got, want)
