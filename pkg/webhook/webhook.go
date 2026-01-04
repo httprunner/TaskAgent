@@ -265,7 +265,7 @@ func flattenDramaFields(raw map[string]any, schema taskagent.FeishuDramaFields) 
 			}
 			continue
 		}
-		payload[engName] = nil
+		payload[engName] = ""
 	}
 	return payload
 }

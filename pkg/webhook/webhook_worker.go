@@ -482,6 +482,15 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 	if err != nil {
 		return w.markFailed(ctx, row, fmt.Errorf("decode drama info failed: %v", err))
 	}
+	if dramaRaw == nil {
+		dramaRaw = make(map[string]any)
+	}
+	if v, ok := dramaRaw["DramaID"]; !ok || strings.TrimSpace(fmt.Sprint(v)) == "" {
+		bookID, _ := shardKeyForWebhookPlan(bizType, row, tasks, meta, dramaRaw)
+		if strings.TrimSpace(bookID) != "" {
+			dramaRaw["DramaID"] = strings.TrimSpace(bookID)
+		}
+	}
 
 	if w.nodeTotal > 1 {
 		bookID, app := shardKeyForWebhookPlan(bizType, row, tasks, meta, dramaRaw)
@@ -616,6 +625,9 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 }
 
 func buildWebhookResultPayload(dramaRaw map[string]any, records []CaptureRecordPayload) map[string]any {
+	if dramaRaw == nil {
+		dramaRaw = map[string]any{}
+	}
 	payload := flattenDramaFields(dramaRaw, taskagent.DefaultDramaFields())
 	for key, val := range dramaRaw {
 		trimmed := strings.TrimSpace(key)
@@ -624,6 +636,14 @@ func buildWebhookResultPayload(dramaRaw map[string]any, records []CaptureRecordP
 		}
 		if _, exists := payload[trimmed]; exists {
 			continue
+		}
+		if val == nil {
+			continue
+		}
+		if s, ok := val.(string); ok {
+			if strings.TrimSpace(s) == "" {
+				continue
+			}
 		}
 		payload[trimmed] = val
 	}

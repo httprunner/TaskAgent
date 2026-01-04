@@ -736,6 +736,10 @@ func (c *Client) FetchBitableRows(ctx context.Context, rawURL string, opts *Task
 			log.Error().Err(err).Str("url", rawURL).Str("options", optionsPayload).
 				Float64("elapsed_seconds", elapsedSeconds).
 				Int("rows_fetched", len(rows)).Msg("fetched bitable rows failed")
+		} else if len(rows) == 0 {
+			log.Debug().Str("options", optionsPayload).
+				Float64("elapsed_seconds", elapsedSeconds).
+				Int("rows_fetched", len(rows)).Msg("fetched bitable rows no matches")
 		} else {
 			log.Info().Str("url", rawURL).Str("options", optionsPayload).
 				Float64("elapsed_seconds", elapsedSeconds).
