@@ -11,6 +11,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
+	larkdrive "github.com/larksuite/oapi-sdk-go/v3/service/drive/v1"
 )
 
 const (
@@ -44,6 +47,59 @@ func (c *Client) UploadBitableMedia(ctx context.Context, appToken string, fileNa
 		parentType = driveParentTypeBitableImage
 	}
 
+	if c.useHTTP() {
+		return c.uploadBitableMediaHTTP(ctx, appToken, fileName, content, parentType)
+	}
+	return c.uploadBitableMediaSDK(ctx, appToken, fileName, content, parentType)
+}
+
+func (c *Client) uploadBitableMediaSDK(ctx context.Context, appToken, fileName string, content []byte, parentType string) (string, error) {
+	if c == nil || c.larkClient == nil {
+		return "", fmt.Errorf("feishu: sdk client is nil")
+	}
+	token, err := c.getTenantAccessToken(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	sdkParentType := parentType
+	switch parentType {
+	case driveParentTypeBitableImage:
+		sdkParentType = larkdrive.ParentTypeUploadAllMediaBitableImage
+	case driveParentTypeBitableFile:
+		sdkParentType = larkdrive.ParentTypeUploadAllMediaBitableFile
+	}
+
+	body := larkdrive.NewUploadAllMediaReqBodyBuilder().
+		FileName(fileName).
+		ParentType(sdkParentType).
+		ParentNode(appToken).
+		Size(len(content)).
+		File(bytes.NewReader(content)).
+		Build()
+
+	req := larkdrive.NewUploadAllMediaReqBuilder().
+		Body(body).
+		Build()
+
+	opts := c.tenantRequestOptions(token)
+	resp, err := c.larkClient.Drive.V1.Media.UploadAll(ctx, req, opts...)
+	if err != nil {
+		return "", fmt.Errorf("feishu: upload media request failed: %w", err)
+	}
+	if resp == nil || resp.ApiResp == nil {
+		return "", fmt.Errorf("feishu: empty response when uploading media")
+	}
+	if err := ensureSDKSuccess("upload media", resp.Success(), resp.Code, resp.Msg, resp.RequestId()); err != nil {
+		return "", err
+	}
+	if resp.Data == nil || strings.TrimSpace(larkcore.StringValue(resp.Data.FileToken)) == "" {
+		return "", fmt.Errorf("feishu: upload response missing file_token")
+	}
+	return strings.TrimSpace(larkcore.StringValue(resp.Data.FileToken)), nil
+}
+
+func (c *Client) uploadBitableMediaHTTP(ctx context.Context, appToken, fileName string, content []byte, parentType string) (string, error) {
 	token, err := c.getTenantAccessToken(ctx)
 	if err != nil {
 		return "", err

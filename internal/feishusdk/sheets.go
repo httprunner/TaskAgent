@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 	larksheets "github.com/larksuite/oapi-sdk-go/v3/service/sheets/v3"
 )
 
@@ -225,12 +226,43 @@ func (c *Client) fetchSheetValues(ctx context.Context, ref SpreadsheetRef, sheet
 	}
 
 	rangeStr := fmt.Sprintf("%s!A1:%s%d", sheetRangeReference(sheet), columnLabel(colCount), rowCount)
-	path := fmt.Sprintf("/open-apis/sheets/v2/spreadsheets/%s/values/%s", ref.SpreadsheetToken, url.PathEscape(rangeStr))
 
-	_, raw, err := c.doJSONRequest(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return nil, err
+	var raw []byte
+	if c.useHTTP() {
+		path := fmt.Sprintf("/open-apis/sheets/v2/spreadsheets/%s/values/%s", ref.SpreadsheetToken, url.PathEscape(rangeStr))
+		_, body, err := c.doJSONRequest(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return nil, err
+		}
+		raw = body
+	} else {
+		token, err := c.getTenantAccessToken(ctx)
+		if err != nil {
+			return nil, err
+		}
+		req := &larkcore.ApiReq{
+			HttpMethod: http.MethodGet,
+			ApiPath:    "/open-apis/sheets/v2/spreadsheets/:spreadsheet_token/values/:range",
+			PathParams: larkcore.PathParams{
+				"spreadsheet_token": ref.SpreadsheetToken,
+				"range":             rangeStr,
+			},
+			QueryParams:               larkcore.QueryParams{},
+			SupportedAccessTokenTypes: []larkcore.AccessTokenType{larkcore.AccessTokenTypeTenant, larkcore.AccessTokenTypeUser},
+		}
+		resp, err := c.doSDKOpenAPIRequest(ctx, req, c.tenantRequestOptions(token)...)
+		if err != nil {
+			return nil, err
+		}
+		if resp == nil {
+			return nil, errors.New("feishu: empty response when getting sheet values")
+		}
+		if resp.StatusCode >= 400 {
+			return nil, fmt.Errorf("feishu: http %d response: %s", resp.StatusCode, strings.TrimSpace(string(resp.RawBody)))
+		}
+		raw = resp.RawBody
 	}
+
 	var resp struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
@@ -290,9 +322,39 @@ func (c *Client) createSheet(ctx context.Context, ref SpreadsheetRef, title stri
 		},
 	}
 
-	_, raw, err := c.doJSONRequest(ctx, http.MethodPost, fmt.Sprintf("/open-apis/sheets/v2/spreadsheets/%s/sheets_batch_update", ref.SpreadsheetToken), payload)
-	if err != nil {
-		return "", err
+	var raw []byte
+	if c.useHTTP() {
+		_, body, err := c.doJSONRequest(ctx, http.MethodPost, fmt.Sprintf("/open-apis/sheets/v2/spreadsheets/%s/sheets_batch_update", ref.SpreadsheetToken), payload)
+		if err != nil {
+			return "", err
+		}
+		raw = body
+	} else {
+		token, err := c.getTenantAccessToken(ctx)
+		if err != nil {
+			return "", err
+		}
+		req := &larkcore.ApiReq{
+			HttpMethod: http.MethodPost,
+			ApiPath:    "/open-apis/sheets/v2/spreadsheets/:spreadsheet_token/sheets_batch_update",
+			Body:       payload,
+			PathParams: larkcore.PathParams{
+				"spreadsheet_token": ref.SpreadsheetToken,
+			},
+			QueryParams:               larkcore.QueryParams{},
+			SupportedAccessTokenTypes: []larkcore.AccessTokenType{larkcore.AccessTokenTypeTenant, larkcore.AccessTokenTypeUser},
+		}
+		resp, err := c.doSDKOpenAPIRequest(ctx, req, c.tenantRequestOptions(token)...)
+		if err != nil {
+			return "", err
+		}
+		if resp == nil {
+			return "", errors.New("feishu: empty response when adding sheet")
+		}
+		if resp.StatusCode >= 400 {
+			return "", fmt.Errorf("feishu: http %d response: %s", resp.StatusCode, strings.TrimSpace(string(resp.RawBody)))
+		}
+		raw = resp.RawBody
 	}
 
 	var resp struct {
@@ -345,9 +407,39 @@ func (c *Client) writeSheetValues(ctx context.Context, ref SpreadsheetRef, sheet
 		"valueInputOption": "RAW",
 	}
 
-	_, raw, err := c.doJSONRequest(ctx, http.MethodPost, fmt.Sprintf("/open-apis/sheets/v2/spreadsheets/%s/values_batch_update", ref.SpreadsheetToken), payload)
-	if err != nil {
-		return err
+	var raw []byte
+	if c.useHTTP() {
+		_, body, err := c.doJSONRequest(ctx, http.MethodPost, fmt.Sprintf("/open-apis/sheets/v2/spreadsheets/%s/values_batch_update", ref.SpreadsheetToken), payload)
+		if err != nil {
+			return err
+		}
+		raw = body
+	} else {
+		token, err := c.getTenantAccessToken(ctx)
+		if err != nil {
+			return err
+		}
+		req := &larkcore.ApiReq{
+			HttpMethod: http.MethodPost,
+			ApiPath:    "/open-apis/sheets/v2/spreadsheets/:spreadsheet_token/values_batch_update",
+			Body:       payload,
+			PathParams: larkcore.PathParams{
+				"spreadsheet_token": ref.SpreadsheetToken,
+			},
+			QueryParams:               larkcore.QueryParams{},
+			SupportedAccessTokenTypes: []larkcore.AccessTokenType{larkcore.AccessTokenTypeTenant, larkcore.AccessTokenTypeUser},
+		}
+		resp, err := c.doSDKOpenAPIRequest(ctx, req, c.tenantRequestOptions(token)...)
+		if err != nil {
+			return err
+		}
+		if resp == nil {
+			return errors.New("feishu: empty response when updating sheet values")
+		}
+		if resp.StatusCode >= 400 {
+			return fmt.Errorf("feishu: http %d response: %s", resp.StatusCode, strings.TrimSpace(string(resp.RawBody)))
+		}
+		raw = resp.RawBody
 	}
 
 	var resp struct {

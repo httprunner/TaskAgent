@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
+	larkbitable "github.com/larksuite/oapi-sdk-go/v3/service/bitable/v1"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 )
@@ -1401,6 +1403,65 @@ type bitablePageInfo struct {
 	Pages         int
 }
 
+func clampBitablePageSize(pageSize int) int {
+	if pageSize <= 0 {
+		return defaultBitablePageSize
+	}
+	if pageSize > maxBitablePageSize {
+		return maxBitablePageSize
+	}
+	return pageSize
+}
+
+func requireBitableAppToken(ref BitableRef) error {
+	if strings.TrimSpace(ref.AppToken) == "" {
+		return errors.New("feishu: bitable app token is empty")
+	}
+	return nil
+}
+
+func requireBitableTableID(ref BitableRef) error {
+	if strings.TrimSpace(ref.TableID) == "" {
+		return errors.New("feishu: bitable table id is empty")
+	}
+	return nil
+}
+
+func requireBitableAppTable(ref BitableRef) error {
+	if err := requireBitableAppToken(ref); err != nil {
+		return err
+	}
+	if err := requireBitableTableID(ref); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Client) bitableSDK(ctx context.Context) (bitableAppTableRecordAPI, larkcore.RequestOptionFunc, error) {
+	if c == nil {
+		return nil, nil, errors.New("feishu: client is nil")
+	}
+	api := c.bitableAppTableRecord()
+	if api == nil {
+		return nil, nil, errors.New("feishu: bitable sdk client is nil")
+	}
+	token, err := c.getTenantAccessToken(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return api, larkcore.WithTenantAccessToken(token), nil
+}
+
+func ensureSDKSuccess(action string, ok bool, code int, msg, logID string) error {
+	if ok {
+		return nil
+	}
+	if strings.TrimSpace(logID) == "" {
+		return fmt.Errorf("feishu: %s failed code=%d msg=%s", action, code, msg)
+	}
+	return fmt.Errorf("feishu: %s failed code=%d msg=%s log_id=%s", action, code, msg, logID)
+}
+
 // BitableRow wraps a raw bitable record so external packages can read arbitrary columns.
 type BitableRow struct {
 	RecordID string
@@ -1425,15 +1486,17 @@ func (c *Client) BatchGetBitableRows(ctx context.Context, ref BitableRef, record
 }
 
 func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSize int, opts *TaskQueryOptions) ([]bitableRecord, bitablePageInfo, error) {
-	if strings.TrimSpace(ref.AppToken) == "" {
-		return nil, bitablePageInfo{}, errors.New("feishu: bitable app token is empty")
+	if c.useHTTP() {
+		return c.listBitableRecordsHTTP(ctx, ref, pageSize, opts)
 	}
-	if pageSize <= 0 {
-		pageSize = defaultBitablePageSize
+	return c.listBitableRecordsSDK(ctx, ref, pageSize, opts)
+}
+
+func (c *Client) listBitableRecordsHTTP(ctx context.Context, ref BitableRef, pageSize int, opts *TaskQueryOptions) ([]bitableRecord, bitablePageInfo, error) {
+	if err := requireBitableAppTable(ref); err != nil {
+		return nil, bitablePageInfo{}, err
 	}
-	if pageSize > maxBitablePageSize {
-		pageSize = maxBitablePageSize
-	}
+	pageSize = clampBitablePageSize(pageSize)
 
 	basePath := fmt.Sprintf("/open-apis/bitable/v1/apps/%s/tables/%s/records/search", url.PathEscape(ref.AppToken), url.PathEscape(ref.TableID))
 	values := url.Values{}
@@ -1587,6 +1650,173 @@ func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSiz
 		Bool("truncated", truncated).
 		Dur("elapsed", time.Since(start)).
 		Msg("fetched bitable records")
+
+	return all, pageInfo, nil
+}
+
+func (c *Client) listBitableRecordsSDK(ctx context.Context, ref BitableRef, pageSize int, opts *TaskQueryOptions) ([]bitableRecord, bitablePageInfo, error) {
+	if err := requireBitableAppTable(ref); err != nil {
+		return nil, bitablePageInfo{}, err
+	}
+	api, opt, err := c.bitableSDK(ctx)
+	if err != nil {
+		return nil, bitablePageInfo{}, err
+	}
+	pageSize = clampBitablePageSize(pageSize)
+
+	limit := 0
+	if opts != nil && opts.Limit > 0 {
+		limit = opts.Limit
+		if limit > 0 && limit < pageSize {
+			pageSize = limit
+		}
+	}
+	maxPages := 0
+	if opts != nil && opts.MaxPages > 0 {
+		maxPages = opts.MaxPages
+	}
+
+	var filterInfo *FilterInfo
+	if opts != nil && opts.Filter != nil {
+		filterInfo = CloneFilter(opts.Filter)
+	}
+
+	filterQuery := (*TaskQueryOptions)(nil)
+	if filterInfo != nil && filterInfo.QueryOptions != nil {
+		filterQuery = filterInfo.QueryOptions
+	}
+	if maxPages <= 0 && filterQuery != nil && filterQuery.MaxPages > 0 {
+		maxPages = filterQuery.MaxPages
+	}
+
+	useView := true
+	if opts != nil && opts.IgnoreView {
+		useView = false
+	} else if filterQuery != nil && filterQuery.IgnoreView {
+		useView = false
+	}
+	viewID := ""
+	if useView {
+		viewID = strings.TrimSpace(ref.ViewID)
+		if opts != nil && strings.TrimSpace(opts.ViewID) != "" {
+			viewID = strings.TrimSpace(opts.ViewID)
+		} else if filterQuery != nil && strings.TrimSpace(filterQuery.ViewID) != "" {
+			viewID = strings.TrimSpace(filterQuery.ViewID)
+		}
+	}
+
+	var body *larkbitable.SearchAppTableRecordReqBody
+	if viewID != "" || filterInfo != nil {
+		body = &larkbitable.SearchAppTableRecordReqBody{}
+		if viewID != "" {
+			body.ViewId = larkcore.StringPtr(viewID)
+		}
+		if filterInfo != nil {
+			body.Filter = &larkbitable.FilterInfo{
+				Conjunction: filterInfo.Conjunction,
+				Conditions:  filterInfo.Conditions,
+				Children:    filterInfo.Children,
+			}
+		}
+	}
+
+	all := make([]bitableRecord, 0, pageSize)
+	pageToken := ""
+	if opts != nil && strings.TrimSpace(opts.PageToken) != "" {
+		pageToken = strings.TrimSpace(opts.PageToken)
+	} else if filterQuery != nil && strings.TrimSpace(filterQuery.PageToken) != "" {
+		pageToken = strings.TrimSpace(filterQuery.PageToken)
+	}
+	pageInfo := bitablePageInfo{}
+
+	start := time.Now()
+	page := 0
+	log.Debug().
+		Str("table_id", ref.TableID).
+		Str("view_id", viewID).
+		Bool("has_filter", filterInfo != nil).
+		Int("page_size", pageSize).
+		Int("limit", limit).
+		Msg("start listing bitable records (sdk)")
+
+	filterJSON := ""
+	if filterInfo != nil {
+		if b, err := json.Marshal(filterInfo); err == nil {
+			filterJSON = string(b)
+			const maxLen = 2048
+			if len(filterJSON) > maxLen {
+				filterJSON = filterJSON[:maxLen] + "...(truncated)"
+			}
+		}
+	}
+
+	for {
+		resp, err := api.Search(ctx, ref.AppToken, ref.TableID, pageSize, pageToken, body, opt)
+		if err != nil {
+			pageInfo.Pages = page
+			return nil, pageInfo, fmt.Errorf("feishu: search bitable records request failed: %w", err)
+		}
+		if resp == nil || resp.ApiResp == nil {
+			pageInfo.Pages = page
+			return nil, pageInfo, errors.New("feishu: empty response when searching bitable records")
+		}
+		if !resp.Success() {
+			pageInfo.Pages = page
+			return nil, pageInfo, fmt.Errorf(
+				"feishu: search bitable records failed code=%d msg=%s table_id=%s view_id=%s filter=%s log_id=%s",
+				resp.Code, resp.Msg, ref.TableID, viewID, filterJSON, resp.RequestId(),
+			)
+		}
+
+		data := resp.Data
+		items := []*larkbitable.AppTableRecord(nil)
+		hasMore := false
+		nextToken := ""
+		if data != nil {
+			items = data.Items
+			hasMore = larkcore.BoolValue(data.HasMore)
+			nextToken = strings.TrimSpace(larkcore.StringValue(data.PageToken))
+		}
+
+		page++
+		for _, item := range items {
+			if item == nil {
+				continue
+			}
+			all = append(all, bitableRecord{
+				RecordID: larkcore.StringValue(item.RecordId),
+				Fields:   item.Fields,
+			})
+		}
+
+		pageInfo.HasMore = hasMore
+		pageInfo.NextPageToken = nextToken
+		pageInfo.Pages = page
+		if limit > 0 && len(all) >= limit {
+			break
+		}
+		if maxPages > 0 && page >= maxPages {
+			break
+		}
+		if !hasMore || nextToken == "" {
+			break
+		}
+		pageToken = nextToken
+	}
+
+	truncated := false
+	if limit > 0 && len(all) > limit {
+		all = all[:limit]
+		truncated = true
+	}
+
+	log.Debug().
+		Str("table_id", ref.TableID).
+		Int("pages", page).
+		Int("count", len(all)).
+		Bool("truncated", truncated).
+		Dur("elapsed", time.Since(start)).
+		Msg("fetched bitable records (sdk)")
 
 	return all, pageInfo, nil
 }
@@ -1823,14 +2053,21 @@ func toString(value any) string {
 }
 
 func (c *Client) updateBitableRecord(ctx context.Context, ref BitableRef, recordID string, fields map[string]any) error {
+	if c.useHTTP() {
+		return c.updateBitableRecordHTTP(ctx, ref, recordID, fields)
+	}
+	return c.updateBitableRecordSDK(ctx, ref, recordID, fields)
+}
+
+func (c *Client) updateBitableRecordHTTP(ctx context.Context, ref BitableRef, recordID string, fields map[string]any) error {
 	if recordID == "" {
 		return errors.New("feishu: record id is empty")
 	}
 	if len(fields) == 0 {
 		return errors.New("feishu: no fields provided for update")
 	}
-	if strings.TrimSpace(ref.AppToken) == "" {
-		return errors.New("feishu: bitable app token is empty")
+	if err := requireBitableAppTable(ref); err != nil {
+		return err
 	}
 	payload := map[string]any{"fields": fields}
 	path := fmt.Sprintf("/open-apis/bitable/v1/apps/%s/tables/%s/records/%s", url.PathEscape(ref.AppToken), url.PathEscape(ref.TableID), url.PathEscape(recordID))
@@ -1853,7 +2090,42 @@ func (c *Client) updateBitableRecord(ctx context.Context, ref BitableRef, record
 	return nil
 }
 
+func (c *Client) updateBitableRecordSDK(ctx context.Context, ref BitableRef, recordID string, fields map[string]any) error {
+	if strings.TrimSpace(recordID) == "" {
+		return errors.New("feishu: record id is empty")
+	}
+	if len(fields) == 0 {
+		return errors.New("feishu: no fields provided for update")
+	}
+	if err := requireBitableAppTable(ref); err != nil {
+		return err
+	}
+	api, opt, err := c.bitableSDK(ctx)
+	if err != nil {
+		return err
+	}
+
+	record := larkbitable.NewAppTableRecordBuilder().
+		Fields(fields).
+		Build()
+	resp, err := api.Update(ctx, ref.AppToken, ref.TableID, recordID, record, opt)
+	if err != nil {
+		return fmt.Errorf("feishu: update record request failed: %w", err)
+	}
+	if resp == nil || resp.ApiResp == nil {
+		return errors.New("feishu: empty response when updating record")
+	}
+	return ensureSDKSuccess("update record", resp.Success(), resp.Code, resp.Msg, resp.RequestId())
+}
+
 func (c *Client) createBitableRecord(ctx context.Context, ref BitableRef, fields map[string]any) (recordID string, err error) {
+	if c.useHTTP() {
+		return c.createBitableRecordHTTP(ctx, ref, fields)
+	}
+	return c.createBitableRecordSDK(ctx, ref, fields)
+}
+
+func (c *Client) createBitableRecordHTTP(ctx context.Context, ref BitableRef, fields map[string]any) (recordID string, err error) {
 	defer func() {
 		if err != nil {
 			err = errors.Wrap(err, "create bitable record failed")
@@ -1863,11 +2135,8 @@ func (c *Client) createBitableRecord(ctx context.Context, ref BitableRef, fields
 	if len(fields) == 0 {
 		return "", errors.New("feishu: no fields provided for creation")
 	}
-	if strings.TrimSpace(ref.AppToken) == "" {
-		return "", errors.New("feishu: bitable app token is empty")
-	}
-	if strings.TrimSpace(ref.TableID) == "" {
-		return "", errors.New("feishu: bitable table id is empty")
+	if err := requireBitableAppTable(ref); err != nil {
+		return "", err
 	}
 	payload := map[string]any{"fields": fields}
 	path := fmt.Sprintf("/open-apis/bitable/v1/apps/%s/tables/%s/records", url.PathEscape(ref.AppToken), url.PathEscape(ref.TableID))
@@ -1896,7 +2165,56 @@ func (c *Client) createBitableRecord(ctx context.Context, ref BitableRef, fields
 	return resp.Data.Record.RecordID, nil
 }
 
+func (c *Client) createBitableRecordSDK(ctx context.Context, ref BitableRef, fields map[string]any) (recordID string, err error) {
+	defer func() {
+		if err != nil {
+			err = errors.Wrap(err, "create bitable record failed")
+		}
+	}()
+
+	if len(fields) == 0 {
+		return "", errors.New("feishu: no fields provided for creation")
+	}
+	if err := requireBitableAppTable(ref); err != nil {
+		return "", err
+	}
+	api, opt, err := c.bitableSDK(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	record := larkbitable.NewAppTableRecordBuilder().
+		Fields(fields).
+		Build()
+
+	resp, err := api.Create(ctx, ref.AppToken, ref.TableID, record, opt)
+	if err != nil {
+		return "", fmt.Errorf("feishu: create record request failed: %w", err)
+	}
+	if resp == nil || resp.ApiResp == nil {
+		return "", errors.New("feishu: empty response when creating record")
+	}
+	if err := ensureSDKSuccess("create record", resp.Success(), resp.Code, resp.Msg, resp.RequestId()); err != nil {
+		return "", err
+	}
+	if resp.Data == nil || resp.Data.Record == nil {
+		return "", errors.New("feishu: create record response missing record")
+	}
+	id := strings.TrimSpace(larkcore.StringValue(resp.Data.Record.RecordId))
+	if id == "" {
+		return "", errors.New("feishu: create record response missing record id")
+	}
+	return id, nil
+}
+
 func (c *Client) batchCreateBitableRecords(ctx context.Context, ref BitableRef, records []map[string]any) (recordIDs []string, err error) {
+	if c.useHTTP() {
+		return c.batchCreateBitableRecordsHTTP(ctx, ref, records)
+	}
+	return c.batchCreateBitableRecordsSDK(ctx, ref, records)
+}
+
+func (c *Client) batchCreateBitableRecordsHTTP(ctx context.Context, ref BitableRef, records []map[string]any) (recordIDs []string, err error) {
 	defer func() {
 		if err != nil {
 			err = errors.Wrap(err, "batch create bitable records failed")
@@ -1906,11 +2224,8 @@ func (c *Client) batchCreateBitableRecords(ctx context.Context, ref BitableRef, 
 	if len(records) == 0 {
 		return nil, errors.New("feishu: no records provided for batch create")
 	}
-	if strings.TrimSpace(ref.AppToken) == "" {
-		return nil, errors.New("feishu: bitable app token is empty")
-	}
-	if strings.TrimSpace(ref.TableID) == "" {
-		return nil, errors.New("feishu: bitable table id is empty")
+	if err := requireBitableAppTable(ref); err != nil {
+		return nil, err
 	}
 	items := make([]map[string]any, 0, len(records))
 	for _, fields := range records {
@@ -1949,6 +2264,67 @@ func (c *Client) batchCreateBitableRecords(ctx context.Context, ref BitableRef, 
 	return ids, nil
 }
 
+func (c *Client) batchCreateBitableRecordsSDK(ctx context.Context, ref BitableRef, records []map[string]any) (recordIDs []string, err error) {
+	defer func() {
+		if err != nil {
+			err = errors.Wrap(err, "batch create bitable records failed")
+		}
+	}()
+
+	if len(records) == 0 {
+		return nil, errors.New("feishu: no records provided for batch create")
+	}
+	if err := requireBitableAppTable(ref); err != nil {
+		return nil, err
+	}
+	api, opt, err := c.bitableSDK(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]*larkbitable.AppTableRecord, 0, len(records))
+	for _, fields := range records {
+		if len(fields) == 0 {
+			return nil, errors.New("feishu: record payload is empty")
+		}
+		items = append(items, larkbitable.NewAppTableRecordBuilder().
+			Fields(fields).
+			Build(),
+		)
+	}
+
+	body := larkbitable.NewBatchCreateAppTableRecordReqBodyBuilder().
+		Records(items).
+		Build()
+
+	resp, err := api.BatchCreate(ctx, ref.AppToken, ref.TableID, body, opt)
+	if err != nil {
+		return nil, fmt.Errorf("feishu: batch create request failed: %w", err)
+	}
+	if resp == nil || resp.ApiResp == nil {
+		return nil, errors.New("feishu: empty response when batch creating records")
+	}
+	if err := ensureSDKSuccess("batch create records", resp.Success(), resp.Code, resp.Msg, resp.RequestId()); err != nil {
+		return nil, err
+	}
+	if resp.Data == nil {
+		return nil, errors.New("feishu: batch create response missing data")
+	}
+
+	ids := make([]string, 0, len(resp.Data.Records))
+	for _, rec := range resp.Data.Records {
+		if rec == nil {
+			continue
+		}
+		id := strings.TrimSpace(larkcore.StringValue(rec.RecordId))
+		if id == "" {
+			return nil, errors.New("feishu: batch create response missing record id")
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
 func (c *Client) getBitableRecord(ctx context.Context, ref BitableRef, recordID string) (bitableRecord, error) {
 	if strings.TrimSpace(recordID) == "" {
 		return bitableRecord{}, errors.New("feishu: record id is empty")
@@ -1964,8 +2340,15 @@ func (c *Client) getBitableRecord(ctx context.Context, ref BitableRef, recordID 
 }
 
 // BatchUpdateBitableRecords updates multiple records in a single request.
-// Max 1000 records per request.
+// Max 500 records per request.
 func (c *Client) BatchUpdateBitableRecords(ctx context.Context, ref BitableRef, records []map[string]any) (updated []bitableRecord, err error) {
+	if c.useHTTP() {
+		return c.batchUpdateBitableRecordsHTTP(ctx, ref, records)
+	}
+	return c.batchUpdateBitableRecordsSDK(ctx, ref, records)
+}
+
+func (c *Client) batchUpdateBitableRecordsHTTP(ctx context.Context, ref BitableRef, records []map[string]any) (updated []bitableRecord, err error) {
 	defer func() {
 		if err != nil {
 			err = errors.Wrap(err, "batch update bitable records failed")
@@ -1975,11 +2358,8 @@ func (c *Client) BatchUpdateBitableRecords(ctx context.Context, ref BitableRef, 
 	if len(records) == 0 {
 		return nil, errors.New("feishu: no records provided for batch update")
 	}
-	if strings.TrimSpace(ref.AppToken) == "" {
-		return nil, errors.New("feishu: bitable app token is empty")
-	}
-	if strings.TrimSpace(ref.TableID) == "" {
-		return nil, errors.New("feishu: bitable table id is empty")
+	if err := requireBitableAppTable(ref); err != nil {
+		return nil, err
 	}
 
 	items := make([]map[string]any, 0, len(records))
@@ -2029,9 +2409,96 @@ func (c *Client) BatchUpdateBitableRecords(ctx context.Context, ref BitableRef, 
 	return resp.Data.Records, nil
 }
 
+func (c *Client) batchUpdateBitableRecordsSDK(ctx context.Context, ref BitableRef, records []map[string]any) (updated []bitableRecord, err error) {
+	defer func() {
+		if err != nil {
+			err = errors.Wrap(err, "batch update bitable records failed")
+		}
+	}()
+
+	if len(records) == 0 {
+		return nil, errors.New("feishu: no records provided for batch update")
+	}
+	if err := requireBitableAppTable(ref); err != nil {
+		return nil, err
+	}
+	api, opt, err := c.bitableSDK(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]*larkbitable.AppTableRecord, 0, len(records))
+	for _, record := range records {
+		if len(record) == 0 {
+			continue
+		}
+		recordID := strings.TrimSpace(toString(record["record_id"]))
+		if recordID == "" {
+			return nil, errors.New("feishu: record_id is missing in update payload")
+		}
+
+		fields, ok := record["fields"].(map[string]any)
+		if !ok {
+			fields = make(map[string]any, len(record))
+			for key, val := range record {
+				if key == "record_id" {
+					continue
+				}
+				fields[key] = val
+			}
+		}
+
+		items = append(items, larkbitable.NewAppTableRecordBuilder().
+			RecordId(recordID).
+			Fields(fields).
+			Build(),
+		)
+	}
+	if len(items) == 0 {
+		return nil, errors.New("feishu: no records provided for batch update")
+	}
+
+	body := larkbitable.NewBatchUpdateAppTableRecordReqBodyBuilder().
+		Records(items).
+		Build()
+
+	resp, err := api.BatchUpdate(ctx, ref.AppToken, ref.TableID, body, opt)
+	if err != nil {
+		return nil, fmt.Errorf("feishu: batch update request failed: %w", err)
+	}
+	if resp == nil || resp.ApiResp == nil {
+		return nil, errors.New("feishu: empty response when batch updating records")
+	}
+	if err := ensureSDKSuccess("batch update records", resp.Success(), resp.Code, resp.Msg, resp.RequestId()); err != nil {
+		return nil, err
+	}
+	if resp.Data == nil {
+		return nil, errors.New("feishu: batch update response missing data")
+	}
+
+	out := make([]bitableRecord, 0, len(resp.Data.Records))
+	for _, rec := range resp.Data.Records {
+		if rec == nil {
+			continue
+		}
+		out = append(out, bitableRecord{
+			RecordID: larkcore.StringValue(rec.RecordId),
+			Fields:   rec.Fields,
+		})
+	}
+	return out, nil
+}
+
 // BatchGetBitableRecords retrieves multiple records by their IDs.
 // Max 100 records per request.
 func (c *Client) BatchGetBitableRecords(ctx context.Context, ref BitableRef, recordIDs []string, userIDType string) (records []bitableRecord, err error) {
+	if c.useHTTP() {
+		return c.batchGetBitableRecordsHTTP(ctx, ref, recordIDs, userIDType)
+	}
+	return c.batchGetBitableRecordsSDK(ctx, ref, recordIDs, userIDType)
+}
+
+func (c *Client) batchGetBitableRecordsHTTP(ctx context.Context, ref BitableRef, recordIDs []string, userIDType string) (records []bitableRecord, err error) {
 	defer func() {
 		if err != nil {
 			err = errors.Wrap(err, "batch get bitable records failed")
@@ -2041,11 +2508,8 @@ func (c *Client) BatchGetBitableRecords(ctx context.Context, ref BitableRef, rec
 	if len(recordIDs) == 0 {
 		return nil, errors.New("feishu: no record ids provided")
 	}
-	if strings.TrimSpace(ref.AppToken) == "" {
-		return nil, errors.New("feishu: bitable app token is empty")
-	}
-	if strings.TrimSpace(ref.TableID) == "" {
-		return nil, errors.New("feishu: bitable table id is empty")
+	if err := requireBitableAppTable(ref); err != nil {
+		return nil, err
 	}
 
 	path := fmt.Sprintf("/open-apis/bitable/v1/apps/%s/tables/%s/records/batch_get", url.PathEscape(ref.AppToken), url.PathEscape(ref.TableID))
@@ -2088,6 +2552,65 @@ func (c *Client) BatchGetBitableRecords(ctx context.Context, ref BitableRef, rec
 	return resp.Data.Records, nil
 }
 
+func (c *Client) batchGetBitableRecordsSDK(ctx context.Context, ref BitableRef, recordIDs []string, userIDType string) (records []bitableRecord, err error) {
+	defer func() {
+		if err != nil {
+			err = errors.Wrap(err, "batch get bitable records failed")
+		}
+	}()
+
+	if len(recordIDs) == 0 {
+		return nil, errors.New("feishu: no record ids provided")
+	}
+	if err := requireBitableAppTable(ref); err != nil {
+		return nil, err
+	}
+	api, opt, err := c.bitableSDK(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	body := larkbitable.NewBatchGetAppTableRecordReqBodyBuilder().
+		RecordIds(recordIDs).
+		Build()
+	if strings.TrimSpace(userIDType) != "" {
+		body.UserIdType = larkcore.StringPtr(strings.TrimSpace(userIDType))
+	}
+
+	resp, err := api.BatchGet(ctx, ref.AppToken, ref.TableID, body, opt)
+	if err != nil {
+		return nil, fmt.Errorf("feishu: batch get request failed: %w", err)
+	}
+	if resp == nil || resp.ApiResp == nil {
+		return nil, errors.New("feishu: empty response when batch getting records")
+	}
+	if err := ensureSDKSuccess("batch get records", resp.Success(), resp.Code, resp.Msg, resp.RequestId()); err != nil {
+		return nil, err
+	}
+	if resp.Data == nil {
+		return nil, errors.New("feishu: batch get response missing data")
+	}
+
+	if len(resp.Data.AbsentRecordIds) > 0 {
+		log.Warn().Strs("absent_ids", resp.Data.AbsentRecordIds).Msg("feishu: some records were absent")
+	}
+	if len(resp.Data.ForbiddenRecordIds) > 0 {
+		log.Warn().Strs("forbidden_ids", resp.Data.ForbiddenRecordIds).Msg("feishu: some records were forbidden")
+	}
+
+	out := make([]bitableRecord, 0, len(resp.Data.Records))
+	for _, rec := range resp.Data.Records {
+		if rec == nil {
+			continue
+		}
+		out = append(out, bitableRecord{
+			RecordID: larkcore.StringValue(rec.RecordId),
+			Fields:   rec.Fields,
+		})
+	}
+	return out, nil
+}
+
 type wikiNodeInfo struct {
 	ObjToken string `json:"obj_token"`
 	ObjType  string `json:"obj_type"`
@@ -2098,23 +2621,48 @@ func (c *Client) fetchWikiNode(ctx context.Context, wikiToken string) (wikiNodeI
 	if strings.TrimSpace(wikiToken) == "" {
 		return empty, errors.New("feishu: wiki token is empty")
 	}
-	path := fmt.Sprintf("/open-apis/wiki/v2/spaces/get_node?token=%s", url.QueryEscape(wikiToken))
-	_, raw, err := c.doJSONRequest(ctx, http.MethodGet, path, nil)
+	if c.useHTTP() {
+		path := fmt.Sprintf("/open-apis/wiki/v2/spaces/get_node?token=%s", url.QueryEscape(wikiToken))
+		_, raw, err := c.doJSONRequest(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return empty, err
+		}
+		var resp struct {
+			Code int    `json:"code"`
+			Msg  string `json:"msg"`
+			Data struct {
+				Node wikiNodeInfo `json:"node"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			return empty, fmt.Errorf("feishu: decode wiki node response: %w", err)
+		}
+		if resp.Code != 0 {
+			return empty, fmt.Errorf("feishu: wiki get_node failed code=%d msg=%s", resp.Code, resp.Msg)
+		}
+		return resp.Data.Node, nil
+	}
+
+	api, opts, err := c.wikiSDK(ctx)
 	if err != nil {
 		return empty, err
 	}
-	var resp struct {
-		Code int    `json:"code"`
-		Msg  string `json:"msg"`
-		Data struct {
-			Node wikiNodeInfo `json:"node"`
-		} `json:"data"`
+	resp, err := api.GetNode(ctx, wikiToken, opts...)
+	if err != nil {
+		return empty, fmt.Errorf("feishu: wiki get_node request failed: %w", err)
 	}
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		return empty, fmt.Errorf("feishu: decode wiki node response: %w", err)
+	if resp == nil || resp.ApiResp == nil {
+		return empty, errors.New("feishu: empty response when getting wiki node")
 	}
-	if resp.Code != 0 {
-		return empty, fmt.Errorf("feishu: wiki get_node failed code=%d msg=%s", resp.Code, resp.Msg)
+	if err := ensureSDKSuccess("wiki get_node", resp.Success(), resp.Code, resp.Msg, resp.RequestId()); err != nil {
+		return empty, err
 	}
-	return resp.Data.Node, nil
+	if resp.Data == nil || resp.Data.Node == nil {
+		return empty, errors.New("feishu: wiki node response missing node")
+	}
+
+	return wikiNodeInfo{
+		ObjToken: larkcore.StringValue(resp.Data.Node.ObjToken),
+		ObjType:  larkcore.StringValue(resp.Data.Node.ObjType),
+	}, nil
 }

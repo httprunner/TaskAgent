@@ -14,6 +14,7 @@ The tables below enumerate every environment variable TaskAgent reads via `os.Ge
 | `FEISHU_APP_SECRET` | Yes | – | Same as above | App secret paired with the App ID. |
 | `FEISHU_TENANT_KEY` | Optional | empty | `internal/feishusdk` | Needed only for tenant-scoped self-built apps. |
 | `FEISHU_BASE_URL` | Optional | `https://open.feishu.cn` | `internal/feishusdk`, `examples/create_task_with_http` | Override for sandbox domains. |
+| `FEISHU_TRANSPORT` | Optional | `sdk` | `internal/feishusdk` | Global Feishu transport: `sdk` (default, via `github.com/larksuite/oapi-sdk-go/v3`) or `http` (legacy raw HTTP). |
 | `FEISHU_REPORT_RPS` | Optional | `1` | `internal/feishusdk/storage.go` | Global limiter for result-table writes (floating-point, rows/sec). |
 
 ## Table URLs (Feishu Bitables)

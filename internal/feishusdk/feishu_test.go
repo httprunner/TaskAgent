@@ -5,10 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
 	"time"
+
+	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
+	larkbitable "github.com/larksuite/oapi-sdk-go/v3/service/bitable/v1"
+	larkwiki "github.com/larksuite/oapi-sdk-go/v3/service/wiki/v2"
 )
 
 const (
@@ -17,6 +22,300 @@ const (
 	liveResultBitableURL   = "https://bytedance.larkoffice.com/wiki/DKKwwF9XRincITkd0g1c6udUnHe?table=tblNwTe8mUxiHUqd&view=vewTF27mJQ"
 	liveTargetApp          = "com.smile.gifmaker"
 )
+
+type fakeSearchCall struct {
+	AppToken  string
+	TableID   string
+	PageSize  int
+	PageToken string
+	Body      *larkbitable.SearchAppTableRecordReqBody
+}
+
+type fakeBatchCreateCall struct {
+	AppToken string
+	TableID  string
+	Body     *larkbitable.BatchCreateAppTableRecordReqBody
+}
+
+type fakeBatchUpdateCall struct {
+	AppToken string
+	TableID  string
+	Body     *larkbitable.BatchUpdateAppTableRecordReqBody
+}
+
+type fakeBatchGetCall struct {
+	AppToken string
+	TableID  string
+	Body     *larkbitable.BatchGetAppTableRecordReqBody
+}
+
+type fakeCreateCall struct {
+	AppToken string
+	TableID  string
+	Record   *larkbitable.AppTableRecord
+}
+
+type fakeUpdateCall struct {
+	AppToken  string
+	TableID   string
+	RecordID  string
+	AppRecord *larkbitable.AppTableRecord
+}
+
+type fakeBitableAPI struct {
+	searchCalls      []fakeSearchCall
+	createCalls      []fakeCreateCall
+	updateCalls      []fakeUpdateCall
+	batchCreateCalls []fakeBatchCreateCall
+	batchUpdateCalls []fakeBatchUpdateCall
+	batchGetCalls    []fakeBatchGetCall
+
+	searchFn      func(ctx context.Context, call fakeSearchCall) (*larkbitable.SearchAppTableRecordResp, error)
+	createFn      func(ctx context.Context, call fakeCreateCall) (*larkbitable.CreateAppTableRecordResp, error)
+	updateFn      func(ctx context.Context, call fakeUpdateCall) (*larkbitable.UpdateAppTableRecordResp, error)
+	batchCreateFn func(ctx context.Context, call fakeBatchCreateCall) (*larkbitable.BatchCreateAppTableRecordResp, error)
+	batchUpdateFn func(ctx context.Context, call fakeBatchUpdateCall) (*larkbitable.BatchUpdateAppTableRecordResp, error)
+	batchGetFn    func(ctx context.Context, call fakeBatchGetCall) (*larkbitable.BatchGetAppTableRecordResp, error)
+}
+
+func (f *fakeBitableAPI) Search(ctx context.Context, appToken, tableID string, pageSize int, pageToken string, body *larkbitable.SearchAppTableRecordReqBody, _ ...larkcore.RequestOptionFunc) (*larkbitable.SearchAppTableRecordResp, error) {
+	call := fakeSearchCall{
+		AppToken:  appToken,
+		TableID:   tableID,
+		PageSize:  pageSize,
+		PageToken: pageToken,
+		Body:      body,
+	}
+	f.searchCalls = append(f.searchCalls, call)
+	if f.searchFn != nil {
+		return f.searchFn(ctx, call)
+	}
+	return okSearchResp(nil, false, ""), nil
+}
+
+func (f *fakeBitableAPI) Create(ctx context.Context, appToken, tableID string, record *larkbitable.AppTableRecord, _ ...larkcore.RequestOptionFunc) (*larkbitable.CreateAppTableRecordResp, error) {
+	call := fakeCreateCall{AppToken: appToken, TableID: tableID, Record: record}
+	f.createCalls = append(f.createCalls, call)
+	if f.createFn != nil {
+		return f.createFn(ctx, call)
+	}
+	return okCreateResp("recDefault", nil), nil
+}
+
+func (f *fakeBitableAPI) Update(ctx context.Context, appToken, tableID, recordID string, record *larkbitable.AppTableRecord, _ ...larkcore.RequestOptionFunc) (*larkbitable.UpdateAppTableRecordResp, error) {
+	call := fakeUpdateCall{AppToken: appToken, TableID: tableID, RecordID: recordID, AppRecord: record}
+	f.updateCalls = append(f.updateCalls, call)
+	if f.updateFn != nil {
+		return f.updateFn(ctx, call)
+	}
+	return okUpdateResp(recordID, nil), nil
+}
+
+func (f *fakeBitableAPI) BatchCreate(ctx context.Context, appToken, tableID string, body *larkbitable.BatchCreateAppTableRecordReqBody, _ ...larkcore.RequestOptionFunc) (*larkbitable.BatchCreateAppTableRecordResp, error) {
+	call := fakeBatchCreateCall{AppToken: appToken, TableID: tableID, Body: body}
+	f.batchCreateCalls = append(f.batchCreateCalls, call)
+	if f.batchCreateFn != nil {
+		return f.batchCreateFn(ctx, call)
+	}
+	return okBatchCreateResp(nil), nil
+}
+
+func (f *fakeBitableAPI) BatchUpdate(ctx context.Context, appToken, tableID string, body *larkbitable.BatchUpdateAppTableRecordReqBody, _ ...larkcore.RequestOptionFunc) (*larkbitable.BatchUpdateAppTableRecordResp, error) {
+	call := fakeBatchUpdateCall{AppToken: appToken, TableID: tableID, Body: body}
+	f.batchUpdateCalls = append(f.batchUpdateCalls, call)
+	if f.batchUpdateFn != nil {
+		return f.batchUpdateFn(ctx, call)
+	}
+	return okBatchUpdateResp(nil), nil
+}
+
+func (f *fakeBitableAPI) BatchGet(ctx context.Context, appToken, tableID string, body *larkbitable.BatchGetAppTableRecordReqBody, _ ...larkcore.RequestOptionFunc) (*larkbitable.BatchGetAppTableRecordResp, error) {
+	call := fakeBatchGetCall{AppToken: appToken, TableID: tableID, Body: body}
+	f.batchGetCalls = append(f.batchGetCalls, call)
+	if f.batchGetFn != nil {
+		return f.batchGetFn(ctx, call)
+	}
+	return okBatchGetResp(nil, nil, nil), nil
+}
+
+func okApiResp() *larkcore.ApiResp {
+	return &larkcore.ApiResp{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		RawBody:    []byte(`{"code":0,"msg":"success"}`),
+	}
+}
+
+func okSearchResp(items []*larkbitable.AppTableRecord, hasMore bool, pageToken string) *larkbitable.SearchAppTableRecordResp {
+	resp := &larkbitable.SearchAppTableRecordResp{
+		ApiResp: okApiResp(),
+		CodeError: larkcore.CodeError{
+			Code: 0,
+			Msg:  "success",
+		},
+		Data: &larkbitable.SearchAppTableRecordRespData{
+			Items:   items,
+			HasMore: larkcore.BoolPtr(hasMore),
+		},
+	}
+	if strings.TrimSpace(pageToken) != "" {
+		resp.Data.PageToken = larkcore.StringPtr(pageToken)
+	}
+	return resp
+}
+
+func okBatchCreateResp(records []*larkbitable.AppTableRecord) *larkbitable.BatchCreateAppTableRecordResp {
+	return &larkbitable.BatchCreateAppTableRecordResp{
+		ApiResp: okApiResp(),
+		CodeError: larkcore.CodeError{
+			Code: 0,
+			Msg:  "success",
+		},
+		Data: &larkbitable.BatchCreateAppTableRecordRespData{
+			Records: records,
+		},
+	}
+}
+
+func okCreateResp(recordID string, fields map[string]any) *larkbitable.CreateAppTableRecordResp {
+	rec := &larkbitable.AppTableRecord{
+		RecordId: larkcore.StringPtr(recordID),
+		Fields:   fields,
+	}
+	return &larkbitable.CreateAppTableRecordResp{
+		ApiResp: okApiResp(),
+		CodeError: larkcore.CodeError{
+			Code: 0,
+			Msg:  "success",
+		},
+		Data: &larkbitable.CreateAppTableRecordRespData{
+			Record: rec,
+		},
+	}
+}
+
+func okBatchUpdateResp(records []*larkbitable.AppTableRecord) *larkbitable.BatchUpdateAppTableRecordResp {
+	return &larkbitable.BatchUpdateAppTableRecordResp{
+		ApiResp: okApiResp(),
+		CodeError: larkcore.CodeError{
+			Code: 0,
+			Msg:  "success",
+		},
+		Data: &larkbitable.BatchUpdateAppTableRecordRespData{
+			Records: records,
+		},
+	}
+}
+
+func okUpdateResp(recordID string, fields map[string]any) *larkbitable.UpdateAppTableRecordResp {
+	rec := &larkbitable.AppTableRecord{
+		RecordId: larkcore.StringPtr(recordID),
+		Fields:   fields,
+	}
+	return &larkbitable.UpdateAppTableRecordResp{
+		ApiResp: okApiResp(),
+		CodeError: larkcore.CodeError{
+			Code: 0,
+			Msg:  "success",
+		},
+		Data: &larkbitable.UpdateAppTableRecordRespData{
+			Record: rec,
+		},
+	}
+}
+
+func okBatchGetResp(records []*larkbitable.AppTableRecord, absent, forbidden []string) *larkbitable.BatchGetAppTableRecordResp {
+	return &larkbitable.BatchGetAppTableRecordResp{
+		ApiResp: okApiResp(),
+		CodeError: larkcore.CodeError{
+			Code: 0,
+			Msg:  "success",
+		},
+		Data: &larkbitable.BatchGetAppTableRecordRespData{
+			Records:            records,
+			AbsentRecordIds:    absent,
+			ForbiddenRecordIds: forbidden,
+		},
+	}
+}
+
+type fakeWikiAPI struct {
+	getNodeFn func(ctx context.Context, token string, options ...larkcore.RequestOptionFunc) (*larkwiki.GetNodeSpaceResp, error)
+}
+
+func (f *fakeWikiAPI) GetNode(ctx context.Context, token string, options ...larkcore.RequestOptionFunc) (*larkwiki.GetNodeSpaceResp, error) {
+	if f == nil || f.getNodeFn == nil {
+		return nil, fmt.Errorf("fake wiki api not configured")
+	}
+	return f.getNodeFn(ctx, token, options...)
+}
+
+func okWikiGetNodeResp(objToken, objType string) *larkwiki.GetNodeSpaceResp {
+	return &larkwiki.GetNodeSpaceResp{
+		ApiResp: okApiResp(),
+		CodeError: larkcore.CodeError{
+			Code: 0,
+			Msg:  "success",
+		},
+		Data: &larkwiki.GetNodeSpaceRespData{
+			Node: &larkwiki.Node{
+				ObjToken: larkcore.StringPtr(objToken),
+				ObjType:  larkcore.StringPtr(objType),
+			},
+		},
+	}
+}
+
+func newSDKTestClient(fake *fakeBitableAPI, doJSON func(ctx context.Context, method, path string, payload any) (*http.Response, []byte, error)) *Client {
+	client := &Client{
+		appID:         "test-app",
+		appSecret:     "test-secret",
+		transport:     "sdk",
+		bitableAPI:    fake,
+		tenantToken:   "test-tenant-token",
+		tokenExpireAt: time.Now().Add(1 * time.Hour),
+	}
+	if doJSON != nil {
+		client.doJSONRequestFunc = doJSON
+	}
+	return client
+}
+
+func newHTTPTestClient(doJSON func(ctx context.Context, method, path string, payload any) (*http.Response, []byte, error)) *Client {
+	client := &Client{
+		appID:     "test-app",
+		appSecret: "test-secret",
+		transport: "http",
+		doJSONRequestFunc: func(ctx context.Context, method, path string, payload any) (*http.Response, []byte, error) {
+			if doJSON == nil {
+				return nil, nil, fmt.Errorf("unexpected request %s %s", method, path)
+			}
+			return doJSON(ctx, method, path, payload)
+		},
+	}
+	return client
+}
+
+func runBitableTransports(t *testing.T, fn func(t *testing.T, transport string)) {
+	t.Helper()
+	for _, transport := range []string{"sdk", "http"} {
+		t.Run(transport, func(t *testing.T) {
+			fn(t, transport)
+		})
+	}
+}
+
+func pageTokenFromPath(path string) string {
+	if idx := strings.Index(path, "?"); idx >= 0 && idx < len(path)-1 {
+		raw := path[idx+1:]
+		q, err := url.ParseQuery(raw)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(q.Get("page_token"))
+	}
+	return ""
+}
 
 func TestParseSpreadsheetURL(t *testing.T) {
 	cases := []struct {
@@ -294,154 +593,277 @@ func TestParseBitableTimeFallback(t *testing.T) {
 }
 
 func TestFetchTaskTableExampleMock(t *testing.T) {
-	ctx := context.Background()
-	const wikiResponse = `{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnMockToken","obj_type":"bitable"}}}`
-	listResponseData := map[string]any{
-		"code": 0,
-		"msg":  "success",
-		"data": map[string]any{
-			"items": []map[string]any{
-				{
-					"record_id": "recYUOQd9",
-					"fields": map[string]any{
-						DefaultTaskFields.TaskID: 101,
-						DefaultTaskFields.Params: "{\"song\":\"foo\"}",
-						DefaultTaskFields.App:    "netease",
-						DefaultTaskFields.Scene:  "batch",
-						DefaultTaskFields.Date:   "2025-11-07 12:30:00",
-						DefaultTaskFields.Status: "pending",
+	runBitableTransports(t, func(t *testing.T, transport string) {
+		ctx := context.Background()
+		const wikiResponse = `{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnMockToken","obj_type":"bitable"}}}`
+		listResponseData := map[string]any{
+			"code": 0,
+			"msg":  "success",
+			"data": map[string]any{
+				"items": []map[string]any{
+					{
+						"record_id": "recYUOQd9",
+						"fields": map[string]any{
+							DefaultTaskFields.TaskID: 101,
+							DefaultTaskFields.Params: "{\"song\":\"foo\"}",
+							DefaultTaskFields.App:    "netease",
+							DefaultTaskFields.Scene:  "batch",
+							DefaultTaskFields.Date:   "2025-11-07 12:30:00",
+							DefaultTaskFields.Status: "pending",
+						},
+					},
+					{
+						"record_id": "recTy0283",
+						"fields": map[string]any{
+							DefaultTaskFields.TaskID: 102,
+							DefaultTaskFields.Params: "{\"song\":\"bar\"}",
+							DefaultTaskFields.App:    "qqmusic",
+							DefaultTaskFields.Scene:  "batch",
+							DefaultTaskFields.Date:   "2025-11-07 13:00:00",
+							DefaultTaskFields.Status: "done",
+						},
 					},
 				},
-				{
-					"record_id": "recTy0283",
-					"fields": map[string]any{
-						DefaultTaskFields.TaskID: 102,
-						DefaultTaskFields.Params: "{\"song\":\"bar\"}",
-						DefaultTaskFields.App:    "qqmusic",
-						DefaultTaskFields.Scene:  "batch",
-						DefaultTaskFields.Date:   "2025-11-07 13:00:00",
-						DefaultTaskFields.Status: "done",
-					},
-				},
+				"has_more":   false,
+				"page_token": "",
 			},
-			"has_more":   false,
-			"page_token": "",
-		},
-	}
-	listResponse, err := json.Marshal(listResponseData)
-	if err != nil {
-		t.Fatalf("marshal list response: %v", err)
-	}
-	updateResponse := []byte(`{"code":0,"msg":"success"}`)
-	var capturedPayload map[string]any
-	wikiCalled := false
-	client := &Client{
-		doJSONRequestFunc: func(ctx context.Context, method, path string, payload any) (*http.Response, []byte, error) {
+		}
+		listResponse, err := json.Marshal(listResponseData)
+		if err != nil {
+			t.Fatalf("marshal list response: %v", err)
+		}
+		updateResponse := []byte(`{"code":0,"msg":"success"}`)
+
+		var (
+			capturedPayloadHTTP map[string]any
+			capturedFieldsSDK   map[string]any
+			wikiCalledHTTP      bool
+			wikiCalledSDK       bool
+		)
+
+		doJSON := func(ctx context.Context, method, path string, payload any) (*http.Response, []byte, error) {
 			switch {
-			case method == http.MethodGet && strings.Contains(path, "/wiki/v2/spaces/get_node"):
-				wikiCalled = true
+			case transport == "http" && method == http.MethodGet && strings.Contains(path, "/wiki/v2/spaces/get_node"):
+				wikiCalledHTTP = true
 				return nil, []byte(wikiResponse), nil
-			case method == http.MethodPost && strings.Contains(path, "/bitable/v1/apps/") && strings.Contains(path, "tables/tblPvDwGcQ9UEzzi/records/search"):
+			case transport == "http" && method == http.MethodPost && strings.Contains(path, "/bitable/v1/apps/") && strings.Contains(path, "tables/tblPvDwGcQ9UEzzi/records/search"):
 				if !strings.Contains(path, "bascnMockToken") {
 					t.Fatalf("expected resolved app token, got %s", path)
 				}
 				return nil, listResponse, nil
-			case method == http.MethodPut && strings.Contains(path, "/bitable/v1/apps/") && strings.Contains(path, "/records/recYUOQd9"):
+			case transport == "http" && method == http.MethodPut && strings.Contains(path, "/bitable/v1/apps/") && strings.Contains(path, "/records/recYUOQd9"):
 				fields, ok := payload.(map[string]any)
 				if !ok {
 					t.Fatalf("expected map payload, got %T", payload)
 				}
-				capturedPayload = fields
+				capturedPayloadHTTP = fields
 				return nil, updateResponse, nil
 			default:
 				t.Fatalf("unexpected request %s %s", method, path)
 			}
 			return nil, nil, nil
-		},
-	}
+		}
 
-	table, err := client.FetchTaskTable(ctx, liveWritableBitableURL, nil)
-	if err != nil {
-		t.Fatalf("FetchTaskTable returned error: %v", err)
-	}
-	if !wikiCalled {
-		t.Fatalf("expected wiki resolver call")
-	}
-	if table == nil || len(table.Rows) != 2 {
-		t.Fatalf("expected 2 rows, got %+v", table)
-	}
-	if table.Ref.TableID != "tblPvDwGcQ9UEzzi" {
-		t.Fatalf("unexpected ref: %+v", table.Ref)
-	}
-	if id, ok := table.RecordIDByTaskID(101); !ok || id != "recYUOQd9" {
-		t.Fatalf("expected record id recYUOQd9 for task 101, got %q ok=%v", id, ok)
-	}
-	if err := client.UpdateTaskStatus(ctx, table, 101, StatusDownloaderProcessing); err != nil {
-		t.Fatalf("UpdateTaskStatus error: %v", err)
-	}
-	if table.Rows[0].Status != StatusDownloaderProcessing {
-		t.Fatalf("local table status not updated, got %q", table.Rows[0].Status)
-	}
-	fields, ok := capturedPayload["fields"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected captured fields map, got %#v", capturedPayload)
-	}
-	if fields[DefaultTaskFields.Status] != StatusDownloaderProcessing {
-		t.Fatalf("expected status payload %#v, got %#v", StatusDownloaderProcessing, fields)
-	}
-	t.Logf("decoded rows from example table (mock): %+v", table.Rows)
+		var client *Client
+		if transport == "sdk" {
+			fake := &fakeBitableAPI{
+				searchFn: func(ctx context.Context, call fakeSearchCall) (*larkbitable.SearchAppTableRecordResp, error) {
+					var parsed struct {
+						Code int    `json:"code"`
+						Msg  string `json:"msg"`
+						Data struct {
+							Items []struct {
+								RecordID string         `json:"record_id"`
+								Fields   map[string]any `json:"fields"`
+							} `json:"items"`
+							HasMore   bool   `json:"has_more"`
+							PageToken string `json:"page_token"`
+						} `json:"data"`
+					}
+					if err := json.Unmarshal(listResponse, &parsed); err != nil {
+						return nil, err
+					}
+					items := make([]*larkbitable.AppTableRecord, 0, len(parsed.Data.Items))
+					for _, it := range parsed.Data.Items {
+						items = append(items, &larkbitable.AppTableRecord{
+							RecordId: larkcore.StringPtr(it.RecordID),
+							Fields:   it.Fields,
+						})
+					}
+					return okSearchResp(items, parsed.Data.HasMore, parsed.Data.PageToken), nil
+				},
+				updateFn: func(ctx context.Context, call fakeUpdateCall) (*larkbitable.UpdateAppTableRecordResp, error) {
+					if call.RecordID != "recYUOQd9" {
+						t.Fatalf("unexpected record id %q", call.RecordID)
+					}
+					if call.AppRecord != nil {
+						capturedFieldsSDK = call.AppRecord.Fields
+					}
+					return okUpdateResp(call.RecordID, nil), nil
+				},
+			}
+			client = newSDKTestClient(fake, nil)
+			client.wikiAPI = &fakeWikiAPI{
+				getNodeFn: func(ctx context.Context, token string, options ...larkcore.RequestOptionFunc) (*larkwiki.GetNodeSpaceResp, error) {
+					wikiCalledSDK = true
+					if token != "DKKwwF9XRincITkd0g1c6udUnHe" {
+						t.Fatalf("unexpected wiki token %q", token)
+					}
+					return okWikiGetNodeResp("bascnMockToken", "bitable"), nil
+				},
+			}
+		} else {
+			client = newHTTPTestClient(doJSON)
+		}
+
+		table, err := client.FetchTaskTable(ctx, liveWritableBitableURL, nil)
+		if err != nil {
+			t.Fatalf("FetchTaskTable returned error: %v", err)
+		}
+		if transport == "sdk" && !wikiCalledSDK {
+			t.Fatalf("expected sdk wiki resolver call")
+		}
+		if transport == "http" && !wikiCalledHTTP {
+			t.Fatalf("expected http wiki resolver call")
+		}
+		if table == nil || len(table.Rows) != 2 {
+			t.Fatalf("expected 2 rows, got %+v", table)
+		}
+		if table.Ref.TableID != "tblPvDwGcQ9UEzzi" {
+			t.Fatalf("unexpected ref: %+v", table.Ref)
+		}
+		if table.Ref.AppToken != "bascnMockToken" {
+			t.Fatalf("expected resolved app token bascnMockToken, got %q", table.Ref.AppToken)
+		}
+		if id, ok := table.RecordIDByTaskID(101); !ok || id != "recYUOQd9" {
+			t.Fatalf("expected record id recYUOQd9 for task 101, got %q ok=%v", id, ok)
+		}
+		if err := client.UpdateTaskStatus(ctx, table, 101, StatusDownloaderProcessing); err != nil {
+			t.Fatalf("UpdateTaskStatus error: %v", err)
+		}
+		if table.Rows[0].Status != StatusDownloaderProcessing {
+			t.Fatalf("local table status not updated, got %q", table.Rows[0].Status)
+		}
+		var fields map[string]any
+		if transport == "sdk" {
+			fields = capturedFieldsSDK
+		} else {
+			var ok bool
+			fields, ok = capturedPayloadHTTP["fields"].(map[string]any)
+			if !ok {
+				t.Fatalf("expected captured fields map, got %#v", capturedPayloadHTTP)
+			}
+		}
+		if fields[DefaultTaskFields.Status] != StatusDownloaderProcessing {
+			t.Fatalf("expected status payload %#v, got %#v", StatusDownloaderProcessing, fields)
+		}
+	})
 }
 
 func TestUpdateCookieStatus(t *testing.T) {
-	ctx := context.Background()
-	wikiResponse := []byte(`{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnMockToken","obj_type":"bitable"}}}`)
-	updateResponse := []byte(`{"code":0,"msg":"success","data":{"records":[{"record_id":"recXYZ"}]}}`)
-	var capturedPayload map[string]any
-	client := &Client{
-		doJSONRequestFunc: func(ctx context.Context, method, path string, payload any) (*http.Response, []byte, error) {
+	runBitableTransports(t, func(t *testing.T, transport string) {
+		ctx := context.Background()
+		wikiResponse := []byte(`{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnMockToken","obj_type":"bitable"}}}`)
+
+		var (
+			capturedCall    fakeBatchUpdateCall
+			capturedPayload map[string]any
+		)
+
+		doJSON := func(ctx context.Context, method, path string, payload any) (*http.Response, []byte, error) {
 			switch {
-			case method == http.MethodGet && strings.Contains(path, "/wiki/v2/spaces/get_node"):
+			case transport == "http" && method == http.MethodGet && strings.Contains(path, "/wiki/v2/spaces/get_node"):
 				return nil, wikiResponse, nil
-			case method == http.MethodPost && strings.Contains(path, "/records/batch_update"):
-				var ok bool
-				capturedPayload, ok = payload.(map[string]any)
+			case transport == "http" && method == http.MethodPost && strings.Contains(path, "/records/batch_update"):
+				m, ok := payload.(map[string]any)
 				if !ok {
 					t.Fatalf("expected map payload, got %T", payload)
 				}
-				return nil, updateResponse, nil
+				capturedPayload = m
+				return nil, []byte(`{"code":0,"msg":"success","data":{"records":[{"record_id":"recXYZ"}]}}`), nil
 			default:
 				t.Fatalf("unexpected request %s %s", method, path)
 			}
 			return nil, nil, nil
-		},
-	}
-	if err := client.UpdateCookieStatus(ctx, liveWritableBitableURL, "recXYZ", CookieStatusInvalid, nil); err != nil {
-		t.Fatalf("UpdateCookieStatus returned error: %v", err)
-	}
-	records, ok := capturedPayload["records"].([]map[string]any)
-	if !ok || len(records) != 1 {
-		t.Fatalf("expected single record payload, got %#v", capturedPayload)
-	}
-	record := records[0]
-	if record["record_id"] != "recXYZ" {
-		t.Fatalf("record_id mismatch: %#v", record)
-	}
-	fields, ok := record["fields"].(map[string]any)
-	if !ok {
-		t.Fatalf("missing fields payload: %#v", record)
-	}
-	if status := fields[DefaultCookieFields.Status]; status != CookieStatusInvalid {
-		t.Fatalf("status mismatch: got %#v", status)
-	}
+		}
+
+		var client *Client
+		if transport == "sdk" {
+			fake := &fakeBitableAPI{
+				batchUpdateFn: func(ctx context.Context, call fakeBatchUpdateCall) (*larkbitable.BatchUpdateAppTableRecordResp, error) {
+					capturedCall = call
+					return okBatchUpdateResp([]*larkbitable.AppTableRecord{
+						{RecordId: larkcore.StringPtr("recXYZ")},
+					}), nil
+				},
+			}
+			client = newSDKTestClient(fake, nil)
+			client.wikiAPI = &fakeWikiAPI{
+				getNodeFn: func(ctx context.Context, token string, options ...larkcore.RequestOptionFunc) (*larkwiki.GetNodeSpaceResp, error) {
+					return okWikiGetNodeResp("bascnMockToken", "bitable"), nil
+				},
+			}
+		} else {
+			client = newHTTPTestClient(doJSON)
+		}
+
+		if err := client.UpdateCookieStatus(ctx, liveWritableBitableURL, "recXYZ", CookieStatusInvalid, nil); err != nil {
+			t.Fatalf("UpdateCookieStatus returned error: %v", err)
+		}
+
+		var recordID string
+		var fields map[string]any
+		if transport == "sdk" {
+			if capturedCall.Body == nil || len(capturedCall.Body.Records) != 1 {
+				t.Fatalf("expected single record payload, got %#v", capturedCall.Body)
+			}
+			record := capturedCall.Body.Records[0]
+			if record == nil {
+				t.Fatalf("record missing")
+			}
+			recordID = larkcore.StringValue(record.RecordId)
+			fields = record.Fields
+		} else {
+			records, ok := capturedPayload["records"].([]map[string]any)
+			if !ok || len(records) != 1 {
+				t.Fatalf("expected single record payload, got %#v", capturedPayload)
+			}
+			record := records[0]
+			recordID = toString(record["record_id"])
+			fields, _ = record["fields"].(map[string]any)
+		}
+
+		if recordID != "recXYZ" {
+			t.Fatalf("record_id mismatch: got %q", recordID)
+		}
+		if fields == nil {
+			t.Fatalf("missing fields payload")
+		}
+		if status := fields[DefaultCookieFields.Status]; status != CookieStatusInvalid {
+			t.Fatalf("status mismatch: got %#v", status)
+		}
+	})
 }
 
 func TestListBitableRecordsFilterConversion(t *testing.T) {
-	ctx := context.Background()
-	var capturedFilter *FilterInfo
-	client := &Client{
-		doJSONRequestFunc: func(ctx context.Context, method, path string, payload any) (*http.Response, []byte, error) {
+	runBitableTransports(t, func(t *testing.T, transport string) {
+		ctx := context.Background()
+		ref := BitableRef{AppToken: "appToken", TableID: "tbl"}
+		filter := NewFilterInfo("and")
+		filter.Conditions = append(filter.Conditions,
+			NewCondition(DefaultTaskFields.Status, "is", "done"),
+			NewCondition(DefaultTaskFields.App, "is", "qqmusic"),
+		)
+		opts := &TaskQueryOptions{Filter: filter}
+
+		var (
+			capturedFilterSDK  *larkbitable.FilterInfo
+			capturedFilterHTTP *FilterInfo
+		)
+
+		doJSON := func(ctx context.Context, method, path string, payload any) (*http.Response, []byte, error) {
 			switch {
-			case method == http.MethodPost && strings.Contains(path, "/records/search"):
+			case transport == "http" && method == http.MethodPost && strings.Contains(path, "/records/search"):
 				body, ok := payload.(map[string]any)
 				if !ok {
 					t.Fatalf("expected map payload, got %T", payload)
@@ -450,112 +872,175 @@ func TestListBitableRecordsFilterConversion(t *testing.T) {
 				if !ok || filter == nil {
 					t.Fatalf("expected filter info in payload, got %T", body["filter"])
 				}
-				capturedFilter = filter
+				capturedFilterHTTP = filter
 				return nil, []byte(`{"code":0,"data":{"items":[],"has_more":false}}`), nil
 			default:
 				t.Fatalf("unexpected request %s %s", method, path)
 			}
 			return nil, nil, nil
-		},
-	}
-	ref := BitableRef{AppToken: "appToken", TableID: "tbl"}
-	filter := NewFilterInfo("and")
-	filter.Conditions = append(filter.Conditions,
-		NewCondition(DefaultTaskFields.Status, "is", "done"),
-		NewCondition(DefaultTaskFields.App, "is", "qqmusic"),
-	)
-	opts := &TaskQueryOptions{Filter: filter}
-	if _, _, err := client.listBitableRecords(ctx, ref, 200, opts); err != nil {
-		t.Fatalf("listBitableRecords returned error: %v", err)
-	}
-	if capturedFilter == nil || capturedFilter.Conjunction == nil || *capturedFilter.Conjunction != "and" {
-		t.Fatalf("unexpected captured filter %+v", capturedFilter)
-	}
-	if len(capturedFilter.Conditions) != 2 {
-		t.Fatalf("expected 2 conditions, got %d", len(capturedFilter.Conditions))
-	}
+		}
+
+		var client *Client
+		if transport == "sdk" {
+			fake := &fakeBitableAPI{
+				searchFn: func(ctx context.Context, call fakeSearchCall) (*larkbitable.SearchAppTableRecordResp, error) {
+					if call.Body != nil {
+						capturedFilterSDK = call.Body.Filter
+					}
+					return okSearchResp(nil, false, ""), nil
+				},
+			}
+			client = newSDKTestClient(fake, nil)
+		} else {
+			client = newHTTPTestClient(doJSON)
+		}
+
+		if _, _, err := client.listBitableRecords(ctx, ref, 200, opts); err != nil {
+			t.Fatalf("listBitableRecords returned error: %v", err)
+		}
+
+		var captured *larkbitable.FilterInfo
+		if transport == "sdk" {
+			captured = capturedFilterSDK
+		} else if capturedFilterHTTP != nil {
+			captured = &larkbitable.FilterInfo{
+				Conjunction: capturedFilterHTTP.Conjunction,
+				Conditions:  capturedFilterHTTP.Conditions,
+				Children:    capturedFilterHTTP.Children,
+			}
+		}
+
+		if captured == nil || captured.Conjunction == nil || *captured.Conjunction != "and" {
+			t.Fatalf("unexpected captured filter %+v", captured)
+		}
+		if len(captured.Conditions) != 2 {
+			t.Fatalf("expected 2 conditions, got %d", len(captured.Conditions))
+		}
+	})
 }
 
 func TestCreateTaskRecords(t *testing.T) {
-	const wikiResponse = `{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnCreateToken","obj_type":"bitable"}}}`
-	const batchCreateResponse = `{"code":0,"msg":"success","data":{"records":[{"record_id":"recAAA"},{"record_id":"recBBB"}]}}`
+	runBitableTransports(t, func(t *testing.T, transport string) {
+		const wikiResponse = `{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnCreateToken","obj_type":"bitable"}}}`
 
-	ctx := context.Background()
-	var (
-		wikiCalled   bool
-		createCalled bool
-		captured     map[string]any
-	)
-	client := &Client{
-		doJSONRequestFunc: func(ctx context.Context, method, path string, payload any) (*http.Response, []byte, error) {
+		ctx := context.Background()
+		var (
+			wikiCalledHTTP bool
+			wikiCalledSDK  bool
+		)
+
+		var (
+			createCalled bool
+			capturedCall fakeBatchCreateCall
+			captured     map[string]any
+		)
+
+		when := time.Date(2024, 10, 1, 12, 0, 0, 0, time.UTC)
+		records := []TaskRecordInput{
+			{TaskID: 301, Params: `{"foo":1}`, App: "netease", Scene: "parse", Datetime: &when, Status: "pending", UserID: "user-123", UserName: "tester", Extra: "0.90"},
+			{TaskID: 0, Params: `{"foo":2}`, DatetimeRaw: "2024-10-02 08:00:00", Status: "queued"},
+		}
+		override := &TaskFields{Status: "biz_status"}
+
+		doJSON := func(ctx context.Context, method, path string, payload any) (*http.Response, []byte, error) {
 			switch {
-			case method == http.MethodGet && strings.Contains(path, "/wiki/v2/spaces/get_node"):
-				wikiCalled = true
+			case transport == "http" && method == http.MethodGet && strings.Contains(path, "/wiki/v2/spaces/get_node"):
+				wikiCalledHTTP = true
 				return nil, []byte(wikiResponse), nil
-			case method == http.MethodPost && strings.Contains(path, "/records/batch_create"):
+			case transport == "http" && method == http.MethodPost && strings.Contains(path, "/records/batch_create"):
 				createCalled = true
 				m, ok := payload.(map[string]any)
 				if !ok {
 					t.Fatalf("expected map payload, got %T", payload)
 				}
 				captured = m
-				return nil, []byte(batchCreateResponse), nil
+				return nil, []byte(`{"code":0,"msg":"success","data":{"records":[{"record_id":"recAAA"},{"record_id":"recBBB"}]}}`), nil
 			default:
 				t.Fatalf("unexpected request %s %s", method, path)
 			}
 			return nil, nil, nil
-		},
-	}
+		}
 
-	when := time.Date(2024, 10, 1, 12, 0, 0, 0, time.UTC)
-	records := []TaskRecordInput{
-		{TaskID: 301, Params: `{"foo":1}`, App: "netease", Scene: "parse", Datetime: &when, Status: "pending", UserID: "user-123", UserName: "tester", Extra: "0.90"},
-		{TaskID: 0, Params: `{"foo":2}`, DatetimeRaw: "2024-10-02 08:00:00", Status: "queued"},
-	}
-	override := &TaskFields{Status: "biz_status"}
-	ids, err := client.CreateTaskRecords(ctx, liveWritableBitableURL, records, override)
-	if err != nil {
-		t.Fatalf("CreateTaskRecords returned error: %v", err)
-	}
-	if !wikiCalled || !createCalled {
-		t.Fatalf("expected wiki and batch create calls, got wiki=%v create=%v", wikiCalled, createCalled)
-	}
-	if len(ids) != 2 || ids[0] != "recAAA" || ids[1] != "recBBB" {
-		t.Fatalf("unexpected ids %#v", ids)
-	}
-	recordPayloads, ok := captured["records"].([]map[string]any)
-	if !ok {
-		t.Fatalf("captured records is %T", captured["records"])
-	}
-	if len(recordPayloads) != 2 {
-		t.Fatalf("expected 2 record payloads, got %d", len(recordPayloads))
-	}
-	firstFields, ok := recordPayloads[0]["fields"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected fields map, got %T", recordPayloads[0]["fields"])
-	}
-	if firstFields[DefaultTaskFields.TaskID] != int64(301) {
-		t.Fatalf("unexpected task id payload %#v", firstFields[DefaultTaskFields.TaskID])
-	}
-	if firstFields["biz_status"] != "pending" {
-		t.Fatalf("expected biz_status pending, got %#v", firstFields["biz_status"])
-	}
-	if _, exists := firstFields[DefaultTaskFields.Status]; exists {
-		t.Fatalf("default status field should be absent when override is set")
-	}
-	if firstFields[DefaultTaskFields.Date] != when.Format(time.RFC3339) {
-		t.Fatalf("unexpected datetime %v", firstFields[DefaultTaskFields.Date])
-	}
-	secondFields, ok := recordPayloads[1]["fields"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected fields map for second record, got %T", recordPayloads[1]["fields"])
-	}
-	if _, exists := secondFields[DefaultTaskFields.TaskID]; exists {
-		t.Fatalf("TaskID should be omitted for auto-increment scenario, got %#v", secondFields[DefaultTaskFields.TaskID])
-	}
-	if secondFields[DefaultTaskFields.Date] != "2024-10-02 08:00:00" {
-		t.Fatalf("expected raw datetime preserved, got %#v", secondFields[DefaultTaskFields.Date])
-	}
+		var client *Client
+		if transport == "sdk" {
+			fake := &fakeBitableAPI{
+				batchCreateFn: func(ctx context.Context, call fakeBatchCreateCall) (*larkbitable.BatchCreateAppTableRecordResp, error) {
+					createCalled = true
+					capturedCall = call
+					return okBatchCreateResp([]*larkbitable.AppTableRecord{
+						{RecordId: larkcore.StringPtr("recAAA")},
+						{RecordId: larkcore.StringPtr("recBBB")},
+					}), nil
+				},
+			}
+			client = newSDKTestClient(fake, nil)
+			client.wikiAPI = &fakeWikiAPI{
+				getNodeFn: func(ctx context.Context, token string, options ...larkcore.RequestOptionFunc) (*larkwiki.GetNodeSpaceResp, error) {
+					wikiCalledSDK = true
+					return okWikiGetNodeResp("bascnCreateToken", "bitable"), nil
+				},
+			}
+		} else {
+			client = newHTTPTestClient(doJSON)
+		}
+
+		ids, err := client.CreateTaskRecords(ctx, liveWritableBitableURL, records, override)
+		if err != nil {
+			t.Fatalf("CreateTaskRecords returned error: %v", err)
+		}
+		if transport == "sdk" && (!wikiCalledSDK || !createCalled) {
+			t.Fatalf("expected sdk wiki + batch create calls, got wiki=%v create=%v", wikiCalledSDK, createCalled)
+		}
+		if transport == "http" && (!wikiCalledHTTP || !createCalled) {
+			t.Fatalf("expected http wiki + batch create calls, got wiki=%v create=%v", wikiCalledHTTP, createCalled)
+		}
+		if len(ids) != 2 || ids[0] != "recAAA" || ids[1] != "recBBB" {
+			t.Fatalf("unexpected ids %#v", ids)
+		}
+
+		var fieldRows []map[string]any
+		if transport == "sdk" {
+			if capturedCall.Body == nil || len(capturedCall.Body.Records) != 2 {
+				t.Fatalf("expected 2 record payloads, got %#v", capturedCall.Body)
+			}
+			for _, rec := range capturedCall.Body.Records {
+				fieldRows = append(fieldRows, rec.Fields)
+			}
+		} else {
+			recordPayloads, ok := captured["records"].([]map[string]any)
+			if !ok || len(recordPayloads) != 2 {
+				t.Fatalf("expected 2 record payloads, got %#v", captured)
+			}
+			for _, rec := range recordPayloads {
+				fields, ok := rec["fields"].(map[string]any)
+				if !ok {
+					t.Fatalf("expected fields map, got %T", rec["fields"])
+				}
+				fieldRows = append(fieldRows, fields)
+			}
+		}
+
+		firstFields := fieldRows[0]
+		if firstFields[DefaultTaskFields.TaskID] != int64(301) {
+			t.Fatalf("unexpected task id payload %#v", firstFields[DefaultTaskFields.TaskID])
+		}
+		if firstFields["biz_status"] != "pending" {
+			t.Fatalf("expected biz_status pending, got %#v", firstFields["biz_status"])
+		}
+		if _, exists := firstFields[DefaultTaskFields.Status]; exists {
+			t.Fatalf("default status field should be absent when override is set")
+		}
+		if firstFields[DefaultTaskFields.Date] != when.Format(time.RFC3339) {
+			t.Fatalf("unexpected datetime %v", firstFields[DefaultTaskFields.Date])
+		}
+		secondFields := fieldRows[1]
+		if _, exists := secondFields[DefaultTaskFields.TaskID]; exists {
+			t.Fatalf("TaskID should be omitted for auto-increment scenario, got %#v", secondFields[DefaultTaskFields.TaskID])
+		}
+		if secondFields[DefaultTaskFields.Date] != "2024-10-02 08:00:00" {
+			t.Fatalf("expected raw datetime preserved, got %#v", secondFields[DefaultTaskFields.Date])
+		}
+	})
 }
 
 func TestBuildTaskRecordPayloadsParentTaskID(t *testing.T) {
@@ -601,57 +1086,92 @@ func TestBuildTaskRecordPayloadsDatetimeMs(t *testing.T) {
 }
 
 func TestCreateTaskRecordSingle(t *testing.T) {
-	const wikiResponse = `{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnSingle","obj_type":"bitable"}}}`
-	const createResponse = `{"code":0,"msg":"success","data":{"record":{"record_id":"recSingle"}}}`
+	runBitableTransports(t, func(t *testing.T, transport string) {
+		const wikiResponse = `{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnSingle","obj_type":"bitable"}}}`
+		const createResponse = `{"code":0,"msg":"success","data":{"record":{"record_id":"recSingle"}}}`
 
-	ctx := context.Background()
-	var (
-		wikiCalled   bool
-		createCalled bool
-		captured     map[string]any
-	)
-	client := &Client{
-		doJSONRequestFunc: func(ctx context.Context, method, path string, payload any) (*http.Response, []byte, error) {
+		ctx := context.Background()
+		var (
+			wikiCalledHTTP bool
+			wikiCalledSDK  bool
+			createCalled   bool
+			capturedHTTP   map[string]any
+			capturedSDK    map[string]any
+		)
+
+		doJSON := func(ctx context.Context, method, path string, payload any) (*http.Response, []byte, error) {
 			switch {
-			case method == http.MethodGet && strings.Contains(path, "/wiki/v2/spaces/get_node"):
-				wikiCalled = true
+			case transport == "http" && method == http.MethodGet && strings.Contains(path, "/wiki/v2/spaces/get_node"):
+				wikiCalledHTTP = true
 				return nil, []byte(wikiResponse), nil
-			case method == http.MethodPost && strings.Contains(path, "/records") && !strings.Contains(path, "batch_create"):
+			case transport == "http" && method == http.MethodPost && strings.Contains(path, "/records") && !strings.Contains(path, "batch_create"):
 				createCalled = true
 				m, ok := payload.(map[string]any)
 				if !ok {
 					t.Fatalf("expected map payload, got %T", payload)
 				}
-				captured = m
+				capturedHTTP = m
 				return nil, []byte(createResponse), nil
 			default:
 				t.Fatalf("unexpected request %s %s", method, path)
 			}
 			return nil, nil, nil
-		},
-	}
+		}
 
-	rec := TaskRecordInput{Status: "pending"}
-	id, err := client.CreateTaskRecord(ctx, liveWritableBitableURL, rec, nil)
-	if err != nil {
-		t.Fatalf("CreateTaskRecord error: %v", err)
-	}
-	if id != "recSingle" {
-		t.Fatalf("unexpected id %q", id)
-	}
-	if !wikiCalled || !createCalled {
-		t.Fatalf("expected both wiki and create calls")
-	}
-	fields, ok := captured["fields"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected fields map, got %T", captured["fields"])
-	}
-	if _, exists := fields[DefaultTaskFields.TaskID]; exists {
-		t.Fatalf("TaskID should be omitted when not provided, got %#v", fields[DefaultTaskFields.TaskID])
-	}
-	if fields[DefaultTaskFields.Status] != "pending" {
-		t.Fatalf("unexpected status %#v", fields[DefaultTaskFields.Status])
-	}
+		var client *Client
+		if transport == "sdk" {
+			fake := &fakeBitableAPI{
+				createFn: func(ctx context.Context, call fakeCreateCall) (*larkbitable.CreateAppTableRecordResp, error) {
+					createCalled = true
+					if call.Record != nil {
+						capturedSDK = call.Record.Fields
+					}
+					return okCreateResp("recSingle", nil), nil
+				},
+			}
+			client = newSDKTestClient(fake, nil)
+			client.wikiAPI = &fakeWikiAPI{
+				getNodeFn: func(ctx context.Context, token string, options ...larkcore.RequestOptionFunc) (*larkwiki.GetNodeSpaceResp, error) {
+					wikiCalledSDK = true
+					return okWikiGetNodeResp("bascnSingle", "bitable"), nil
+				},
+			}
+		} else {
+			client = newHTTPTestClient(doJSON)
+		}
+
+		rec := TaskRecordInput{Status: "pending"}
+		id, err := client.CreateTaskRecord(ctx, liveWritableBitableURL, rec, nil)
+		if err != nil {
+			t.Fatalf("CreateTaskRecord error: %v", err)
+		}
+		if id != "recSingle" {
+			t.Fatalf("unexpected id %q", id)
+		}
+		if transport == "sdk" && (!wikiCalledSDK || !createCalled) {
+			t.Fatalf("expected sdk wiki + create calls")
+		}
+		if transport == "http" && (!wikiCalledHTTP || !createCalled) {
+			t.Fatalf("expected http wiki + create calls")
+		}
+
+		var fields map[string]any
+		if transport == "sdk" {
+			fields = capturedSDK
+		} else {
+			var ok bool
+			fields, ok = capturedHTTP["fields"].(map[string]any)
+			if !ok {
+				t.Fatalf("expected fields map, got %T", capturedHTTP["fields"])
+			}
+		}
+		if _, exists := fields[DefaultTaskFields.TaskID]; exists {
+			t.Fatalf("TaskID should be omitted when not provided, got %#v", fields[DefaultTaskFields.TaskID])
+		}
+		if fields[DefaultTaskFields.Status] != "pending" {
+			t.Fatalf("unexpected status %#v", fields[DefaultTaskFields.Status])
+		}
+	})
 }
 
 func TestBuildResultRecordPayloads(t *testing.T) {
@@ -707,340 +1227,443 @@ func TestBuildResultRecordPayloads(t *testing.T) {
 }
 
 func TestCreateResultRecords(t *testing.T) {
-	const wikiResponse = `{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnResult","obj_type":"bitable"}}}`
-	const batchCreateResponse = `{"code":0,"msg":"success","data":{"records":[{"record_id":"recRes1"},{"record_id":"recRes2"}]}}`
+	runBitableTransports(t, func(t *testing.T, transport string) {
+		const wikiResponse = `{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnResult","obj_type":"bitable"}}}`
 
-	ctx := context.Background()
-	var (
-		wikiCalled   bool
-		batchCalled  bool
-		capturedBody map[string]any
-	)
-	client := &Client{
-		doJSONRequestFunc: func(ctx context.Context, method, path string, payload any) (*http.Response, []byte, error) {
+		ctx := context.Background()
+		var (
+			wikiCalledHTTP bool
+			wikiCalledSDK  bool
+			batchCalled    bool
+		)
+
+		var (
+			capturedCall fakeBatchCreateCall
+			capturedBody map[string]any
+		)
+
+		doJSON := func(ctx context.Context, method, path string, payload any) (*http.Response, []byte, error) {
 			switch {
-			case method == http.MethodGet && strings.Contains(path, "/wiki/v2/spaces/get_node"):
-				wikiCalled = true
+			case transport == "http" && method == http.MethodGet && strings.Contains(path, "/wiki/v2/spaces/get_node"):
+				wikiCalledHTTP = true
 				return nil, []byte(wikiResponse), nil
-			case method == http.MethodPost && strings.Contains(path, "/records/batch_create"):
+			case transport == "http" && method == http.MethodPost && strings.Contains(path, "/records/batch_create"):
 				batchCalled = true
 				m, ok := payload.(map[string]any)
 				if !ok {
 					t.Fatalf("expected map payload, got %T", payload)
 				}
 				capturedBody = m
-				return nil, []byte(batchCreateResponse), nil
+				return nil, []byte(`{"code":0,"msg":"success","data":{"records":[{"record_id":"recRes1"},{"record_id":"recRes2"}]}}`), nil
 			default:
 				t.Fatalf("unexpected request %s %s", method, path)
 			}
 			return nil, nil, nil
-		},
-	}
+		}
 
-	records := []ResultRecordInput{
-		{
-			DeviceSerial: "dev-1",
-			App:          "netease",
-			Scene:        "auto",
-			Params:       "{}",
-			ItemID:       "item-1",
-			Extra:        map[string]any{"id": 1},
-		},
-		{
-			DeviceSerial: "dev-2",
-			App:          "douyin",
-			Scene:        "manual",
-			ItemID:       "item-2",
-			Extra:        json.RawMessage(`{"id":2}`),
-		},
-	}
-	ids, err := client.CreateResultRecords(ctx, liveResultBitableURL, records, nil)
-	if err != nil {
-		t.Fatalf("CreateResultRecords returned error: %v", err)
-	}
-	if !wikiCalled || !batchCalled {
-		t.Fatalf("expected wiki and batch create calls, got wiki=%v batch=%v", wikiCalled, batchCalled)
-	}
-	if len(ids) != 2 || ids[0] != "recRes1" || ids[1] != "recRes2" {
-		t.Fatalf("unexpected ids %#v", ids)
-	}
-	payloadRecords, ok := capturedBody["records"].([]map[string]any)
-	if !ok {
-		t.Fatalf("records payload is %T", capturedBody["records"])
-	}
-	first, ok := payloadRecords[0]["fields"].(map[string]any)
-	if !ok {
-		t.Fatalf("fields payload type %T", payloadRecords[0]["fields"])
-	}
-	if first[DefaultResultFields.DeviceSerial] != "dev-1" {
-		t.Fatalf("unexpected dispatched device %#v", first[DefaultResultFields.DeviceSerial])
-	}
-	if _, ok := first[DefaultResultFields.Extra].(string); !ok {
-		t.Fatalf("payload json should be string, got %#v", first[DefaultResultFields.Extra])
-	}
+		var client *Client
+		if transport == "sdk" {
+			fake := &fakeBitableAPI{
+				batchCreateFn: func(ctx context.Context, call fakeBatchCreateCall) (*larkbitable.BatchCreateAppTableRecordResp, error) {
+					batchCalled = true
+					capturedCall = call
+					return okBatchCreateResp([]*larkbitable.AppTableRecord{
+						{RecordId: larkcore.StringPtr("recRes1")},
+						{RecordId: larkcore.StringPtr("recRes2")},
+					}), nil
+				},
+			}
+			client = newSDKTestClient(fake, nil)
+			client.wikiAPI = &fakeWikiAPI{
+				getNodeFn: func(ctx context.Context, token string, options ...larkcore.RequestOptionFunc) (*larkwiki.GetNodeSpaceResp, error) {
+					wikiCalledSDK = true
+					return okWikiGetNodeResp("bascnResult", "bitable"), nil
+				},
+			}
+		} else {
+			client = newHTTPTestClient(doJSON)
+		}
+
+		records := []ResultRecordInput{
+			{
+				DeviceSerial: "dev-1",
+				App:          "netease",
+				Scene:        "auto",
+				Params:       "{}",
+				ItemID:       "item-1",
+				Extra:        map[string]any{"id": 1},
+			},
+			{
+				DeviceSerial: "dev-2",
+				App:          "douyin",
+				Scene:        "manual",
+				ItemID:       "item-2",
+				Extra:        json.RawMessage(`{"id":2}`),
+			},
+		}
+		ids, err := client.CreateResultRecords(ctx, liveResultBitableURL, records, nil)
+		if err != nil {
+			t.Fatalf("CreateResultRecords returned error: %v", err)
+		}
+		if transport == "sdk" && (!wikiCalledSDK || !batchCalled) {
+			t.Fatalf("expected sdk wiki and batch create calls, got wiki=%v batch=%v", wikiCalledSDK, batchCalled)
+		}
+		if transport == "http" && (!wikiCalledHTTP || !batchCalled) {
+			t.Fatalf("expected http wiki and batch create calls, got wiki=%v batch=%v", wikiCalledHTTP, batchCalled)
+		}
+		if len(ids) != 2 || ids[0] != "recRes1" || ids[1] != "recRes2" {
+			t.Fatalf("unexpected ids %#v", ids)
+		}
+
+		var firstFields map[string]any
+		if transport == "sdk" {
+			if capturedCall.Body == nil || len(capturedCall.Body.Records) == 0 {
+				t.Fatalf("records payload is %#v", capturedCall.Body)
+			}
+			firstFields = capturedCall.Body.Records[0].Fields
+		} else {
+			payloadRecords, ok := capturedBody["records"].([]map[string]any)
+			if !ok || len(payloadRecords) == 0 {
+				t.Fatalf("records payload is %#v", capturedBody)
+			}
+			fields, ok := payloadRecords[0]["fields"].(map[string]any)
+			if !ok {
+				t.Fatalf("fields payload type %T", payloadRecords[0]["fields"])
+			}
+			firstFields = fields
+		}
+
+		if firstFields[DefaultResultFields.DeviceSerial] != "dev-1" {
+			t.Fatalf("unexpected dispatched device %#v", firstFields[DefaultResultFields.DeviceSerial])
+		}
+		if _, ok := firstFields[DefaultResultFields.Extra].(string); !ok {
+			t.Fatalf("payload json should be string, got %#v", firstFields[DefaultResultFields.Extra])
+		}
+	})
 }
 
 func TestCreateResultRecordSingle(t *testing.T) {
-	const wikiResponse = `{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnResultSingle","obj_type":"bitable"}}}`
-	const createResponse = `{"code":0,"msg":"success","data":{"record":{"record_id":"recResSingle"}}}`
+	runBitableTransports(t, func(t *testing.T, transport string) {
+		const wikiResponse = `{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnResultSingle","obj_type":"bitable"}}}`
+		const createResponse = `{"code":0,"msg":"success","data":{"record":{"record_id":"recResSingle"}}}`
 
-	ctx := context.Background()
-	var (
-		wikiCalled      bool
-		createCalled    bool
-		capturedPayload map[string]any
-	)
-	client := &Client{
-		doJSONRequestFunc: func(ctx context.Context, method, path string, payload any) (*http.Response, []byte, error) {
+		ctx := context.Background()
+		var (
+			wikiCalledHTTP bool
+			wikiCalledSDK  bool
+			createCalled   bool
+			capturedHTTP   map[string]any
+			capturedSDK    map[string]any
+		)
+
+		doJSON := func(ctx context.Context, method, path string, payload any) (*http.Response, []byte, error) {
 			switch {
-			case method == http.MethodGet && strings.Contains(path, "/wiki/v2/spaces/get_node"):
-				wikiCalled = true
+			case transport == "http" && method == http.MethodGet && strings.Contains(path, "/wiki/v2/spaces/get_node"):
+				wikiCalledHTTP = true
 				return nil, []byte(wikiResponse), nil
-			case method == http.MethodPost && strings.Contains(path, "/records") && !strings.Contains(path, "batch_create"):
+			case transport == "http" && method == http.MethodPost && strings.Contains(path, "/records") && !strings.Contains(path, "batch_create"):
 				createCalled = true
 				m, ok := payload.(map[string]any)
 				if !ok {
 					t.Fatalf("expected map payload, got %T", payload)
 				}
-				capturedPayload = m
+				capturedHTTP = m
 				return nil, []byte(createResponse), nil
 			default:
 				t.Fatalf("unexpected request %s %s", method, path)
 			}
 			return nil, nil, nil
-		},
-	}
+		}
 
-	id, err := client.CreateResultRecord(ctx, liveResultBitableURL, ResultRecordInput{
-		DeviceSerial: "dev-only",
-		App:          "netease",
-		Extra:        map[string]any{"ok": true},
-	}, nil)
-	if err != nil {
-		t.Fatalf("CreateResultRecord returned error: %v", err)
-	}
-	if id != "recResSingle" {
-		t.Fatalf("unexpected record id %q", id)
-	}
-	if !wikiCalled || !createCalled {
-		t.Fatalf("expected wiki and create calls")
-	}
-	fields, ok := capturedPayload["fields"].(map[string]any)
-	if !ok {
-		t.Fatalf("fields payload type %T", capturedPayload["fields"])
-	}
-	if fields[DefaultResultFields.DeviceSerial] != "dev-only" {
-		t.Fatalf("unexpected dispatched device %#v", fields[DefaultResultFields.DeviceSerial])
-	}
-	if _, ok := fields[DefaultResultFields.Extra].(string); !ok {
-		t.Fatalf("payload json should be string, got %#v", fields[DefaultResultFields.Extra])
-	}
+		var client *Client
+		if transport == "sdk" {
+			fake := &fakeBitableAPI{
+				createFn: func(ctx context.Context, call fakeCreateCall) (*larkbitable.CreateAppTableRecordResp, error) {
+					createCalled = true
+					if call.Record != nil {
+						capturedSDK = call.Record.Fields
+					}
+					return okCreateResp("recResSingle", nil), nil
+				},
+			}
+			client = newSDKTestClient(fake, nil)
+			client.wikiAPI = &fakeWikiAPI{
+				getNodeFn: func(ctx context.Context, token string, options ...larkcore.RequestOptionFunc) (*larkwiki.GetNodeSpaceResp, error) {
+					wikiCalledSDK = true
+					return okWikiGetNodeResp("bascnResultSingle", "bitable"), nil
+				},
+			}
+		} else {
+			client = newHTTPTestClient(doJSON)
+		}
+
+		id, err := client.CreateResultRecord(ctx, liveResultBitableURL, ResultRecordInput{
+			DeviceSerial: "dev-only",
+			App:          "netease",
+			Extra:        map[string]any{"ok": true},
+		}, nil)
+		if err != nil {
+			t.Fatalf("CreateResultRecord returned error: %v", err)
+		}
+		if id != "recResSingle" {
+			t.Fatalf("unexpected record id %q", id)
+		}
+		if transport == "sdk" && (!wikiCalledSDK || !createCalled) {
+			t.Fatalf("expected sdk wiki and create calls")
+		}
+		if transport == "http" && (!wikiCalledHTTP || !createCalled) {
+			t.Fatalf("expected http wiki and create calls")
+		}
+
+		var fields map[string]any
+		if transport == "sdk" {
+			fields = capturedSDK
+		} else {
+			var ok bool
+			fields, ok = capturedHTTP["fields"].(map[string]any)
+			if !ok {
+				t.Fatalf("fields payload type %T", capturedHTTP["fields"])
+			}
+		}
+		if fields[DefaultResultFields.DeviceSerial] != "dev-only" {
+			t.Fatalf("unexpected dispatched device %#v", fields[DefaultResultFields.DeviceSerial])
+		}
+		if _, ok := fields[DefaultResultFields.Extra].(string); !ok {
+			t.Fatalf("payload json should be string, got %#v", fields[DefaultResultFields.Extra])
+		}
+	})
 }
 
 func TestUpdateTaskStatuses(t *testing.T) {
-	const wikiResponse = `{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnUpdate","obj_type":"bitable"}}}`
-	const customStatusField = "biz_status"
-	listResponseData := map[string]any{
-		"code": 0,
-		"msg":  "success",
-		"data": map[string]any{
-			"items": []map[string]any{
-				{
-					"record_id": "recA1",
-					"fields": map[string]any{
-						DefaultTaskFields.TaskID: 101,
-						customStatusField:        "pending",
-					},
-				},
-				{
-					"record_id": "recA2",
-					"fields": map[string]any{
-						DefaultTaskFields.TaskID: 102,
-						customStatusField:        "pending",
-					},
-				},
-			},
-			"has_more":   false,
-			"page_token": "",
-		},
-	}
-	listResponse, err := json.Marshal(listResponseData)
-	if err != nil {
-		t.Fatalf("marshal list response: %v", err)
-	}
-	const updateResponse = `{"code":0,"msg":"success"}`
+	runBitableTransports(t, func(t *testing.T, transport string) {
+		const wikiResponse = `{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnUpdate","obj_type":"bitable"}}}`
+		const customStatusField = "biz_status"
+		const updateResponse = `{"code":0,"msg":"success"}`
 
-	ctx := context.Background()
-	var (
-		wikiCalled bool
-		listCalled bool
-		updates    []map[string]any
-	)
-	client := &Client{
-		doJSONRequestFunc: func(ctx context.Context, method, path string, payload any) (*http.Response, []byte, error) {
+		ctx := context.Background()
+		var (
+			wikiCalledHTTP bool
+			wikiCalledSDK  bool
+			listCalled     bool
+			updates        []map[string]any
+		)
+
+		doJSON := func(ctx context.Context, method, path string, payload any) (*http.Response, []byte, error) {
 			switch {
-			case method == http.MethodGet && strings.Contains(path, "/wiki/v2/spaces/get_node"):
-				wikiCalled = true
+			case transport == "http" && method == http.MethodGet && strings.Contains(path, "/wiki/v2/spaces/get_node"):
+				wikiCalledHTTP = true
 				return nil, []byte(wikiResponse), nil
-			case method == http.MethodPost && strings.Contains(path, "/bitable/v1/apps/") && strings.Contains(path, "/records/search"):
-				listCalled = true
-				return nil, listResponse, nil
-			case method == http.MethodPut && strings.Contains(path, "/records/rec"):
+			case transport == "http" && method == http.MethodPut && strings.Contains(path, "/records/rec"):
 				m, ok := payload.(map[string]any)
 				if !ok {
 					t.Fatalf("expected map payload, got %T", payload)
 				}
 				updates = append(updates, m)
 				return nil, []byte(updateResponse), nil
+			case transport == "http" && method == http.MethodPost && strings.Contains(path, "/records/search"):
+				listCalled = true
+				return nil, []byte(`{"code":0,"msg":"success","data":{"items":[{"record_id":"recA1","fields":{"TaskID":101,"biz_status":"pending"}},{"record_id":"recA2","fields":{"TaskID":102,"biz_status":"pending"}}],"has_more":false,"page_token":""}}`), nil
 			default:
 				t.Fatalf("unexpected request %s %s", method, path)
 			}
 			return nil, nil, nil
-		},
-	}
+		}
 
-	changes := []TaskStatusUpdate{{TaskID: 101, NewStatus: StatusDownloaderProcessing}, {TaskID: 102, NewStatus: "done"}}
-	override := &TaskFields{Status: customStatusField}
-	if err := client.UpdateTaskStatuses(ctx, liveWritableBitableURL, changes, override); err != nil {
-		t.Fatalf("UpdateTaskStatuses returned error: %v", err)
-	}
-	if !wikiCalled || !listCalled {
-		t.Fatalf("expected wiki and list calls")
-	}
-	if len(updates) != 2 {
-		t.Fatalf("expected 2 update calls, got %d", len(updates))
-	}
-	firstFields, ok := updates[0]["fields"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected fields map, got %T", updates[0]["fields"])
-	}
-	if firstFields[customStatusField] != StatusDownloaderProcessing {
-		t.Fatalf("unexpected first status %#v", firstFields[customStatusField])
-	}
-	secondFields, ok := updates[1]["fields"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected fields map, got %T", updates[1]["fields"])
-	}
-	if secondFields[customStatusField] != "done" {
-		t.Fatalf("unexpected second status %#v", secondFields[customStatusField])
-	}
+		var client *Client
+		if transport == "sdk" {
+			fake := &fakeBitableAPI{
+				searchFn: func(ctx context.Context, call fakeSearchCall) (*larkbitable.SearchAppTableRecordResp, error) {
+					listCalled = true
+					return okSearchResp([]*larkbitable.AppTableRecord{
+						{
+							RecordId: larkcore.StringPtr("recA1"),
+							Fields: map[string]any{
+								DefaultTaskFields.TaskID: int64(101),
+								customStatusField:        "pending",
+							},
+						},
+						{
+							RecordId: larkcore.StringPtr("recA2"),
+							Fields: map[string]any{
+								DefaultTaskFields.TaskID: int64(102),
+								customStatusField:        "pending",
+							},
+						},
+					}, false, ""), nil
+				},
+				updateFn: func(ctx context.Context, call fakeUpdateCall) (*larkbitable.UpdateAppTableRecordResp, error) {
+					fields := map[string]any{}
+					if call.AppRecord != nil {
+						fields = call.AppRecord.Fields
+					}
+					updates = append(updates, map[string]any{
+						"fields": fields,
+					})
+					return okUpdateResp(call.RecordID, nil), nil
+				},
+			}
+			client = newSDKTestClient(fake, nil)
+			client.wikiAPI = &fakeWikiAPI{
+				getNodeFn: func(ctx context.Context, token string, options ...larkcore.RequestOptionFunc) (*larkwiki.GetNodeSpaceResp, error) {
+					wikiCalledSDK = true
+					return okWikiGetNodeResp("bascnUpdate", "bitable"), nil
+				},
+			}
+		} else {
+			client = newHTTPTestClient(doJSON)
+		}
+
+		changes := []TaskStatusUpdate{{TaskID: 101, NewStatus: StatusDownloaderProcessing}, {TaskID: 102, NewStatus: "done"}}
+		override := &TaskFields{Status: customStatusField}
+		if err := client.UpdateTaskStatuses(ctx, liveWritableBitableURL, changes, override); err != nil {
+			t.Fatalf("UpdateTaskStatuses returned error: %v", err)
+		}
+		if transport == "sdk" && (!wikiCalledSDK || !listCalled) {
+			t.Fatalf("expected sdk wiki and list calls")
+		}
+		if transport == "http" && (!wikiCalledHTTP || !listCalled) {
+			t.Fatalf("expected http wiki and list calls")
+		}
+		if len(updates) != 2 {
+			t.Fatalf("expected 2 update calls, got %d", len(updates))
+		}
+		firstFields, ok := updates[0]["fields"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected fields map, got %T", updates[0]["fields"])
+		}
+		if firstFields[customStatusField] != StatusDownloaderProcessing {
+			t.Fatalf("unexpected first status %#v", firstFields[customStatusField])
+		}
+		secondFields, ok := updates[1]["fields"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected fields map, got %T", updates[1]["fields"])
+		}
+		if secondFields[customStatusField] != "done" {
+			t.Fatalf("unexpected second status %#v", secondFields[customStatusField])
+		}
+	})
 }
 
 func TestFetchTaskTableWithOptionsRespectsPagingCursor(t *testing.T) {
-	const wikiResponse = `{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnPage","obj_type":"bitable"}}}`
-	firstPage := map[string]any{
-		"code": 0,
-		"msg":  "success",
-		"data": map[string]any{
-			"items": []map[string]any{
-				{
-					"record_id": "recP1",
-					"fields": map[string]any{
-						DefaultTaskFields.TaskID: 201,
-						DefaultTaskFields.Status: "pending",
-					},
-				},
-			},
-			"has_more":   true,
-			"page_token": "p2",
-		},
-	}
-	secondPage := map[string]any{
-		"code": 0,
-		"msg":  "success",
-		"data": map[string]any{
-			"items": []map[string]any{
-				{
-					"record_id": "recP2",
-					"fields": map[string]any{
-						DefaultTaskFields.TaskID: 202,
-						DefaultTaskFields.Status: "pending",
-					},
-				},
-			},
-			"has_more":   false,
-			"page_token": "",
-		},
-	}
-	firstRaw, err := json.Marshal(firstPage)
-	if err != nil {
-		t.Fatalf("marshal first page: %v", err)
-	}
-	secondRaw, err := json.Marshal(secondPage)
-	if err != nil {
-		t.Fatalf("marshal second page: %v", err)
-	}
+	runBitableTransports(t, func(t *testing.T, transport string) {
+		const wikiResponse = `{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnPage","obj_type":"bitable"}}}`
 
-	ctx := context.Background()
-	var (
-		wikiCalled bool
-		pageCalls  []string
-	)
-	client := &Client{
-		doJSONRequestFunc: func(ctx context.Context, method, path string, payload any) (*http.Response, []byte, error) {
+		ctx := context.Background()
+		var (
+			wikiCalledHTTP bool
+			wikiCalledSDK  bool
+			pageCalls      []string
+		)
+
+		doJSON := func(ctx context.Context, method, path string, payload any) (*http.Response, []byte, error) {
 			switch {
-			case method == http.MethodGet && strings.Contains(path, "/wiki/v2/spaces/get_node"):
-				wikiCalled = true
+			case transport == "http" && method == http.MethodGet && strings.Contains(path, "/wiki/v2/spaces/get_node"):
+				wikiCalledHTTP = true
 				return nil, []byte(wikiResponse), nil
-			case method == http.MethodPost && strings.Contains(path, "/bitable/v1/apps/") && strings.Contains(path, "/records/search"):
-				pageCalls = append(pageCalls, path)
-				if strings.Contains(path, "page_token=p2") {
-					return nil, secondRaw, nil
+			case transport == "http" && method == http.MethodPost && strings.Contains(path, "/records/search"):
+				pageToken := pageTokenFromPath(path)
+				pageCalls = append(pageCalls, pageToken)
+				if pageToken == "p2" {
+					return nil, []byte(`{"code":0,"msg":"success","data":{"items":[{"record_id":"recP2","fields":{"TaskID":202,"Status":"pending"}}],"has_more":false,"page_token":""}}`), nil
 				}
-				return nil, firstRaw, nil
+				return nil, []byte(`{"code":0,"msg":"success","data":{"items":[{"record_id":"recP1","fields":{"TaskID":201,"Status":"pending"}}],"has_more":true,"page_token":"p2"}}`), nil
 			default:
 				t.Fatalf("unexpected request %s %s", method, path)
 			}
 			return nil, nil, nil
-		},
-	}
+		}
 
-	table, err := client.FetchTaskTableWithOptions(ctx, liveReadableBitableURL, nil, &TaskQueryOptions{
-		Limit:    2000,
-		MaxPages: 1,
-	})
-	if err != nil {
-		t.Fatalf("FetchTaskTableWithOptions returned error: %v", err)
-	}
-	if !wikiCalled {
-		t.Fatalf("expected wiki call")
-	}
-	if table == nil {
-		t.Fatalf("expected table, got nil")
-	}
-	if len(table.Rows) != 1 {
-		t.Fatalf("expected 1 row, got %d", len(table.Rows))
-	}
-	if !table.HasMore || table.NextPageToken != "p2" {
-		t.Fatalf("expected hasMore=true and nextPageToken=p2, got hasMore=%v token=%q", table.HasMore, table.NextPageToken)
-	}
-	if table.Pages != 1 {
-		t.Fatalf("expected Pages=1, got %d", table.Pages)
-	}
+		var client *Client
+		if transport == "sdk" {
+			fake := &fakeBitableAPI{
+				searchFn: func(ctx context.Context, call fakeSearchCall) (*larkbitable.SearchAppTableRecordResp, error) {
+					pageCalls = append(pageCalls, call.PageToken)
+					if strings.TrimSpace(call.PageToken) == "p2" {
+						return okSearchResp([]*larkbitable.AppTableRecord{
+							{
+								RecordId: larkcore.StringPtr("recP2"),
+								Fields: map[string]any{
+									DefaultTaskFields.TaskID: int64(202),
+									DefaultTaskFields.Status: "pending",
+								},
+							},
+						}, false, ""), nil
+					}
+					return okSearchResp([]*larkbitable.AppTableRecord{
+						{
+							RecordId: larkcore.StringPtr("recP1"),
+							Fields: map[string]any{
+								DefaultTaskFields.TaskID: int64(201),
+								DefaultTaskFields.Status: "pending",
+							},
+						},
+					}, true, "p2"), nil
+				},
+			}
+			client = newSDKTestClient(fake, nil)
+			client.wikiAPI = &fakeWikiAPI{
+				getNodeFn: func(ctx context.Context, token string, options ...larkcore.RequestOptionFunc) (*larkwiki.GetNodeSpaceResp, error) {
+					wikiCalledSDK = true
+					return okWikiGetNodeResp("bascnPage", "bitable"), nil
+				},
+			}
+		} else {
+			client = newHTTPTestClient(doJSON)
+		}
 
-	table, err = client.FetchTaskTableWithOptions(ctx, liveReadableBitableURL, nil, &TaskQueryOptions{
-		Limit:     2000,
-		MaxPages:  1,
-		PageToken: "p2",
+		table, err := client.FetchTaskTableWithOptions(ctx, liveReadableBitableURL, nil, &TaskQueryOptions{
+			Limit:    2000,
+			MaxPages: 1,
+		})
+		if err != nil {
+			t.Fatalf("FetchTaskTableWithOptions returned error: %v", err)
+		}
+		if transport == "sdk" && !wikiCalledSDK {
+			t.Fatalf("expected sdk wiki call")
+		}
+		if transport == "http" && !wikiCalledHTTP {
+			t.Fatalf("expected http wiki call")
+		}
+		if table == nil {
+			t.Fatalf("expected table, got nil")
+		}
+		if len(table.Rows) != 1 {
+			t.Fatalf("expected 1 row, got %d", len(table.Rows))
+		}
+		if !table.HasMore || table.NextPageToken != "p2" {
+			t.Fatalf("expected hasMore=true and nextPageToken=p2, got hasMore=%v token=%q", table.HasMore, table.NextPageToken)
+		}
+		if table.Pages != 1 {
+			t.Fatalf("expected Pages=1, got %d", table.Pages)
+		}
+
+		table, err = client.FetchTaskTableWithOptions(ctx, liveReadableBitableURL, nil, &TaskQueryOptions{
+			Limit:     2000,
+			MaxPages:  1,
+			PageToken: "p2",
+		})
+		if err != nil {
+			t.Fatalf("FetchTaskTableWithOptions returned error: %v", err)
+		}
+		if table == nil {
+			t.Fatalf("expected table, got nil")
+		}
+		if len(table.Rows) != 1 {
+			t.Fatalf("expected 1 row, got %d", len(table.Rows))
+		}
+		if table.HasMore || table.NextPageToken != "" {
+			t.Fatalf("expected hasMore=false and empty nextPageToken, got hasMore=%v token=%q", table.HasMore, table.NextPageToken)
+		}
+		if table.Pages != 1 {
+			t.Fatalf("expected Pages=1, got %d", table.Pages)
+		}
+		if len(pageCalls) != 2 {
+			t.Fatalf("expected 2 search calls, got %d", len(pageCalls))
+		}
+		if strings.TrimSpace(pageCalls[0]) != "" || pageCalls[1] != "p2" {
+			t.Fatalf("unexpected page token calls %#v", pageCalls)
+		}
 	})
-	if err != nil {
-		t.Fatalf("FetchTaskTableWithOptions returned error: %v", err)
-	}
-	if table == nil {
-		t.Fatalf("expected table, got nil")
-	}
-	if len(table.Rows) != 1 {
-		t.Fatalf("expected 1 row, got %d", len(table.Rows))
-	}
-	if table.HasMore || table.NextPageToken != "" {
-		t.Fatalf("expected hasMore=false and empty nextPageToken, got hasMore=%v token=%q", table.HasMore, table.NextPageToken)
-	}
-	if table.Pages != 1 {
-		t.Fatalf("expected Pages=1, got %d", table.Pages)
-	}
-	if len(pageCalls) < 2 {
-		t.Fatalf("expected >=2 page calls, got %d", len(pageCalls))
-	}
 }
 
 func TestFetchTaskTableExampleLive(t *testing.T) {
