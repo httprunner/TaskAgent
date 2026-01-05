@@ -62,6 +62,19 @@ func decodeSingleURLMetadata(raw string) singleURLMetadata {
 		}
 		return singleURLMetadata{}
 	}
+	if strings.HasPrefix(trimmed, "{") {
+		var wrapper struct {
+			Attempts []singleURLAttempt `json:"attempts"`
+		}
+		if err := json.Unmarshal([]byte(trimmed), &wrapper); err == nil && len(wrapper.Attempts) > 0 {
+			return singleURLMetadata{Attempts: wrapper.Attempts}
+		}
+		var attempt singleURLAttempt
+		if err := json.Unmarshal([]byte(trimmed), &attempt); err == nil && strings.TrimSpace(attempt.TaskID) != "" {
+			return singleURLMetadata{Attempts: []singleURLAttempt{attempt}}
+		}
+		return singleURLMetadata{}
+	}
 	return singleURLMetadata{}
 }
 
@@ -390,7 +403,6 @@ func (w *SingleURLWorker) ProcessOnce(ctx context.Context) (retErr error) {
 type singleURLUpdateWork struct {
 	taskID int64
 	apply  func(context.Context) error
-	err    error
 }
 
 func (w *SingleURLWorker) reconcileSingleURLActiveTasks(ctx context.Context, tasks []*FeishuTask) {
@@ -400,85 +412,49 @@ func (w *SingleURLWorker) reconcileSingleURLActiveTasks(ctx context.Context, tas
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if w.concurrency <= 1 || len(tasks) <= 1 {
-		for _, task := range tasks {
-			work := w.buildSingleURLReconcileWork(ctx, task)
-			if work.err != nil {
-				log.Error().Err(work.err).
-					Int64("task_id", work.taskID).
-					Msg("single url worker polling failed")
-			}
-			if work.apply == nil {
-				continue
-			}
-			if err := work.apply(ctx); err != nil {
-				log.Error().Err(err).
-					Int64("task_id", work.taskID).
-					Msg("single url worker update failed")
-			}
-		}
-		return
-	}
-
-	works := make([]singleURLUpdateWork, len(tasks))
-	group, groupCtx := errgroup.WithContext(ctx)
-	group.SetLimit(w.concurrency)
-	for idx, task := range tasks {
-		idx := idx
-		task := task
-		group.Go(func() error {
-			defer func() {
-				if r := recover(); r != nil {
-					taskID := int64(0)
-					if task != nil {
-						taskID = task.TaskID
-					}
-					fmt.Fprintf(os.Stderr, "single url worker panic (reconcile task_id=%d): %v\n", taskID, r)
-					if task != nil {
-						reason := fmt.Sprintf("panic: %v", r)
-						works[idx] = singleURLUpdateWork{
-							taskID: taskID,
-							apply: func(ctx context.Context) error {
-								return w.failSingleURLTask(ctx, task, reason, nil)
-							},
-						}
-					}
-				}
-			}()
-			if task == nil {
-				return nil
-			}
-			works[idx] = w.buildSingleURLReconcileWork(groupCtx, task)
-			return nil
-		})
-	}
-	_ = group.Wait()
-	for _, work := range works {
-		if work.err != nil {
-			log.Error().Err(work.err).
-				Int64("task_id", work.taskID).
-				Msg("single url worker polling failed")
-		}
-		if work.apply == nil {
-			continue
-		}
-		if err := work.apply(ctx); err != nil {
-			log.Error().Err(err).
-				Int64("task_id", work.taskID).
-				Msg("single url worker update failed")
-		}
-	}
+	decisions := w.buildSingleURLReconcileDecisions(ctx, tasks)
+	w.applySingleURLReconcileDecisions(ctx, decisions)
 }
 
-func (w *SingleURLWorker) buildSingleURLReconcileWork(ctx context.Context, task *FeishuTask) singleURLUpdateWork {
-	work := singleURLUpdateWork{taskID: 0}
+type singleURLReconcileAction int
+
+const (
+	singleURLReconcileNone singleURLReconcileAction = iota
+	singleURLReconcileEnsureQueued
+	singleURLReconcileToProcessing
+	singleURLReconcileToSuccess
+	singleURLReconcileFail
+)
+
+type singleURLReconcileDecision struct {
+	task   *FeishuTask
+	taskID int64
+
+	action singleURLReconcileAction
+	meta   singleURLMetadata
+
+	groupID string
+	vid     string
+	reason  string
+
+	pollErr error
+}
+
+type singleURLMetaUpdate struct {
+	task *FeishuTask
+	meta singleURLMetadata
+	vid  string
+}
+
+func (w *SingleURLWorker) buildSingleURLReconcileDecision(ctx context.Context, task *FeishuTask) singleURLReconcileDecision {
+	d := singleURLReconcileDecision{task: task}
 	if task == nil {
-		return work
+		return d
 	}
-	work.taskID = task.TaskID
+	d.taskID = task.TaskID
 	if w == nil {
-		work.apply = func(context.Context) error { return errors.New("single url worker: nil instance") }
-		return work
+		d.pollErr = errors.New("single url worker: nil instance")
+		return d
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -487,51 +463,43 @@ func (w *SingleURLWorker) buildSingleURLReconcileWork(ctx context.Context, task 
 	meta := decodeSingleURLMetadata(task.Logs)
 	crawlerTaskID := meta.latestTaskID()
 	if crawlerTaskID == "" {
-		work.apply = func(ctx context.Context) error {
-			return w.failSingleURLTask(ctx, task, "missing task_id for queued task", nil)
-		}
-		return work
+		d.action = singleURLReconcileFail
+		d.meta = meta
+		d.reason = "missing task_id for queued task"
+		return d
 	}
 
 	status, err := w.crawler.GetTask(ctx, crawlerTaskID)
 	if err != nil {
 		if errors.Is(err, errCrawlerTaskNotFound) {
 			meta.markFailure("crawler task not found", w.clock())
-			work.apply = func(ctx context.Context) error {
-				return w.failSingleURLTask(ctx, task, "crawler task not found", &meta)
-			}
-			return work
+			d.action = singleURLReconcileFail
+			d.meta = meta
+			d.reason = "crawler task not found"
+			return d
 		}
-		work.err = err
-		return work
+		d.pollErr = err
+		return d
 	}
 
 	switch strings.ToUpper(strings.TrimSpace(status.Status)) {
 	case "WAITING":
 		if strings.TrimSpace(task.Status) == feishusdk.StatusDownloaderQueued {
-			return work
+			return d
 		}
 		groupID := strings.TrimSpace(task.GroupID)
 		if groupID == "" {
 			groupID = buildSingleURLGroupID(task.App, strings.TrimSpace(task.BookID), strings.TrimSpace(task.UserID))
 		}
-		work.apply = func(ctx context.Context) error {
-			return w.markSingleURLTaskQueued(ctx, task, groupID, meta)
-		}
-		return work
+		d.action = singleURLReconcileEnsureQueued
+		d.meta = meta
+		d.groupID = groupID
+		return d
 	case "PROCESSING":
 		meta.markRunning()
-		work.apply = func(ctx context.Context) error {
-			if err := w.updateTaskExtra(ctx, task, meta); err != nil {
-				return err
-			}
-			if err := taskagent.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishusdk.StatusDownloaderProcessing, "", nil); err != nil {
-				return err
-			}
-			task.Status = feishusdk.StatusDownloaderProcessing
-			return nil
-		}
-		return work
+		d.action = singleURLReconcileToProcessing
+		d.meta = meta
+		return d
 	case "COMPLETED":
 		vid := strings.TrimSpace(status.VID)
 		if vid == "" {
@@ -548,50 +516,238 @@ func (w *SingleURLWorker) buildSingleURLReconcileWork(ctx context.Context, task 
 				Int64("task_id", task.TaskID).
 				Str("crawler_task_id", crawlerTaskID).
 				Msg("single url worker: crawler returned completed but vid is empty; keep polling")
-			work.apply = func(ctx context.Context) error {
-				if err := w.updateTaskExtra(ctx, task, meta); err != nil {
-					return err
-				}
-				if strings.TrimSpace(task.Status) != feishusdk.StatusDownloaderProcessing {
-					if err := taskagent.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishusdk.StatusDownloaderProcessing, "", nil); err != nil {
-						return err
-					}
-					task.Status = feishusdk.StatusDownloaderProcessing
-				}
-				return nil
-			}
-			return work
+			d.action = singleURLReconcileToProcessing
+			d.meta = meta
+			return d
 		}
-		completed := w.clock()
-		meta.markSuccess(vid, completed)
-		work.apply = func(ctx context.Context) error {
-			if err := w.updateTaskExtra(ctx, task, meta); err != nil {
-				return err
-			}
-			if err := taskagent.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{task}, feishusdk.StatusSuccess, "", &taskagent.TaskStatusMeta{CompletedAt: &completed}); err != nil {
-				return err
-			}
-			task.Status = feishusdk.StatusSuccess
-			return nil
-		}
-		return work
+		d.action = singleURLReconcileToSuccess
+		d.meta = meta
+		d.vid = vid
+		return d
 	case "FAILED":
 		reason := strings.TrimSpace(status.Error)
 		if reason == "" {
 			reason = "crawler task failed"
 		}
 		meta.markFailure(reason, w.clock())
-		work.apply = func(ctx context.Context) error {
-			return w.failSingleURLTask(ctx, task, reason, &meta)
-		}
-		return work
+		d.action = singleURLReconcileFail
+		d.meta = meta
+		d.reason = reason
+		return d
 	default:
 		log.Warn().
 			Int64("task_id", task.TaskID).
 			Str("crawler_task_id", crawlerTaskID).
 			Str("status", status.Status).
 			Msg("single url worker: unknown crawler status")
-		return work
+		return d
+	}
+}
+
+func (w *SingleURLWorker) buildSingleURLReconcileDecisions(ctx context.Context, tasks []*FeishuTask) []singleURLReconcileDecision {
+	if w == nil || len(tasks) == 0 {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	decisions := make([]singleURLReconcileDecision, len(tasks))
+
+	if w.concurrency <= 1 || len(tasks) <= 1 {
+		for idx, task := range tasks {
+			decisions[idx] = w.buildSingleURLReconcileDecision(ctx, task)
+		}
+		return decisions
+	}
+
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(w.concurrency)
+	for idx, task := range tasks {
+		idx := idx
+		task := task
+		group.Go(func() error {
+			defer func() {
+				if r := recover(); r != nil {
+					taskID := int64(0)
+					if task != nil {
+						taskID = task.TaskID
+					}
+					fmt.Fprintf(os.Stderr, "single url worker panic (reconcile task_id=%d): %v\n", taskID, r)
+					if task != nil {
+						reason := fmt.Sprintf("panic: %v", r)
+						meta := decodeSingleURLMetadata(task.Logs)
+						meta.markFailure(reason, w.clock())
+						decisions[idx] = singleURLReconcileDecision{
+							task:   task,
+							taskID: taskID,
+							action: singleURLReconcileFail,
+							meta:   meta,
+							reason: reason,
+						}
+					}
+				}
+			}()
+			decisions[idx] = w.buildSingleURLReconcileDecision(groupCtx, task)
+			return nil
+		})
+	}
+	_ = group.Wait()
+	return decisions
+}
+
+func (w *SingleURLWorker) applySingleURLReconcileDecision(ctx context.Context, d singleURLReconcileDecision) error {
+	if w == nil {
+		return errors.New("single url worker: nil instance")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if d.pollErr != nil {
+		return d.pollErr
+	}
+	if d.task == nil {
+		return nil
+	}
+
+	switch d.action {
+	case singleURLReconcileFail:
+		return w.failSingleURLTask(ctx, d.task, d.reason, &d.meta)
+	case singleURLReconcileEnsureQueued:
+		return w.markSingleURLTaskQueued(ctx, d.task, d.groupID, d.meta)
+	case singleURLReconcileToProcessing:
+		if err := w.updateTaskExtra(ctx, d.task, d.meta); err != nil {
+			return err
+		}
+		if strings.TrimSpace(d.task.Status) != feishusdk.StatusDownloaderProcessing {
+			if err := taskagent.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{d.task}, feishusdk.StatusDownloaderProcessing, "", nil); err != nil {
+				return err
+			}
+			d.task.Status = feishusdk.StatusDownloaderProcessing
+		}
+		return nil
+	case singleURLReconcileToSuccess:
+		completed := w.clock()
+		if completed.IsZero() {
+			completed = time.Now()
+		}
+		meta := d.meta
+		meta.markSuccess(d.vid, completed)
+		if err := w.updateTaskExtra(ctx, d.task, meta); err != nil {
+			return err
+		}
+		if strings.TrimSpace(d.task.Status) != feishusdk.StatusSuccess {
+			if err := taskagent.UpdateFeishuTaskStatuses(ctx, []*FeishuTask{d.task}, feishusdk.StatusSuccess, "", &taskagent.TaskStatusMeta{CompletedAt: &completed}); err != nil {
+				return err
+			}
+			d.task.Status = feishusdk.StatusSuccess
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
+func (w *SingleURLWorker) applySingleURLReconcileDecisions(ctx context.Context, decisions []singleURLReconcileDecision) {
+	if w == nil || len(decisions) == 0 {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	toProcessing := make([]singleURLMetaUpdate, 0, len(decisions))
+	toSuccess := make([]singleURLMetaUpdate, 0, len(decisions))
+
+	for _, d := range decisions {
+		if d.pollErr != nil {
+			log.Error().Err(d.pollErr).
+				Int64("task_id", d.taskID).
+				Msg("single url worker polling failed")
+			continue
+		}
+		if d.task == nil {
+			continue
+		}
+		switch d.action {
+		case singleURLReconcileFail:
+			if err := w.failSingleURLTask(ctx, d.task, d.reason, &d.meta); err != nil {
+				log.Error().Err(err).
+					Int64("task_id", d.taskID).
+					Msg("single url worker update failed")
+			}
+		case singleURLReconcileEnsureQueued:
+			if err := w.markSingleURLTaskQueued(ctx, d.task, d.groupID, d.meta); err != nil {
+				log.Error().Err(err).
+					Int64("task_id", d.taskID).
+					Msg("single url worker update failed")
+			}
+		case singleURLReconcileToProcessing:
+			toProcessing = append(toProcessing, singleURLMetaUpdate{task: d.task, meta: d.meta})
+		case singleURLReconcileToSuccess:
+			toSuccess = append(toSuccess, singleURLMetaUpdate{task: d.task, meta: d.meta, vid: d.vid})
+		default:
+			continue
+		}
+	}
+
+	if len(toProcessing) > 0 {
+		if err := w.updateTasksExtra(ctx, toProcessing); err != nil {
+			log.Error().Err(err).
+				Int("task_count", len(toProcessing)).
+				Msg("single url worker update logs batch failed")
+		}
+		processingTasks := make([]*FeishuTask, 0, len(toProcessing))
+		for _, upd := range toProcessing {
+			if upd.task == nil {
+				continue
+			}
+			processingTasks = append(processingTasks, upd.task)
+		}
+		if err := taskagent.UpdateFeishuTaskStatuses(ctx, processingTasks, feishusdk.StatusDownloaderProcessing, "", nil); err != nil {
+			log.Error().Err(err).
+				Int("task_count", len(processingTasks)).
+				Msg("single url worker status batch update failed")
+		} else {
+			for _, t := range processingTasks {
+				if t != nil {
+					t.Status = feishusdk.StatusDownloaderProcessing
+				}
+			}
+		}
+	}
+
+	if len(toSuccess) > 0 {
+		completed := w.clock()
+		if completed.IsZero() {
+			completed = time.Now()
+		}
+		updates := make([]singleURLMetaUpdate, 0, len(toSuccess))
+		successTasks := make([]*FeishuTask, 0, len(toSuccess))
+		for _, upd := range toSuccess {
+			if upd.task == nil {
+				continue
+			}
+			meta := upd.meta
+			meta.markSuccess(upd.vid, completed)
+			updates = append(updates, singleURLMetaUpdate{task: upd.task, meta: meta})
+			successTasks = append(successTasks, upd.task)
+		}
+		if err := w.updateTasksExtra(ctx, updates); err != nil {
+			log.Error().Err(err).
+				Int("task_count", len(updates)).
+				Msg("single url worker update logs batch failed")
+		}
+		if err := taskagent.UpdateFeishuTaskStatuses(ctx, successTasks, feishusdk.StatusSuccess, "", &taskagent.TaskStatusMeta{CompletedAt: &completed}); err != nil {
+			log.Error().Err(err).
+				Int("task_count", len(successTasks)).
+				Msg("single url worker status batch update failed")
+		} else {
+			for _, t := range successTasks {
+				if t != nil {
+					t.Status = feishusdk.StatusSuccess
+				}
+			}
+		}
 	}
 }
 
@@ -983,14 +1139,8 @@ func (w *SingleURLWorker) reconcileSingleURLTask(ctx context.Context, task *Feis
 	if task == nil {
 		return errors.New("single url worker: nil task")
 	}
-	work := w.buildSingleURLReconcileWork(ctx, task)
-	if work.err != nil {
-		return work.err
-	}
-	if work.apply == nil {
-		return nil
-	}
-	return work.apply(ctx)
+	d := w.buildSingleURLReconcileDecision(ctx, task)
+	return w.applySingleURLReconcileDecision(ctx, d)
 }
 
 func extractSingleURLCDNURL(raw string) string {
@@ -1026,20 +1176,117 @@ func extractSingleURLCDNURL(raw string) string {
 }
 
 func (w *SingleURLWorker) updateTaskExtra(ctx context.Context, task *FeishuTask, meta singleURLMetadata) error {
-	_, table, err := taskagent.TaskSourceContext(task)
-	if err != nil {
-		return err
+	return w.updateTasksExtra(ctx, []singleURLMetaUpdate{{task: task, meta: meta}})
+}
+
+func (w *SingleURLWorker) updateTasksExtra(ctx context.Context, updates []singleURLMetaUpdate) error {
+	if w == nil {
+		return errors.New("single url worker: nil instance")
 	}
-	logsField := strings.TrimSpace(table.Fields.Logs)
-	if logsField == "" {
+	if len(updates) == 0 {
 		return nil
 	}
-	encoded := encodeSingleURLMetadata(meta)
-	payload := map[string]any{logsField: encoded}
-	if err := taskagent.UpdateTaskFields(ctx, task, payload); err != nil {
-		return err
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	task.Logs = encoded
+
+	type taskFieldsBatchUpdater interface {
+		BatchUpdateTaskFields(ctx context.Context, table *feishusdk.TaskTable, updates []feishusdk.TaskFieldUpdate) error
+	}
+
+	type groupedUpdates struct {
+		client taskagent.TargetTableClient
+		table  *feishusdk.TaskTable
+		items  []struct {
+			taskID  int64
+			payload map[string]any
+			task    *FeishuTask
+			logs    string
+		}
+	}
+
+	groups := make(map[*feishusdk.TaskTable]*groupedUpdates, 8)
+	var errs []string
+
+	for _, upd := range updates {
+		if upd.task == nil {
+			continue
+		}
+		client, table, err := taskagent.TaskSourceContext(upd.task)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("task %d: %v", upd.task.TaskID, err))
+			continue
+		}
+		logsField := strings.TrimSpace(table.Fields.Logs)
+		if logsField == "" {
+			continue
+		}
+		encoded := encodeSingleURLMetadata(upd.meta)
+		if strings.TrimSpace(encoded) == "" {
+			// Do not overwrite logs with an empty payload; keep the original for debugging.
+			continue
+		}
+		group := groups[table]
+		if group == nil {
+			group = &groupedUpdates{client: client, table: table}
+			groups[table] = group
+		}
+		group.items = append(group.items, struct {
+			taskID  int64
+			payload map[string]any
+			task    *FeishuTask
+			logs    string
+		}{
+			taskID:  upd.task.TaskID,
+			payload: map[string]any{logsField: encoded},
+			task:    upd.task,
+			logs:    encoded,
+		})
+	}
+
+	for _, group := range groups {
+		if group == nil || group.table == nil || group.client == nil || len(group.items) == 0 {
+			continue
+		}
+
+		batchUpdates := make([]feishusdk.TaskFieldUpdate, 0, len(group.items))
+		for _, item := range group.items {
+			batchUpdates = append(batchUpdates, feishusdk.TaskFieldUpdate{TaskID: item.taskID, Fields: item.payload})
+		}
+
+		var updateErr error
+		if batcher, ok := group.client.(taskFieldsBatchUpdater); ok && len(batchUpdates) > 1 {
+			updateErr = batcher.BatchUpdateTaskFields(ctx, group.table, batchUpdates)
+			if updateErr != nil {
+				log.Warn().
+					Err(updateErr).
+					Int("task_count", len(batchUpdates)).
+					Msg("single url worker: batch update logs failed; falling back to per-task updates")
+			}
+		}
+		if updateErr != nil || len(batchUpdates) == 1 {
+			for _, item := range group.items {
+				if err := group.client.UpdateTaskFields(ctx, group.table, item.taskID, item.payload); err != nil {
+					errs = append(errs, fmt.Sprintf("task %d: %v", item.taskID, err))
+					continue
+				}
+				if item.task != nil {
+					item.task.Logs = item.logs
+				}
+			}
+			continue
+		}
+
+		for _, item := range group.items {
+			if item.task != nil {
+				item.task.Logs = item.logs
+			}
+		}
+	}
+
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
+	}
 	return nil
 }
 

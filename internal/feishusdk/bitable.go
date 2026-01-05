@@ -809,6 +809,12 @@ func (c *Client) UpdateTaskStatus(ctx context.Context, table *TaskTable, taskID 
 	})
 }
 
+// TaskFieldUpdate describes a per-task field update for batch operations.
+type TaskFieldUpdate struct {
+	TaskID int64
+	Fields map[string]any
+}
+
 // UpdateTaskFields updates arbitrary fields for a given TaskID using a previously fetched table.
 func (c *Client) UpdateTaskFields(ctx context.Context, table *TaskTable, taskID int64, fields map[string]any) error {
 	if c == nil {
@@ -890,6 +896,131 @@ func (c *Client) UpdateTaskFields(ctx context.Context, table *TaskTable, taskID 
 			}
 		}
 	}
+	return nil
+}
+
+// BatchUpdateTaskFields updates multiple task rows with a single batch_update call.
+// It requires the provided table to include record ids for all TaskIDs.
+//
+// Max 500 updates per request.
+func (c *Client) BatchUpdateTaskFields(ctx context.Context, table *TaskTable, updates []TaskFieldUpdate) error {
+	if c == nil {
+		return errors.New("feishu: client is nil")
+	}
+	if table == nil {
+		return errors.New("feishu: task table is nil")
+	}
+	if len(updates) == 0 {
+		return errors.New("feishu: no updates provided for batch update")
+	}
+	const maxBatch = 500
+
+	records := make([]map[string]any, 0, len(updates))
+	localUpdates := make([]TaskFieldUpdate, 0, len(updates))
+	for _, upd := range updates {
+		if upd.TaskID == 0 {
+			return errors.New("feishu: task id is zero in batch update")
+		}
+		if len(upd.Fields) == 0 {
+			continue
+		}
+		recordID, ok := table.RecordIDByTaskID(upd.TaskID)
+		if !ok {
+			return fmt.Errorf("feishu: task id %d not found in table", upd.TaskID)
+		}
+		records = append(records, map[string]any{
+			"record_id": recordID,
+			"fields":    upd.Fields,
+		})
+		localUpdates = append(localUpdates, upd)
+	}
+	if len(records) == 0 {
+		return nil
+	}
+
+	for start := 0; start < len(records); start += maxBatch {
+		end := start + maxBatch
+		if end > len(records) {
+			end = len(records)
+		}
+		if _, err := c.BatchUpdateBitableRecords(ctx, table.Ref, records[start:end]); err != nil {
+			return err
+		}
+	}
+
+	// Best-effort local cache update so callers relying on the fetched table
+	// can observe changes without refetching.
+	for _, upd := range localUpdates {
+		taskID := upd.TaskID
+		fields := upd.Fields
+		if fields == nil {
+			continue
+		}
+		if statusField := strings.TrimSpace(table.Fields.Status); statusField != "" {
+			if val, ok := fields[statusField]; ok {
+				table.updateLocalStatus(taskID, toString(val))
+			}
+		}
+		if startField := strings.TrimSpace(table.Fields.StartAt); startField != "" {
+			if val, ok := fields[startField]; ok {
+				raw := toString(val)
+				var parsed *time.Time
+				if raw != "" {
+					if ts, err := parseBitableTime(raw); err == nil {
+						parsed = &ts
+					}
+				}
+				table.updateLocalStartAt(taskID, raw, parsed)
+			}
+		}
+		if endField := strings.TrimSpace(table.Fields.EndAt); endField != "" {
+			if val, ok := fields[endField]; ok {
+				raw := toString(val)
+				var parsed *time.Time
+				if raw != "" {
+					if ts, err := parseBitableTime(raw); err == nil {
+						parsed = &ts
+					}
+				}
+				table.updateLocalEndAt(taskID, raw, parsed)
+			}
+		}
+		if webhookField := strings.TrimSpace(table.Fields.Webhook); webhookField != "" {
+			if val, ok := fields[webhookField]; ok {
+				table.updateLocalWebhook(taskID, toString(val))
+			}
+		}
+		if dispatchedField := strings.TrimSpace(table.Fields.DispatchedDevice); dispatchedField != "" {
+			if val, ok := fields[dispatchedField]; ok {
+				table.updateLocalDispatchedDevice(taskID, toString(val))
+			}
+		}
+		if targetField := strings.TrimSpace(table.Fields.DeviceSerial); targetField != "" {
+			if val, ok := fields[targetField]; ok {
+				table.updateLocalTargetDevice(taskID, toString(val))
+			}
+		}
+		if dispatchedAtField := strings.TrimSpace(table.Fields.DispatchedAt); dispatchedAtField != "" {
+			if val, ok := fields[dispatchedAtField]; ok {
+				raw := toString(val)
+				var parsed *time.Time
+				if raw != "" {
+					if ts, err := parseBitableTime(raw); err == nil {
+						parsed = &ts
+					}
+				}
+				table.updateLocalDispatchedAt(taskID, raw, parsed)
+			}
+		}
+		if elapsedField := strings.TrimSpace(table.Fields.ElapsedSeconds); elapsedField != "" {
+			if val, ok := fields[elapsedField]; ok {
+				if secs, err := toInt64(val); err == nil {
+					table.updateLocalElapsedSeconds(taskID, secs)
+				}
+			}
+		}
+	}
+
 	return nil
 }
 

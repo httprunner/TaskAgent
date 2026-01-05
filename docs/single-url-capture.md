@@ -37,13 +37,14 @@
    - Worker 启动后会先立即执行一轮 `ProcessOnce`，避免等待一个完整的 poll interval 才开始处理任务。
 3. 对于 `ready` 且字段完整的任务：
    - Worker 会调用下载服务 `POST /download/tasks`，请求体包含 `{platform,bid,uid,url}`（可选 `cdn_url`）；
-   - 成功后会把任务 `Status` 更新为 `dl-queued`，将 `GroupID` 写成 `BookID_UserID`，并把 `{task_id: <xxx>}` 序列化到 `Logs`；
+   - 成功后会把任务 `Status` 更新为 `dl-queued`，将 `GroupID` 写成 `BookID_UserID`，并把下载服务返回的 `task_id` 写入 `Logs`（JSON 数组；兼容旧版单对象格式）；
    - `DispatchedAt/StartAt` 同步为当前时间，用于后续统计；若创建失败则标记 `dl-failed` 并写入错误信息（随后回退为 `failed`）。
 4. `SingleURLWorker` 继续在每轮 `ProcessOnce` 中拉取 `Status ∈ {dl-queued,dl-processing}` 的任务并轮询 `GET /download/tasks/<task_id>`：
    - 为避免跨天任务（例如任务 `Date=2025-12-27`，但在 `2025-12-28` 仍处于 `dl-queued/dl-processing`）因 `Date` 过滤导致永远拉不到，**active 状态轮询不会附加 Date 条件**；
    - active 状态轮询按 `dl-processing → dl-queued` 顺序拉取，本轮配额优先用于 `dl-processing`，其余再分配给 `dl-queued`；
    - 为避免任务量过大时始终只轮询前 `fetch-limit` 条导致“后续页任务永远不更新”，active 状态轮询每轮至少翻 `3` 页，单页默认 `100` 条，并在进程内维护 `page_token` 轮转扫描；
    - 为避免 bitable URL 自带的 view 过滤/排序影响任务可见性，singleurl worker 查询任务表时会忽略 view（只依赖 filter 条件）。
+   - active 状态的 Feishu 回写会尽量使用 batch_update（单次最多 500 行）以加速大规模积压场景的状态扭转。
    - `ready → dl-queued` 的入队阶段仍默认只扫描 `Today + Yesterday`，避免全表扫描带来的频率/性能风险。
    - 若某一轮 `ProcessOnce` 执行耗时超过 `poll interval`，后续 tick 可能会被跳过（日志会提示 `single url worker pass exceeded poll interval; ticks may be skipped`）。
 
@@ -51,7 +52,7 @@
 | --- | --- | --- |
 | `WAITING` | `dl-queued` | 维持排队状态，如缺失 task_id 会自动补齐/报错。 |
 | `PROCESSING` | `dl-processing` | 通过 `UpdateFeishuTaskStatuses` 更新状态，保持原始时间戳。 |
-| `COMPLETED` | `success` | 写入 `vid` 到 `Logs`（`{"task_id":"...","vid":"..."}`），并把 `EndAt`/`ElapsedSeconds` 补齐。 |
+| `COMPLETED` | `success` | 写入 `vid` 到 `Logs`（JSON 数组 attempt 中包含 `task_id/vid`），并把 `EndAt`/`ElapsedSeconds` 补齐。 |
 | `FAILED` / 404 | `dl-failed` | 将失败原因附加到 `Logs`，同时保留 `task_id` 方便排查；随后回退为 `failed` 交给设备侧重试。 |
 
 这样即可形成 `pending → queued → running → success/failed` 的闭环，无需人工介入。单链任务完成后的汇总推送与 `Webhook` 字段更新不再由 `SingleURLWorker` 直接触发，而是统一交给 `pkg/webhook` 中的 `WebhookResultCreator/Worker` 通过「推送结果表」驱动：

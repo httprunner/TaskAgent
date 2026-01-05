@@ -1082,6 +1082,7 @@ func UpdateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 		updateSerial := strings.TrimSpace(deviceSerial) != "" && dispatchedField != ""
 		trimmedStatus := strings.TrimSpace(status)
 		updatedTasks := make([]*FeishuTask, 0, len(subset))
+		updates := make([]feishusdk.TaskFieldUpdate, 0, len(subset))
 		for _, task := range subset {
 			if task == nil {
 				continue
@@ -1131,11 +1132,46 @@ func UpdateFeishuTaskStatuses(ctx context.Context, tasks []*FeishuTask, status s
 				fields[retryField] = *meta.RetryCount
 				task.RetryCount = *meta.RetryCount
 			}
-			if err := source.client.UpdateTaskFields(ctx, source.table, task.TaskID, fields); err != nil {
-				errs = append(errs, fmt.Sprintf("task %d: %v", task.TaskID, err))
-				continue
-			}
+			updates = append(updates, feishusdk.TaskFieldUpdate{
+				TaskID: task.TaskID,
+				Fields: fields,
+			})
 			updatedTasks = append(updatedTasks, task)
+		}
+
+		if len(updates) == 0 {
+			continue
+		}
+
+		type taskFieldsBatchUpdater interface {
+			BatchUpdateTaskFields(ctx context.Context, table *feishusdk.TaskTable, updates []feishusdk.TaskFieldUpdate) error
+		}
+
+		var updateErr error
+		if batcher, ok := source.client.(taskFieldsBatchUpdater); ok && len(updates) > 1 {
+			updateErr = batcher.BatchUpdateTaskFields(ctx, source.table, updates)
+			if updateErr != nil {
+				log.Warn().
+					Err(updateErr).
+					Int("task_count", len(updates)).
+					Msg("feishusdk: batch update failed; falling back to per-task updates")
+			}
+		}
+		if updateErr != nil || len(updates) == 1 {
+			// Fall back to per-task updates so partial failures don't stall the scheduler.
+			updatedTasks = updatedTasks[:0]
+			for _, upd := range updates {
+				if err := source.client.UpdateTaskFields(ctx, source.table, upd.TaskID, upd.Fields); err != nil {
+					errs = append(errs, fmt.Sprintf("task %d: %v", upd.TaskID, err))
+					continue
+				}
+				for _, task := range subset {
+					if task != nil && task.TaskID == upd.TaskID {
+						updatedTasks = append(updatedTasks, task)
+						break
+					}
+				}
+			}
 		}
 
 		if lastScreenshotField == "" || len(updatedTasks) == 0 {
