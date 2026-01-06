@@ -34,9 +34,9 @@ type WebhookResultCreateOptions struct {
 }
 
 const (
-	WebhookBizTypePiracyGeneralSearch = "piracy_general_search"
-	WebhookBizTypeVideoScreenCapture  = "video_screen_capture"
-	WebhookBizTypeSingleURLCapture    = "single_url_capture"
+	WebhookBizTypePiracyGeneralSearch = taskagent.TaskBizTypePiracyGeneralSearch
+	WebhookBizTypeVideoScreenCapture  = taskagent.TaskBizTypeVideoScreenCapture
+	WebhookBizTypeSingleURLCapture    = taskagent.TaskBizTypeSingleURLCapture
 )
 
 // CreateWebhookResultsForGroups creates one webhook result row per GroupID under a parent task.
@@ -987,7 +987,7 @@ func (c *WebhookResultCreator) fetchVideoScreenCaptureTasks(ctx context.Context,
 	filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(sceneField, "is", taskagent.SceneVideoScreenCapture))
 	filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(statusField, "is", taskagent.StatusSuccess))
 	if dtField := strings.TrimSpace(fields.Date); dtField != "" {
-		if cond := exactDateCondition(dtField, c.scanDate); cond != nil {
+		if cond := taskagent.ExactDateCondition(dtField, c.scanDate); cond != nil {
 			filter.Conditions = append(filter.Conditions, cond)
 		}
 	}
@@ -1023,7 +1023,7 @@ func (c *WebhookResultCreator) fetchPiracyTasksForDay(ctx context.Context) ([]ta
 	}
 
 	filter := taskagent.NewFeishuFilterInfo("and")
-	if cond := exactDateCondition(datetimeField, c.scanDate); cond != nil {
+	if cond := taskagent.ExactDateCondition(datetimeField, c.scanDate); cond != nil {
 		filter.Conditions = append(filter.Conditions, cond)
 	}
 	if app := strings.TrimSpace(c.appFilter); app != "" {
@@ -1140,7 +1140,7 @@ func buildSingleURLCaptureTaskFilter(fields taskagent.FeishuTaskFields, appFilte
 		filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(sceneField, "is", taskagent.SceneSingleURLCapture))
 	}
 	if dtField := strings.TrimSpace(fields.Date); dtField != "" {
-		if cond := exactDateCondition(dtField, scanDate); cond != nil {
+		if cond := taskagent.ExactDateCondition(dtField, scanDate); cond != nil {
 			filter.Conditions = append(filter.Conditions, cond)
 		}
 	}
@@ -1175,17 +1175,4 @@ func sameInt64Slice(a, b []int64) bool {
 		}
 	}
 	return true
-}
-
-func exactDateCondition(fieldName, date string) *taskagent.FeishuCondition {
-	trimmed := strings.TrimSpace(date)
-	if trimmed == "" || strings.TrimSpace(fieldName) == "" {
-		return nil
-	}
-	dayTime, err := time.ParseInLocation("2006-01-02", trimmed, time.Local)
-	if err != nil {
-		return nil
-	}
-	tsMs := strconv.FormatInt(dayTime.UnixMilli(), 10)
-	return taskagent.NewFeishuCondition(fieldName, "is", "ExactDate", tsMs)
 }

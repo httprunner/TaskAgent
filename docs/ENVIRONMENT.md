@@ -34,6 +34,16 @@ The tables below enumerate every environment variable TaskAgent reads via `os.Ge
 | --- | --- | --- | --- | --- |
 | `DEVICE_ALLOWLIST` | Optional | empty | `taskagent.DevicePoolAgent` | Restrict scheduling to a subset of locally connected device serials. Must be a comma-separated list (e.g. `device-A,device-B`). When empty, all connected devices are eligible. |
 
+## Task scheduling
+
+| Variable | Required | Default | Used by | Description |
+| --- | --- | --- | --- | --- |
+| `TASK_GROUP_PRIORITY_ENABLE` | Optional | unset (`false`) | `taskagent.DevicePoolAgent` | Enable group-aware prioritization: tasks are re-ordered by remaining group size (ascending) per `<BizType, GroupID, DateDay>` so "almost done" groups finish earlier. |
+| `TASK_GROUP_PRIORITY_OVERSAMPLE` | Optional | `4` | `taskagent.DevicePoolAgent` | Candidate multiplier used before re-ordering; fetches `limit*oversample` tasks from Feishu and then truncates to `limit` after sorting. |
+| `TASK_GROUP_PRIORITY_TTL` | Optional | `45s` | `taskagent.DevicePoolAgent` | In-memory cache TTL for per-group remaining counts queried from Feishu. |
+| `TASK_GROUP_PRIORITY_MAX_GROUPS` | Optional | `50` | `taskagent.DevicePoolAgent` | Max distinct groups to count per fetch call (extra groups fall back to base ordering). |
+| `TASK_GROUP_PRIORITY_COUNT_CAP` | Optional | `200` | `taskagent.DevicePoolAgent` | Max rows scanned per group when counting `Status in {pending, failed}`; values above cap are treated as cap. |
+
 ## 资源下载服务
 
 | Variable | Required | Default | Used by | Description |

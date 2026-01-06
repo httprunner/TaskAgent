@@ -150,6 +150,37 @@ func NewDevicePoolAgent(cfg Config, runner JobRunner) (*DevicePoolAgent, error) 
 		return nil, errors.New("task manager cannot be nil")
 	}
 
+	if EnvBool(EnvTaskGroupPriorityEnable, false) {
+		bitableURL := strings.TrimSpace(cfg.BitableURL)
+		if bitableURL == "" {
+			log.Warn().Msg("task group priority enabled but task bitable url is empty; skipping")
+		} else {
+			oversample := EnvInt(EnvTaskGroupPriorityOversample, defaultGroupPriorityOversample)
+			maxGroups := EnvInt(EnvTaskGroupPriorityMaxGroups, defaultGroupPriorityMaxGroupsPerFetch)
+			ttl := EnvDuration(EnvTaskGroupPriorityTTL, defaultGroupPriorityCountTTL)
+			countCap := EnvInt(EnvTaskGroupPriorityCountCap, defaultGroupPriorityCountCap)
+			wrapped, err := NewGroupTaskPrioritizer(
+				manager, bitableURL,
+				GroupTaskPrioritizerOptions{
+					Oversample:        oversample,
+					CountTTL:          ttl,
+					MaxGroupsPerFetch: maxGroups,
+					CountCap:          countCap,
+				},
+			)
+			if err != nil {
+				return nil, err
+			}
+			manager = wrapped
+			log.Info().
+				Int("oversample", oversample).
+				Dur("ttl", ttl).
+				Int("max_groups", maxGroups).
+				Int("count_cap", countCap).
+				Msg("task group priority enabled")
+		}
+	}
+
 	hostUUID := ""
 	if uuid, err := getHostUUID(); err == nil {
 		hostUUID = uuid

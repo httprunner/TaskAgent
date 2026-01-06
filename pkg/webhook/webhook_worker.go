@@ -354,7 +354,7 @@ func (w *WebhookResultWorker) fetchPlanTasks(ctx context.Context, bizType, group
 	if groupField == "" || sceneField == "" || dateField == "" {
 		return nil, errors.New("task table field mapping is missing (GroupID/Scene/Date)")
 	}
-	dateCond := exactDateCondition(dateField, day)
+	dateCond := taskagent.ExactDateCondition(dateField, day)
 	if dateCond == nil {
 		return nil, errors.Errorf("invalid day: %s", day)
 	}

@@ -207,6 +207,8 @@ OnTasksCompleted → Feishu updates + recorder cleanup
 
 `FeishuTaskClient` fetches tasks in prioritized bands (个人页搜索 before 综合页搜索, same-day before backlog, failed before untouched) and only fills the shortfall to `MaxTasksPerJob`. See [`client.go`](client.go) for the full prioritization table.
 
+When `TASK_GROUP_PRIORITY_ENABLE=1`, `DevicePoolAgent` additionally re-orders fetched tasks by remaining group size (ascending) per `<BizType, GroupID, DateDay>` so "almost done" groups finish earlier and downstream webhook pushes can be triggered sooner.
+
 ## Multi-scenario scheduling (Multi*)
 
 When you need to run multiple task "scenes" in a single process (e.g. search + single-url) but still keep **one** device pool, you can combine:

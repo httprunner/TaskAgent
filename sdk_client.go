@@ -1,6 +1,12 @@
 package taskagent
 
-import "github.com/httprunner/TaskAgent/internal/feishusdk"
+import (
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/httprunner/TaskAgent/internal/feishusdk"
+)
 
 // FeishuClient is a low-level client for interacting with Feishu Bitables.
 // It is intended for advanced use cases (such as custom task creation)
@@ -74,6 +80,21 @@ func NewFeishuFilterInfo(conjunction string) *FeishuFilterInfo {
 // NewFeishuCondition constructs a single condition.
 func NewFeishuCondition(field, operator string, values ...string) *FeishuCondition {
 	return feishusdk.NewCondition(field, operator, values...)
+}
+
+// ExactDateCondition builds a Feishu "ExactDate" filter condition for a datetime field.
+// day must be in "2006-01-02" format (local time).
+func ExactDateCondition(fieldName, day string) *FeishuCondition {
+	trimmed := strings.TrimSpace(day)
+	if trimmed == "" || strings.TrimSpace(fieldName) == "" {
+		return nil
+	}
+	dayTime, err := time.ParseInLocation("2006-01-02", trimmed, time.Local)
+	if err != nil {
+		return nil
+	}
+	tsMs := strconv.FormatInt(dayTime.UnixMilli(), 10)
+	return NewFeishuCondition(fieldName, "is", "ExactDate", tsMs)
 }
 
 // NewFeishuChildrenFilter constructs a nested filter group with the given

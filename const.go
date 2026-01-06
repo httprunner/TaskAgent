@@ -18,6 +18,18 @@ const (
 	EnvDeviceBitableURL = feishusdk.EnvDeviceBitableURL
 	// EnvCookieBitableURL points to the dedicated cookies table for SingleURLWorker.
 	EnvCookieBitableURL = feishusdk.EnvCookieBitableURL
+
+	// EnvTaskGroupPriorityEnable enables group-aware task prioritization in the default
+	// DevicePoolAgent wiring (when enabled, tasks are re-ordered by remaining group size).
+	EnvTaskGroupPriorityEnable = "TASK_GROUP_PRIORITY_ENABLE"
+	// EnvTaskGroupPriorityOversample controls how many candidate tasks are fetched before re-ordering.
+	EnvTaskGroupPriorityOversample = "TASK_GROUP_PRIORITY_OVERSAMPLE"
+	// EnvTaskGroupPriorityTTL controls the in-memory remaining-count cache TTL.
+	EnvTaskGroupPriorityTTL = "TASK_GROUP_PRIORITY_TTL"
+	// EnvTaskGroupPriorityMaxGroups caps how many distinct groups are counted per fetch.
+	EnvTaskGroupPriorityMaxGroups = "TASK_GROUP_PRIORITY_MAX_GROUPS"
+	// EnvTaskGroupPriorityCountCap caps how many pending/failed rows are scanned per group.
+	EnvTaskGroupPriorityCountCap = "TASK_GROUP_PRIORITY_COUNT_CAP"
 )
 
 // Shared status values for Feishu task rows and related resources.
