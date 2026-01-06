@@ -866,14 +866,12 @@ func (w *SingleURLWorker) buildSingleURLDispatchWork(ctx context.Context, task *
 	metaPayload["bid"] = bookID
 	metaPayload["uid"] = userID
 	cdnURL := extractSingleURLCDNURL(task.Extra)
-	if strings.TrimSpace(task.Status) == feishusdk.StatusReady && cdnURL == "" {
-		work.apply = func(ctx context.Context) error {
-			return w.markSingleURLTaskFailedForDeviceStage(ctx, task, false)
-		}
-		return work
-	}
 	if cdnURL != "" {
 		metaPayload["cdn_url"] = cdnURL
+	} else if strings.TrimSpace(task.Status) == feishusdk.StatusReady {
+		log.Warn().
+			Int64("task_id", task.TaskID).
+			Msg("single url task missing cdn_url; dispatching without cdn_url")
 	}
 	taskID, err := w.crawler.CreateTask(ctx, url, metaPayload)
 	if err != nil {

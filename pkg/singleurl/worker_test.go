@@ -131,7 +131,7 @@ func TestSingleURLWorkerForwardsCDNURLFromExtra(t *testing.T) {
 	}
 }
 
-func TestSingleURLReadyWorkerMarksFailedWhenCDNURLMissing(t *testing.T) {
+func TestSingleURLReadyWorkerDispatchesWithoutCDNURL(t *testing.T) {
 	client := &singleURLTestClient{
 		rows: map[string][]feishusdk.TaskRow{
 			feishusdk.StatusReady: {
@@ -149,9 +149,10 @@ func TestSingleURLReadyWorkerMarksFailedWhenCDNURLMissing(t *testing.T) {
 			},
 		},
 	}
+	crawler := &stubCrawlerClient{createTaskID: "task-no-cdn"}
 	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
 		Client:        client,
-		CrawlerClient: &stubCrawlerClient{createTaskID: "noop"},
+		CrawlerClient: crawler,
 		BitableURL:    "https://bitable.example",
 		Limit:         5,
 		PollInterval:  time.Second,
@@ -163,12 +164,19 @@ func TestSingleURLReadyWorkerMarksFailedWhenCDNURLMissing(t *testing.T) {
 	if err := worker.ProcessOnce(context.Background()); err != nil {
 		t.Fatalf("process once: %v", err)
 	}
+	if len(crawler.createdURLs) != 1 {
+		t.Fatalf("expected crawler create call")
+	}
+	meta := crawler.createdMeta[0]
+	if _, ok := meta["cdn_url"]; ok {
+		t.Fatalf("unexpected cdn_url forwarded: %#v", meta["cdn_url"])
+	}
 	if len(client.updateCalls) == 0 {
 		t.Fatalf("expected task status update")
 	}
 	call := client.updateCalls[len(client.updateCalls)-1]
-	if call.fields[feishusdk.DefaultTaskFields.Status] != feishusdk.StatusFailed {
-		t.Fatalf("expected status %q, got %#v", feishusdk.StatusFailed, call.fields[feishusdk.DefaultTaskFields.Status])
+	if call.fields[feishusdk.DefaultTaskFields.Status] != feishusdk.StatusDownloaderQueued {
+		t.Fatalf("expected status %q, got %#v", feishusdk.StatusDownloaderQueued, call.fields[feishusdk.DefaultTaskFields.Status])
 	}
 }
 
