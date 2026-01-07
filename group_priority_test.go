@@ -192,3 +192,45 @@ func TestGroupTaskPrioritizerOnTaskResultDecrementsCacheOnSuccess(t *testing.T) 
 		t.Fatalf("expected remaining unchanged on failure, got %d", entry2.remaining)
 	}
 }
+
+func TestGroupTaskPrioritizerFocusGroups(t *testing.T) {
+	base := &stubGroupBaseTM{
+		tasks: []*Task{
+			makeFeishuTask("A1", SceneGeneralSearch, "G-A", "2026-01-06"),
+			makeFeishuTask("B1", SceneSingleURLCapture, "G-B", "2026-01-06"),
+			makeFeishuTask("C1", SceneVideoScreenCapture, "G-C", "2026-01-06"),
+			makeFeishuTask("A2", SceneProfileSearch, "G-A", "2026-01-06"),
+			makeFeishuTask("B2", SceneSingleURLCapture, "G-B", "2026-01-06"),
+			makeFeishuTask("C2", SceneVideoScreenCapture, "G-C", "2026-01-06"),
+		},
+	}
+	counter := &stubGroupCounter{
+		remainingByKey: map[string]int{
+			(GroupKey{BizType: TaskBizTypePiracyGeneralSearch, GroupID: "G-A", Day: "2026-01-06"}).String(): 5,
+			(GroupKey{BizType: TaskBizTypeSingleURLCapture, GroupID: "G-B", Day: "2026-01-06"}).String():    2,
+			(GroupKey{BizType: TaskBizTypeVideoScreenCapture, GroupID: "G-C", Day: "2026-01-06"}).String():  1,
+		},
+	}
+	p := &GroupTaskPrioritizer{
+		Base:    base,
+		Counter: counter,
+		Opts: GroupTaskPrioritizerOptions{
+			Oversample:        4,
+			CountTTL:          time.Minute,
+			MaxGroupsPerFetch: 10,
+			FocusGroups:       1,
+		},
+	}
+
+	out, err := p.FetchAvailableTasks(context.Background(), "kwai", 2)
+	if err != nil {
+		t.Fatalf("FetchAvailableTasks error: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(out))
+	}
+	// FocusGroups=1 should prefer the smallest-remaining group (G-C).
+	if strings.TrimSpace(out[0].ID) != "C1" || strings.TrimSpace(out[1].ID) != "C2" {
+		t.Fatalf("expected tasks from focused group G-C, got %q and %q", out[0].ID, out[1].ID)
+	}
+}

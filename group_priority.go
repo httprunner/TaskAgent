@@ -141,6 +141,7 @@ const (
 	defaultGroupPriorityMaxGroupsPerFetch = 50
 	defaultGroupPriorityCountCap          = 200
 	defaultGroupPriorityLargeRemaining    = 1 << 30
+	defaultGroupPriorityFocusGroups       = 2
 )
 
 func normalizeGroupTaskPrioritizerOptions(opts GroupTaskPrioritizerOptions) GroupTaskPrioritizerOptions {
@@ -190,6 +191,9 @@ type GroupTaskPrioritizerOptions struct {
 	Clock func() time.Time
 	// CountCap caps how many pending/failed rows are scanned for a single group.
 	CountCap int
+	// FocusGroups caps how many top-ranked groups can be selected per fetch.
+	// When >0, tasks are first selected from the remaining-minimum K groups, then filled from the rest.
+	FocusGroups int
 }
 
 type groupCountEntry struct {
@@ -263,13 +267,110 @@ func (p *GroupTaskPrioritizer) FetchAvailableTasks(ctx context.Context, app stri
 		if ra != rb {
 			return ra < rb
 		}
+		ka := groupKeyString(a)
+		kb := groupKeyString(b)
+		if ka != kb {
+			return ka < kb
+		}
 		return false
 	})
 
-	if len(candidates) > limit {
+	if p.Opts.FocusGroups > 0 {
+		candidates = focusCandidates(candidates, remainingByTask, p.Opts.FocusGroups, limit)
+	} else if len(candidates) > limit {
 		candidates = candidates[:limit]
 	}
 	return candidates, nil
+}
+
+func focusCandidates(candidates []*Task, remainingByTask map[*Task]int, focusGroups int, limit int) []*Task {
+	if limit <= 0 || len(candidates) == 0 {
+		return candidates
+	}
+	if focusGroups <= 0 {
+		if len(candidates) > limit {
+			return candidates[:limit]
+		}
+		return candidates
+	}
+	remainingByGroup := make(map[string]int)
+	for task, remaining := range remainingByTask {
+		if task == nil {
+			continue
+		}
+		key := groupKeyString(task)
+		if key == "" {
+			continue
+		}
+		if prev, ok := remainingByGroup[key]; !ok || remaining < prev {
+			remainingByGroup[key] = remaining
+		}
+	}
+	type groupRank struct {
+		key       string
+		remaining int
+	}
+	ranks := make([]groupRank, 0, len(remainingByGroup))
+	for key, remaining := range remainingByGroup {
+		ranks = append(ranks, groupRank{key: key, remaining: remaining})
+	}
+	sort.Slice(ranks, func(i, j int) bool {
+		if ranks[i].remaining != ranks[j].remaining {
+			return ranks[i].remaining < ranks[j].remaining
+		}
+		return ranks[i].key < ranks[j].key
+	})
+	if len(ranks) > focusGroups {
+		ranks = ranks[:focusGroups]
+	}
+	focusSet := make(map[string]struct{}, len(ranks))
+	for _, r := range ranks {
+		focusSet[r.key] = struct{}{}
+	}
+
+	out := make([]*Task, 0, minInt(limit, len(candidates)))
+	used := make(map[*Task]struct{})
+	for _, t := range candidates {
+		if len(out) >= limit {
+			return out
+		}
+		if t == nil {
+			continue
+		}
+		if _, ok := focusSet[groupKeyString(t)]; !ok {
+			continue
+		}
+		out = append(out, t)
+		used[t] = struct{}{}
+	}
+	for _, t := range candidates {
+		if len(out) >= limit {
+			break
+		}
+		if t == nil {
+			continue
+		}
+		if _, ok := used[t]; ok {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+func groupKeyString(task *Task) string {
+	key, ok := groupKeyFromTask(task)
+	if !ok {
+		return ""
+	}
+	return key.String()
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func (p *GroupTaskPrioritizer) OnTasksDispatched(ctx context.Context, deviceSerial string, tasks []*Task) error {

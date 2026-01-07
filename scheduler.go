@@ -157,6 +157,7 @@ func NewDevicePoolAgent(cfg Config, runner JobRunner) (*DevicePoolAgent, error) 
 		} else {
 			oversample := EnvInt(EnvTaskGroupPriorityOversample, defaultGroupPriorityOversample)
 			maxGroups := EnvInt(EnvTaskGroupPriorityMaxGroups, defaultGroupPriorityMaxGroupsPerFetch)
+			focusGroups := EnvInt(EnvTaskGroupPriorityFocusGroups, defaultGroupPriorityFocusGroups)
 			ttl := EnvDuration(EnvTaskGroupPriorityTTL, defaultGroupPriorityCountTTL)
 			countCap := EnvInt(EnvTaskGroupPriorityCountCap, defaultGroupPriorityCountCap)
 			wrapped, err := NewGroupTaskPrioritizer(
@@ -166,6 +167,7 @@ func NewDevicePoolAgent(cfg Config, runner JobRunner) (*DevicePoolAgent, error) 
 					CountTTL:          ttl,
 					MaxGroupsPerFetch: maxGroups,
 					CountCap:          countCap,
+					FocusGroups:       focusGroups,
 				},
 			)
 			if err != nil {
@@ -177,6 +179,7 @@ func NewDevicePoolAgent(cfg Config, runner JobRunner) (*DevicePoolAgent, error) 
 				Dur("ttl", ttl).
 				Int("max_groups", maxGroups).
 				Int("count_cap", countCap).
+				Int("focus_groups", focusGroups).
 				Msg("task group priority enabled")
 		}
 	}

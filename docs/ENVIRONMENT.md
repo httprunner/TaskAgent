@@ -43,6 +43,7 @@ The tables below enumerate every environment variable TaskAgent reads via `os.Ge
 | `TASK_GROUP_PRIORITY_TTL` | Optional | `45s` | `taskagent.DevicePoolAgent` | In-memory cache TTL for per-group remaining counts queried from Feishu. |
 | `TASK_GROUP_PRIORITY_MAX_GROUPS` | Optional | `50` | `taskagent.DevicePoolAgent` | Max distinct groups to count per fetch call (extra groups fall back to base ordering). |
 | `TASK_GROUP_PRIORITY_COUNT_CAP` | Optional | `200` | `taskagent.DevicePoolAgent` | Max rows scanned per group when counting `Status in {pending, failed}`; values above cap are treated as cap. |
+| `TASK_GROUP_PRIORITY_FOCUS_GROUPS` | Optional | `0` | `taskagent.DevicePoolAgent` | When >0, prefer scheduling tasks from the remaining-minimum K groups first; if insufficient, fill from other groups. |
 
 ## 资源下载服务
 

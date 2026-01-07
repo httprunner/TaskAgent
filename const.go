@@ -30,6 +30,9 @@ const (
 	EnvTaskGroupPriorityMaxGroups = "TASK_GROUP_PRIORITY_MAX_GROUPS"
 	// EnvTaskGroupPriorityCountCap caps how many pending/failed rows are scanned per group.
 	EnvTaskGroupPriorityCountCap = "TASK_GROUP_PRIORITY_COUNT_CAP"
+	// EnvTaskGroupPriorityFocusGroups caps how many top-ranked groups can be selected per fetch.
+	// When >0, TaskAgent prefers tasks from the remaining-minimum K groups, then fills from the rest.
+	EnvTaskGroupPriorityFocusGroups = "TASK_GROUP_PRIORITY_FOCUS_GROUPS"
 )
 
 // Shared status values for Feishu task rows and related resources.
