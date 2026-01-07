@@ -816,7 +816,9 @@ func (w *SingleURLWorker) buildSingleURLDispatchWork(ctx context.Context, task *
 	meta := decodeSingleURLMetadata(task.Logs)
 	if strings.TrimSpace(task.Status) == feishusdk.StatusDownloaderFailed {
 		work.apply = func(ctx context.Context) error {
-			return w.markSingleURLTaskFailedForDeviceStage(ctx, task, true)
+			// Keep existing Logs (attempt history) when resetting dl-failed back to failed.
+			// Logs are useful for debugging and should not be cleared across retries.
+			return w.markSingleURLTaskFailedForDeviceStage(ctx, task, false)
 		}
 		return work
 	}

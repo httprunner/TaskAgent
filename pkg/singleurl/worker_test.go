@@ -368,8 +368,8 @@ func TestSingleURLWorkerMovesDownloaderFailedToDeviceStage(t *testing.T) {
 	if status := last.fields[feishusdk.DefaultTaskFields.Status]; status != feishusdk.StatusFailed {
 		t.Fatalf("expected status %q, got %#v", feishusdk.StatusFailed, status)
 	}
-	if logs, ok := last.fields[feishusdk.DefaultTaskFields.Logs].(string); !ok || strings.TrimSpace(logs) != "[]" {
-		t.Fatalf("expected logs to be reset, got %#v", last.fields[feishusdk.DefaultTaskFields.Logs])
+	if _, ok := last.fields[feishusdk.DefaultTaskFields.Logs]; ok {
+		t.Fatalf("expected logs to be preserved when dl-failed is reset, got %#v", last.fields[feishusdk.DefaultTaskFields.Logs])
 	}
 }
 
