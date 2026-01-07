@@ -11,6 +11,7 @@ import (
 	"time"
 
 	taskagent "github.com/httprunner/TaskAgent"
+	"github.com/httprunner/TaskAgent/internal/env"
 	"github.com/httprunner/TaskAgent/internal/feishusdk"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
@@ -1175,4 +1176,164 @@ func sameInt64Slice(a, b []int64) bool {
 		}
 	}
 	return true
+}
+
+// WebhookPlanEnsureConfig controls how webhook result rows (plans) are created for
+// a set of dispatched tasks. A plan is uniquely identified by <BizType, GroupID, Day>.
+type WebhookPlanEnsureConfig struct {
+	// WebhookBitableURL overrides WEBHOOK_BITABLE_URL when provided.
+	WebhookBitableURL string
+	// DramaBitableURL overrides DRAMA_BITABLE_URL when provided.
+	DramaBitableURL string
+}
+
+type webhookPlanCandidate struct {
+	BizType string
+	GroupID string
+	Day     string
+	BookID  string
+	TaskIDs []int64
+}
+
+func (c webhookPlanCandidate) toCreateInput(ctx context.Context, client *taskagent.FeishuClient, dramaTableURL string) webhookResultCreateInput {
+	day := strings.TrimSpace(c.Day)
+	var dateMs int64
+	if dayTime, err := time.ParseInLocation("2006-01-02", day, time.Local); err == nil {
+		dateMs = dayTime.UTC().UnixMilli()
+	}
+
+	dramaInfo := "{}"
+	if client != nil && strings.TrimSpace(dramaTableURL) != "" && strings.TrimSpace(c.BookID) != "" {
+		if raw, err := fetchDramaInfoJSONByBookID(ctx, client, dramaTableURL, c.BookID); err == nil {
+			if trimmed := strings.TrimSpace(raw); trimmed != "" {
+				dramaInfo = trimmed
+			}
+		}
+	}
+
+	return webhookResultCreateInput{
+		BizType:   strings.TrimSpace(c.BizType),
+		GroupID:   strings.TrimSpace(c.GroupID),
+		TaskIDs:   uniqueInt64(c.TaskIDs),
+		DramaInfo: dramaInfo,
+		DateMs:    dateMs,
+	}
+}
+
+// EnsureWebhookPlansForTasks ensures webhook result rows exist for each <BizType, GroupID, Day>
+// derived from the given tasks. It is intended to be called from the task dispatch callback so
+// that groups can be pushed downstream as soon as they start running.
+func EnsureWebhookPlansForTasks(ctx context.Context, cfg WebhookPlanEnsureConfig, tasks []*taskagent.Task) (created, skipped int, retErr error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if len(tasks) == 0 {
+		return 0, 0, nil
+	}
+
+	tableURL := strings.TrimSpace(firstNonEmpty(cfg.WebhookBitableURL, env.String(taskagent.EnvWebhookBitableURL, "")))
+	store, err := newWebhookResultStore(tableURL)
+	if err != nil {
+		return 0, 0, err
+	}
+	if store == nil || strings.TrimSpace(store.table()) == "" {
+		log.Debug().Msg("webhook plan ensure: webhook result table not configured; skipping")
+		return 0, 0, nil
+	}
+
+	candidates := buildWebhookPlanCandidates(tasks)
+	if len(candidates) == 0 {
+		return 0, 0, nil
+	}
+
+	dramaURL := strings.TrimSpace(firstNonEmpty(cfg.DramaBitableURL, env.String("DRAMA_BITABLE_URL", "")))
+
+	keys := make([]string, 0, len(candidates))
+	for key := range candidates {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	var errs []string
+	for _, key := range keys {
+		cand := candidates[key]
+		if strings.TrimSpace(cand.BizType) == "" || strings.TrimSpace(cand.GroupID) == "" || strings.TrimSpace(cand.Day) == "" {
+			continue
+		}
+
+		existing, err := store.getExistingByBizGroupAndDay(ctx, cand.BizType, cand.GroupID, cand.Day)
+		if err != nil {
+			errs = append(errs, err.Error())
+			continue
+		}
+		if existing != nil && strings.TrimSpace(existing.RecordID) != "" {
+			skipped++
+			continue
+		}
+
+		input := cand.toCreateInput(ctx, store.client, dramaURL)
+		if _, err := store.createPending(ctx, input); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", key, err))
+			continue
+		}
+		created++
+	}
+
+	if created > 0 || skipped > 0 {
+		log.Info().
+			Int("created", created).
+			Int("skipped", skipped).
+			Int("candidate_groups", len(candidates)).
+			Msg("webhook plan ensure completed")
+	}
+
+	if len(errs) > 0 {
+		return created, skipped, errors.New(strings.Join(errs, "; "))
+	}
+	return created, skipped, nil
+}
+
+func buildWebhookPlanCandidates(tasks []*taskagent.Task) map[string]webhookPlanCandidate {
+	if len(tasks) == 0 {
+		return nil
+	}
+	out := make(map[string]webhookPlanCandidate, len(tasks))
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		ft, ok := task.Payload.(*taskagent.FeishuTask)
+		if !ok || ft == nil {
+			continue
+		}
+		groupID := strings.TrimSpace(ft.GroupID)
+		if groupID == "" {
+			continue
+		}
+		day := strings.TrimSpace(dayString(ft.Datetime, ft.DatetimeRaw))
+		if day == "" {
+			continue
+		}
+		biz := strings.TrimSpace(taskagent.BizTypeForScene(ft.Scene))
+		if biz == "" {
+			continue
+		}
+		key := fmt.Sprintf("%s|%s|%s", biz, groupID, day)
+		cand := out[key]
+		if cand.GroupID == "" {
+			cand = webhookPlanCandidate{
+				BizType: biz,
+				GroupID: groupID,
+				Day:     day,
+				BookID:  strings.TrimSpace(ft.BookID),
+			}
+		} else if strings.TrimSpace(cand.BookID) == "" {
+			cand.BookID = strings.TrimSpace(ft.BookID)
+		}
+		if ft.TaskID > 0 {
+			cand.TaskIDs = append(cand.TaskIDs, ft.TaskID)
+		}
+		out[key] = cand
+	}
+	return out
 }

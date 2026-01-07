@@ -586,7 +586,7 @@ func groupKeyFromTask(task *Task) (GroupKey, bool) {
 	if day == "" {
 		return GroupKey{}, false
 	}
-	biz := bizTypeForScene(strings.TrimSpace(ft.Scene))
+	biz := BizTypeForScene(strings.TrimSpace(ft.Scene))
 	if biz == "" {
 		return GroupKey{}, false
 	}
@@ -620,7 +620,7 @@ func scenesForBizType(bizType string) []string {
 	}
 }
 
-func bizTypeForScene(scene string) string {
+func BizTypeForScene(scene string) string {
 	switch strings.TrimSpace(scene) {
 	case SceneVideoScreenCapture:
 		return TaskBizTypeVideoScreenCapture
