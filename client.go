@@ -454,6 +454,7 @@ func (c *FeishuTaskClient) now() time.Time {
 // FeishuTask represents a pending capture job fetched from Feishu bitable.
 type FeishuTask struct {
 	TaskID           int64
+	BizTaskID        string
 	Params           string
 	ItemID           string
 	BookID           string
@@ -493,6 +494,7 @@ func toStorageTaskStatus(task *FeishuTask) *storage.TaskStatus {
 	}
 	return &storage.TaskStatus{
 		TaskID:           task.TaskID,
+		BizTaskID:        task.BizTaskID,
 		Params:           task.Params,
 		ItemID:           task.ItemID,
 		BookID:           task.BookID,
@@ -804,6 +806,7 @@ func FetchFeishuTasksWithFilter(ctx context.Context, client TargetTableClient, b
 		}
 		tasks = append(tasks, &FeishuTask{
 			TaskID:           row.TaskID,
+			BizTaskID:        row.BizTaskID,
 			Params:           params,
 			ItemID:           itemID,
 			BookID:           bookID,

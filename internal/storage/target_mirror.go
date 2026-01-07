@@ -18,6 +18,7 @@ const (
 // TaskStatus contains the columns mirrored into the local capture_tasks table.
 type TaskStatus struct {
 	TaskID           int64
+	BizTaskID        string
 	Params           string
 	ItemID           string
 	BookID           string
@@ -101,6 +102,7 @@ func configureTaskSQLite(db *sql.DB) error {
 func buildTaskColumnOrder(fields feishusdk.TaskFields) []string {
 	return []string{
 		fields.TaskID,
+		fields.BizTaskID,
 		fields.Params,
 		fields.ItemID,
 		fields.BookID,
@@ -128,6 +130,7 @@ func buildTaskColumnOrder(fields feishusdk.TaskFields) []string {
 func ensureTaskSchema(db *sql.DB, table string, fields feishusdk.TaskFields, columns []string) error {
 	defs := []string{
 		fmt.Sprintf("%s INTEGER PRIMARY KEY", quoteIdent(fields.TaskID)),
+		fmt.Sprintf("%s TEXT", quoteIdent(fields.BizTaskID)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.Params)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.ItemID)),
 		fmt.Sprintf("%s TEXT", quoteIdent(fields.BookID)),
@@ -158,6 +161,9 @@ func ensureTaskSchema(db *sql.DB, table string, fields feishusdk.TaskFields, col
 		return errors.Wrap(err, "create capture targets table failed")
 	}
 	if err := ensureColumnExists(db, table, fields.ItemID, "TEXT"); err != nil {
+		return err
+	}
+	if err := ensureColumnExists(db, table, fields.BizTaskID, "TEXT"); err != nil {
 		return err
 	}
 	if err := ensureColumnExists(db, table, fields.BookID, "TEXT"); err != nil {
@@ -272,6 +278,7 @@ func (m *TaskMirror) upsert(task *TaskStatus) error {
 	retryCount := sql.NullInt64{Int64: task.RetryCount, Valid: true}
 	_, err := m.stmt.Exec(
 		task.TaskID,
+		nullableString(task.BizTaskID),
 		nullableString(task.Params),
 		nullableString(task.ItemID),
 		nullableString(task.BookID),

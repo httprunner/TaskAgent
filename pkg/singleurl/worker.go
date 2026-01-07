@@ -867,6 +867,9 @@ func (w *SingleURLWorker) buildSingleURLDispatchWork(ctx context.Context, task *
 	metaPayload["platform"] = defaultCookiePlatform
 	metaPayload["bid"] = bookID
 	metaPayload["uid"] = userID
+	if trimmed := strings.TrimSpace(task.BizTaskID); trimmed != "" {
+		metaPayload["biz_task_id"] = trimmed
+	}
 	cdnURL := extractSingleURLCDNURL(task.Extra)
 	if cdnURL != "" {
 		metaPayload["cdn_url"] = cdnURL

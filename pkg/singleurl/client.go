@@ -91,6 +91,12 @@ func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, meta
 		UID      string `json:"uid"`
 		URL      string `json:"url"`
 		CDNURL   string `json:"cdn_url,omitempty"`
+		Extra    any    `json:"extra,omitempty"`
+	}
+
+	var extraPayload map[string]any
+	if rawBizTaskID := strings.TrimSpace(cleanMeta["biz_task_id"]); rawBizTaskID != "" {
+		extraPayload = map[string]any{"biz_task_id": rawBizTaskID}
 	}
 
 	payload := requestBody{
@@ -99,6 +105,7 @@ func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, meta
 		UID:      strings.TrimSpace(cleanMeta["uid"]),
 		URL:      strings.TrimSpace(url),
 		CDNURL:   strings.TrimSpace(cleanMeta["cdn_url"]),
+		Extra:    extraPayload,
 	}
 	if payload.Platform == "" {
 		payload.Platform = defaultCookiePlatform

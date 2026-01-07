@@ -34,6 +34,7 @@ type BitableRef struct {
 // TaskFields lists the expected column names inside the task status table.
 type TaskFields struct {
 	TaskID           string
+	BizTaskID        string
 	ParentTaskID     string
 	App              string
 	Scene            string
@@ -71,6 +72,7 @@ type CookieFields struct {
 type TaskRow struct {
 	RecordID         string
 	TaskID           int64
+	BizTaskID        string
 	ParentTaskID     int64
 	Params           string
 	ItemID           string
@@ -113,6 +115,7 @@ type CookieRow struct {
 // DatetimeRaw takes precedence if both it and Datetime are set.
 type TaskRecordInput struct {
 	TaskID           int64
+	BizTaskID        string
 	ParentTaskID     int64
 	Params           string
 	ItemID           string
@@ -1163,6 +1166,10 @@ func (fields TaskFields) merge(override TaskFields) TaskFields {
 		log.Warn().Str("new", override.TaskID).Msg("overriding field TaskID")
 		result.TaskID = override.TaskID
 	}
+	if strings.TrimSpace(override.BizTaskID) != "" {
+		log.Warn().Str("new", override.BizTaskID).Msg("overriding field BizTaskID")
+		result.BizTaskID = override.BizTaskID
+	}
 	if strings.TrimSpace(override.Params) != "" {
 		log.Warn().Str("new", override.Params).Msg("overriding field Params")
 		result.Params = override.Params
@@ -1323,6 +1330,9 @@ func buildTaskRecordPayloads(records []TaskRecordInput, fields TaskFields) ([]ma
 		row := make(map[string]any)
 		if rec.TaskID != 0 {
 			row[fields.TaskID] = rec.TaskID
+		}
+		if strings.TrimSpace(rec.BizTaskID) != "" && strings.TrimSpace(fields.BizTaskID) != "" {
+			row[fields.BizTaskID] = strings.TrimSpace(rec.BizTaskID)
 		}
 		if rec.ParentTaskID > 0 && strings.TrimSpace(fields.ParentTaskID) != "" {
 			row[fields.ParentTaskID] = rec.ParentTaskID
@@ -1974,11 +1984,17 @@ func decodeTaskRow(rec bitableRecord, fields TaskFields) (TaskRow, error) {
 		}
 	}
 
+	var bizTaskID string
+	if field := strings.TrimSpace(fields.BizTaskID); field != "" {
+		bizTaskID = bitableOptionalString(rec.Fields, field)
+	}
+
 	targetDevice := strings.TrimSpace(bitableOptionalString(rec.Fields, fields.DeviceSerial))
 	dispatchedDevice := strings.TrimSpace(bitableOptionalString(rec.Fields, fields.DispatchedDevice))
 	row := TaskRow{
 		RecordID:         rec.RecordID,
 		TaskID:           taskID,
+		BizTaskID:        bizTaskID,
 		ParentTaskID:     parentTaskID,
 		Params:           bitableOptionalString(rec.Fields, fields.Params),
 		ItemID:           bitableOptionalString(rec.Fields, fields.ItemID),
