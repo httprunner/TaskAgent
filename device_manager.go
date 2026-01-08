@@ -63,13 +63,9 @@ func (m *deviceManager) Refresh(ctx context.Context, fetchMeta func(serial strin
 	if err != nil {
 		return errors.Wrap(err, "list devices with state failed")
 	}
-	serials := make([]string, 0, len(stateBySerial))
-	for serial := range stateBySerial {
-		serials = append(serials, serial)
-	}
 	now := time.Now()
-	seen := make(map[string]struct{}, len(serials))
-	updates := make([]DeviceInfoUpdate, 0, len(serials))
+	seen := make(map[string]struct{}, len(stateBySerial))
+	updates := make([]DeviceInfoUpdate, 0, len(stateBySerial))
 
 	m.mu.Lock()
 	if len(m.allowlist) > 0 {
@@ -84,7 +80,7 @@ func (m *deviceManager) Refresh(ctx context.Context, fetchMeta func(serial strin
 			delete(m.devices, serial)
 		}
 	}
-	for _, serial := range serials {
+	for serial, state := range stateBySerial {
 		serial = strings.TrimSpace(serial)
 		if serial == "" {
 			continue
@@ -93,7 +89,7 @@ func (m *deviceManager) Refresh(ctx context.Context, fetchMeta func(serial strin
 			continue
 		}
 		seen[serial] = struct{}{}
-		state := strings.TrimSpace(stateBySerial[serial])
+		state = strings.TrimSpace(state)
 		if state != "" && state != string(gadb.StateOnline) {
 			meta := deviceMeta{ProviderUUID: m.hostUUID}
 			if dev, ok := m.devices[serial]; ok {

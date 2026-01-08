@@ -13,6 +13,7 @@ import (
 
 	"github.com/httprunner/TaskAgent/internal/feishusdk"
 	adbprovider "github.com/httprunner/TaskAgent/internal/providers/adb"
+	"github.com/httprunner/httprunner/v5/pkg/gadb"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 )
@@ -28,7 +29,7 @@ type Config struct {
 	// DeviceSerialAllowlist optionally restricts scheduling to these device serials.
 	// When empty, all connected devices are eligible unless overridden by env.
 	DeviceSerialAllowlist []string
-	Provider              DeviceStateProvider
+	Provider              DeviceProvider
 	TaskManager           TaskManager
 	BitableURL            string
 	AgentVersion          string
@@ -120,13 +121,15 @@ func NewDevicePoolAgent(cfg Config, runner JobRunner) (*DevicePoolAgent, error) 
 			Msg("device pool allowlist enabled")
 	}
 
-	provider := cfg.Provider
-	if provider == nil {
+	var provider DeviceStateProvider
+	if cfg.Provider == nil {
 		var err error
 		provider, err = defaultDeviceProvider(cfg)
 		if err != nil {
 			return nil, err
 		}
+	} else {
+		provider = wrapDeviceStateProvider(cfg.Provider)
 	}
 
 	manager := cfg.TaskManager
@@ -217,6 +220,39 @@ func defaultDeviceProvider(cfg Config) (DeviceStateProvider, error) {
 	default:
 		return nil, fmt.Errorf("no default device provider for os type %s", cfg.OSType)
 	}
+}
+
+type deviceStateProviderAdapter struct {
+	base DeviceProvider
+}
+
+func (p deviceStateProviderAdapter) ListDevicesWithState(ctx context.Context) (map[string]string, error) {
+	if p.base == nil {
+		return nil, errors.New("device provider is nil")
+	}
+	serials, err := p.base.ListDevices(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]string, len(serials))
+	for _, serial := range serials {
+		serial = strings.TrimSpace(serial)
+		if serial == "" {
+			continue
+		}
+		result[serial] = string(gadb.StateOnline)
+	}
+	return result, nil
+}
+
+func wrapDeviceStateProvider(provider DeviceProvider) DeviceStateProvider {
+	if provider == nil {
+		return nil
+	}
+	if stateProvider, ok := provider.(DeviceStateProvider); ok {
+		return stateProvider
+	}
+	return deviceStateProviderAdapter{base: provider}
 }
 
 // Start begins the polling loop until the context is cancelled.
