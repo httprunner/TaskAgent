@@ -1254,6 +1254,7 @@ func EnsureWebhookPlansForTasks(ctx context.Context, cfg WebhookPlanEnsureConfig
 	}
 	sort.Strings(keys)
 
+	reset := 0
 	var errs []string
 	for _, key := range keys {
 		cand := candidates[key]
@@ -1267,8 +1268,25 @@ func EnsureWebhookPlansForTasks(ctx context.Context, cfg WebhookPlanEnsureConfig
 			continue
 		}
 		if existing != nil && strings.TrimSpace(existing.RecordID) != "" {
-			skipped++
-			continue
+			switch strings.ToLower(strings.TrimSpace(existing.Status)) {
+			case WebhookResultSuccess, WebhookResultError:
+				pending := WebhookResultPending
+				zero := int64(0)
+				empty := ""
+				if err := store.update(ctx, existing.RecordID, webhookResultUpdate{
+					Status:    &pending,
+					EndAtMs:   &zero,
+					LastError: &empty,
+				}); err != nil {
+					errs = append(errs, err.Error())
+					continue
+				}
+				reset++
+				continue
+			default:
+				skipped++
+				continue
+			}
 		}
 
 		input := cand.toCreateInput(ctx, store.client, dramaURL)
@@ -1279,10 +1297,11 @@ func EnsureWebhookPlansForTasks(ctx context.Context, cfg WebhookPlanEnsureConfig
 		created++
 	}
 
-	if created > 0 || skipped > 0 {
+	if created > 0 || skipped > 0 || reset > 0 {
 		log.Info().
 			Int("created", created).
 			Int("skipped", skipped).
+			Int("reset", reset).
 			Int("candidate_groups", len(candidates)).
 			Msg("webhook plan ensure completed")
 	}
