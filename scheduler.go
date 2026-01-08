@@ -464,6 +464,25 @@ func (a *DevicePoolAgent) dispatchTasks(ctx context.Context, idle []string, task
 		}
 		targeted[target] = append(targeted[target], task)
 	}
+	if EnvBool(EnvTaskGroupPriorityEnable, false) {
+		groupCount := make(map[string]int)
+		noKey := 0
+		for _, task := range general {
+			key, ok := groupKeyFromTask(task)
+			if !ok {
+				noKey++
+				continue
+			}
+			groupCount[key.String()]++
+		}
+		log.Debug().
+			Int("idle_devices", len(idle)).
+			Int("general_tasks", len(general)).
+			Int("targeted_tasks", len(tasks)-len(general)).
+			Int("group_count", len(groupCount)).
+			Int("no_group_key", noKey).
+			Msg("device pool dispatch group summary")
+	}
 	assignments := make([]*deviceAssignment, 0, len(idle))
 	for _, serial := range idle {
 		capacity := a.cfg.MaxTasksPerJob
@@ -491,22 +510,33 @@ func (a *DevicePoolAgent) dispatchTasks(ctx context.Context, idle []string, task
 		assignments = append(assignments, assignment)
 	}
 	generalIdx := 0
-	for generalIdx < len(general) {
-		progress := false
-		for _, assignment := range assignments {
-			if assignment.capacity <= 0 {
-				continue
+	if len(general) > 0 {
+		if EnvBool(EnvTaskGroupPriorityEnable, false) {
+			keys, tasksByKey, noKeyTasks := groupTasksByGroupKey(general)
+			if len(keys) == 0 {
+				general = noKeyTasks
+			} else {
+				ordered := make([]*Task, 0, len(general))
+				for _, key := range keys {
+					if list := tasksByKey[key]; len(list) > 0 {
+						ordered = append(ordered, list...)
+					}
+				}
+				if len(noKeyTasks) > 0 {
+					ordered = append(ordered, noKeyTasks...)
+				}
+				general = ordered
 			}
-			assignment.tasks = append(assignment.tasks, general[generalIdx])
-			assignment.capacity--
-			generalIdx++
-			progress = true
+		}
+		for _, assignment := range assignments {
+			for assignment.capacity > 0 && generalIdx < len(general) {
+				assignment.tasks = append(assignment.tasks, general[generalIdx])
+				assignment.capacity--
+				generalIdx++
+			}
 			if generalIdx >= len(general) {
 				break
 			}
-		}
-		if !progress {
-			break
 		}
 	}
 	dispatchedDevices := 0
@@ -521,6 +551,30 @@ func (a *DevicePoolAgent) dispatchTasks(ctx context.Context, idle []string, task
 		}
 	}
 	return dispatchedDevices, nil
+}
+
+func groupTasksByGroupKey(tasks []*Task) ([]string, map[string][]*Task, []*Task) {
+	if len(tasks) == 0 {
+		return nil, nil, nil
+	}
+	orderedKeys := make([]string, 0, len(tasks))
+	tasksByKey := make(map[string][]*Task, len(tasks))
+	noKeyTasks := make([]*Task, 0, len(tasks))
+	seen := make(map[string]struct{}, len(tasks))
+	for _, task := range tasks {
+		key, ok := groupKeyFromTask(task)
+		if !ok {
+			noKeyTasks = append(noKeyTasks, task)
+			continue
+		}
+		k := key.String()
+		if _, exists := seen[k]; !exists {
+			seen[k] = struct{}{}
+			orderedKeys = append(orderedKeys, k)
+		}
+		tasksByKey[k] = append(tasksByKey[k], task)
+	}
+	return orderedKeys, tasksByKey, noKeyTasks
 }
 
 func (a *DevicePoolAgent) dispatchToDevice(ctx context.Context, serial string, tasks []*Task, meta deviceMeta, msg string, dispatched map[string]struct{}) bool {

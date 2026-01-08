@@ -136,9 +136,9 @@ const (
 	TaskBizTypeVideoScreenCapture  = "video_screen_capture"
 	TaskBizTypeSingleURLCapture    = "single_url_capture"
 
-	defaultGroupPriorityOversample        = 4
-	defaultGroupPriorityCountTTL          = 45 * time.Second
-	defaultGroupPriorityMaxGroupsPerFetch = 50
+	defaultGroupPriorityOversample        = 10
+	defaultGroupPriorityCountTTL          = 20 * time.Second
+	defaultGroupPriorityMaxGroupsPerFetch = 40
 	defaultGroupPriorityCountCap          = 200
 	defaultGroupPriorityLargeRemaining    = 1 << 30
 	defaultGroupPriorityFocusGroups       = 2
