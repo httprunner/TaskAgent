@@ -415,8 +415,23 @@ func (w *SingleURLWorker) ProcessOnce(ctx context.Context) (retErr error) {
 	return nil
 }
 
+type singleURLDispatchAction int
+
+const (
+	singleURLDispatchNone singleURLDispatchAction = iota
+	singleURLDispatchQueued
+	singleURLDispatchFail
+	singleURLDispatchFailForDevice
+	singleURLDispatchReconcile
+)
+
 type singleURLUpdateWork struct {
 	taskID int64
+	task   *FeishuTask
+	action singleURLDispatchAction
+	group  string
+	meta   singleURLMetadata
+	reason string
 	apply  func(context.Context) error
 }
 
@@ -806,14 +821,35 @@ func (w *SingleURLWorker) dispatchSingleURLTasks(ctx context.Context, tasks []*F
 		})
 	}
 	_ = group.Wait()
+	queued := make([]singleURLUpdateWork, 0, len(works))
 	for _, work := range works {
 		if work.apply == nil {
+			if work.action == singleURLDispatchQueued && work.task != nil {
+				queued = append(queued, work)
+			}
 			continue
 		}
 		if err := work.apply(ctx); err != nil {
 			log.Error().Err(err).
 				Int64("task_id", work.taskID).
 				Msg("single url worker update failed")
+		}
+	}
+	if len(queued) > 0 {
+		if err := w.markSingleURLTasksQueued(ctx, queued); err != nil {
+			log.Error().Err(err).
+				Int("task_count", len(queued)).
+				Msg("single url worker queued batch update failed")
+		} else {
+			for _, item := range queued {
+				if item.task != nil {
+					item.task.Status = feishusdk.StatusDownloaderQueued
+					if strings.TrimSpace(item.group) != "" {
+						item.task.GroupID = item.group
+					}
+					item.task.Logs = encodeSingleURLMetadata(item.meta)
+				}
+			}
 		}
 	}
 }
@@ -824,12 +860,14 @@ func (w *SingleURLWorker) buildSingleURLDispatchWork(ctx context.Context, task *
 		return work
 	}
 	work.taskID = task.TaskID
+	work.task = task
 	if w == nil {
 		work.apply = func(context.Context) error { return errors.New("single url worker: nil instance") }
 		return work
 	}
 	meta := decodeSingleURLMetadata(task.Logs)
 	if strings.TrimSpace(task.Status) == feishusdk.StatusDownloaderFailed {
+		work.action = singleURLDispatchFailForDevice
 		work.apply = func(ctx context.Context) error {
 			// Keep existing Logs (attempt history) when resetting dl-failed back to failed.
 			// Logs are useful for debugging and should not be cleared across retries.
@@ -859,6 +897,8 @@ func (w *SingleURLWorker) buildSingleURLDispatchWork(ctx context.Context, task *
 			missingFields = append(missingFields, "URL")
 		}
 		reason := fmt.Sprintf("missing fields: %s", strings.Join(missingFields, ","))
+		work.action = singleURLDispatchFail
+		work.reason = reason
 		work.apply = func(ctx context.Context) error {
 			return w.failSingleURLTask(ctx, task, reason, nil)
 		}
@@ -867,6 +907,7 @@ func (w *SingleURLWorker) buildSingleURLDispatchWork(ctx context.Context, task *
 
 	if !retryRequired {
 		if taskID := meta.latestTaskID(); taskID != "" {
+			work.action = singleURLDispatchReconcile
 			work.apply = func(ctx context.Context) error {
 				log.Info().
 					Int64("task_id", task.TaskID).
@@ -896,6 +937,8 @@ func (w *SingleURLWorker) buildSingleURLDispatchWork(ctx context.Context, task *
 	taskID, err := w.crawler.CreateTask(ctx, url, metaPayload)
 	if err != nil {
 		reason := fmt.Sprintf("create crawler task failed: %v", err)
+		work.action = singleURLDispatchFail
+		work.reason = reason
 		work.apply = func(ctx context.Context) error {
 			return w.failSingleURLTask(ctx, task, reason, nil)
 		}
@@ -908,19 +951,9 @@ func (w *SingleURLWorker) buildSingleURLDispatchWork(ctx context.Context, task *
 	}
 	meta.appendAttempt(taskID, feishusdk.StatusDownloaderQueued, createdAt)
 	groupID := buildSingleURLGroupID(task.App, bookID, userID)
-	work.apply = func(ctx context.Context) error {
-		if err := w.markSingleURLTaskQueued(ctx, task, groupID, meta); err != nil {
-			return err
-		}
-		log.Info().
-			Int64("task_id", task.TaskID).
-			Str("crawler_task_id", taskID).
-			Str("book_id", bookID).
-			Str("user_id", userID).
-			Str("url", url).
-			Msg("single url capture task queued")
-		return nil
-	}
+	work.action = singleURLDispatchQueued
+	work.group = groupID
+	work.meta = meta
 	return work
 }
 
@@ -1341,6 +1374,102 @@ func (w *SingleURLWorker) failSingleURLTask(ctx context.Context, task *FeishuTas
 		if logs, ok := fields[logsField].(string); ok {
 			task.Logs = logs
 		}
+	}
+	return nil
+}
+
+func (w *SingleURLWorker) markSingleURLTasksQueued(ctx context.Context, works []singleURLUpdateWork) error {
+	if w == nil {
+		return errors.New("single url worker: nil instance")
+	}
+	if len(works) == 0 {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	type taskFieldsBatchUpdater interface {
+		BatchUpdateTaskFields(ctx context.Context, table *feishusdk.TaskTable, updates []feishusdk.TaskFieldUpdate) error
+	}
+
+	type groupedUpdates struct {
+		client taskagent.TargetTableClient
+		table  *feishusdk.TaskTable
+		items  []feishusdk.TaskFieldUpdate
+	}
+
+	now := w.clock()
+	if now.IsZero() {
+		now = time.Now()
+	}
+	nowMillis := now.UTC().UnixMilli()
+
+	groups := make(map[*feishusdk.TaskTable]*groupedUpdates, 8)
+	var errs []string
+
+	for _, work := range works {
+		if work.task == nil {
+			continue
+		}
+		client, table, err := taskagent.TaskSourceContext(work.task)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("task %d: %v", work.taskID, err))
+			continue
+		}
+		fields := map[string]any{}
+		if statusField := strings.TrimSpace(table.Fields.Status); statusField != "" {
+			fields[statusField] = feishusdk.StatusDownloaderQueued
+		}
+		if groupField := strings.TrimSpace(table.Fields.GroupID); groupField != "" && strings.TrimSpace(work.group) != "" {
+			fields[groupField] = strings.TrimSpace(work.group)
+		}
+		if logsField := strings.TrimSpace(table.Fields.Logs); logsField != "" {
+			fields[logsField] = encodeSingleURLMetadata(work.meta)
+		}
+		if dispatchedField := strings.TrimSpace(table.Fields.DispatchedAt); dispatchedField != "" {
+			fields[dispatchedField] = nowMillis
+		}
+		if startField := strings.TrimSpace(table.Fields.StartAt); startField != "" {
+			fields[startField] = nowMillis
+		}
+		if len(fields) == 0 {
+			continue
+		}
+		group := groups[table]
+		if group == nil {
+			group = &groupedUpdates{client: client, table: table}
+			groups[table] = group
+		}
+		group.items = append(group.items, feishusdk.TaskFieldUpdate{TaskID: work.taskID, Fields: fields})
+	}
+
+	for _, group := range groups {
+		if group == nil || group.table == nil || group.client == nil || len(group.items) == 0 {
+			continue
+		}
+
+		var updateErr error
+		if batcher, ok := group.client.(taskFieldsBatchUpdater); ok && len(group.items) > 1 {
+			updateErr = batcher.BatchUpdateTaskFields(ctx, group.table, group.items)
+			if updateErr != nil {
+				log.Warn().
+					Err(updateErr).
+					Int("task_count", len(group.items)).
+					Msg("single url worker: batch update queued fields failed; falling back to per-task updates")
+			}
+		}
+		if updateErr != nil || len(group.items) == 1 {
+			for _, item := range group.items {
+				if err := group.client.UpdateTaskFields(ctx, group.table, item.TaskID, item.Fields); err != nil {
+					errs = append(errs, fmt.Sprintf("task %d: %v", item.TaskID, err))
+				}
+			}
+		}
+	}
+
+	if len(errs) > 0 {
+		return errors.New(strings.Join(errs, "; "))
 	}
 	return nil
 }
