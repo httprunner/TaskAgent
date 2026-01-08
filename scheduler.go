@@ -28,7 +28,7 @@ type Config struct {
 	// DeviceSerialAllowlist optionally restricts scheduling to these device serials.
 	// When empty, all connected devices are eligible unless overridden by env.
 	DeviceSerialAllowlist []string
-	Provider              DeviceProvider
+	Provider              DeviceStateProvider
 	TaskManager           TaskManager
 	BitableURL            string
 	AgentVersion          string
@@ -40,7 +40,7 @@ type Config struct {
 // DevicePoolAgent coordinates plug-and-play devices with a task source.
 type DevicePoolAgent struct {
 	cfg             Config
-	deviceProvider  DeviceProvider
+	deviceProvider  DeviceStateProvider
 	taskManager     TaskManager
 	recorder        DeviceRecorder
 	jobRunner       JobRunner
@@ -206,7 +206,7 @@ func NewDevicePoolAgent(cfg Config, runner JobRunner) (*DevicePoolAgent, error) 
 	return agent, nil
 }
 
-func defaultDeviceProvider(cfg Config) (DeviceProvider, error) {
+func defaultDeviceProvider(cfg Config) (DeviceStateProvider, error) {
 	switch strings.ToLower(strings.TrimSpace(cfg.OSType)) {
 	case "", "android":
 		provider, err := adbprovider.NewDefault()

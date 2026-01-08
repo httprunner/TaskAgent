@@ -49,6 +49,12 @@ type DeviceProvider interface {
 	ListDevices(ctx context.Context) ([]string, error)
 }
 
+// DeviceStateProvider optionally returns the raw device states from the provider.
+// When implemented, DevicePoolAgent will use it to avoid scheduling offline/unauthorized devices.
+type DeviceStateProvider interface {
+	ListDevicesWithState(ctx context.Context) (map[string]string, error)
+}
+
 // DispatchPlanner optionally customizes how tasks are assigned to idle devices.
 // When nil, DevicePoolAgent falls back to its built-in round-robin strategy.
 type DispatchPlanner interface {

@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/httprunner/httprunner/v5/pkg/gadb"
 )
 
 type stubDeviceProvider struct {
@@ -22,6 +24,21 @@ func (s *stubDeviceProvider) ListDevices(ctx context.Context) ([]string, error) 
 	out := make([]string, len(s.devices))
 	copy(out, s.devices)
 	return out, nil
+}
+
+func (s *stubDeviceProvider) ListDevicesWithState(ctx context.Context) (map[string]string, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	states := make(map[string]string, len(s.devices))
+	for _, serial := range s.devices {
+		serial = strings.TrimSpace(serial)
+		if serial == "" {
+			continue
+		}
+		states[serial] = string(gadb.StateOnline)
+	}
+	return states, nil
 }
 
 type stubTaskManager struct {

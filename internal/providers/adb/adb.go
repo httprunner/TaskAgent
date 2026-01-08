@@ -8,7 +8,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-// Provider implements DeviceProvider using gadb.
+// Provider implements DeviceStateProvider using gadb.
 type Provider struct {
 	client gadb.Client
 }
@@ -30,6 +30,34 @@ func NewDefault() (*Provider, error) {
 // ListDevices returns all available device serials from adb.
 func (p *Provider) ListDevices(ctx context.Context) ([]string, error) {
 	return p.client.DeviceSerialList()
+}
+
+// ListDevicesWithState returns device serials with their raw gadb state names.
+func (p *Provider) ListDevicesWithState(ctx context.Context) (map[string]string, error) {
+	if p == nil {
+		return nil, errors.New("adb provider is nil")
+	}
+	devs, err := p.client.DeviceList()
+	if err != nil {
+		return nil, errors.Wrap(err, "list adb devices")
+	}
+	stateBySerial := make(map[string]string, len(devs))
+	for _, dev := range devs {
+		if dev == nil {
+			continue
+		}
+		serial := strings.TrimSpace(dev.Serial())
+		if serial == "" {
+			continue
+		}
+		state, err := dev.State()
+		if err != nil {
+			stateBySerial[serial] = string(gadb.StateUnknown)
+			continue
+		}
+		stateBySerial[serial] = string(state)
+	}
+	return stateBySerial, nil
 }
 
 // RunShell executes a shell command on the given device serial.

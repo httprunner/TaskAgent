@@ -354,6 +354,15 @@ func (w *SingleURLWorker) ProcessOnce(ctx context.Context) (retErr error) {
 		ctx = context.Background()
 	}
 	startedAt := time.Now()
+	effectiveLimit := w.limit
+	if effectiveLimit <= 0 {
+		effectiveLimit = DefaultSingleURLWorkerLimit
+	}
+	activeLimit := effectiveLimit / 2
+	newLimit := effectiveLimit - activeLimit
+	if newLimit < 1 {
+		newLimit = 1
+	}
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Fprintf(os.Stderr, "single url worker panic (ProcessOnce): %v\n", r)
@@ -369,13 +378,17 @@ func (w *SingleURLWorker) ProcessOnce(ctx context.Context) (retErr error) {
 	}()
 	// Always poll active tasks first so dl-processing tasks don't get starved when
 	// the table is dominated by ready/queued tasks.
-	activeTasks, err := w.fetchSingleURLActiveTasksRotating(ctx, w.limit)
-	if err != nil {
-		return err
+	activeTasks := []*FeishuTask{}
+	if activeLimit > 0 {
+		var err error
+		activeTasks, err = w.fetchSingleURLActiveTasksRotating(ctx, activeLimit)
+		if err != nil {
+			return err
+		}
+		w.reconcileSingleURLActiveTasks(ctx, activeTasks)
 	}
-	w.reconcileSingleURLActiveTasks(ctx, activeTasks)
 
-	newTasks, err := w.fetchSingleURLTasks(ctx, w.newTaskStatuses, w.limit)
+	newTasks, err := w.fetchSingleURLTasks(ctx, w.newTaskStatuses, newLimit)
 	if err != nil {
 		return err
 	}
@@ -393,7 +406,9 @@ func (w *SingleURLWorker) ProcessOnce(ctx context.Context) (retErr error) {
 	log.Debug().
 		Int("active_tasks", len(activeTasks)).
 		Int("new_tasks", len(newTasks)).
-		Int("limit", w.limit).
+		Int("active_limit", activeLimit).
+		Int("new_limit", newLimit).
+		Int("limit", effectiveLimit).
 		Int("concurrency", w.concurrency).
 		Dur("elapsed", time.Since(startedAt)).
 		Msg("single url worker pass finished")
@@ -997,6 +1012,7 @@ func (w *SingleURLWorker) fetchSingleURLActiveTasksRotating(ctx context.Context,
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	explicitLimit := limit > 0
 	if limit <= 0 {
 		limit = w.limit
 	}
@@ -1004,7 +1020,7 @@ func (w *SingleURLWorker) fetchSingleURLActiveTasksRotating(ctx context.Context,
 		limit = DefaultSingleURLWorkerLimit
 	}
 	scanLimit := limit
-	if singleURLActiveFetchChunk > 0 && singleURLActiveMinPages > 0 {
+	if !explicitLimit && singleURLActiveFetchChunk > 0 && singleURLActiveMinPages > 0 {
 		minCap := singleURLActiveFetchChunk * singleURLActiveMinPages
 		if scanLimit < minCap {
 			scanLimit = minCap
@@ -1046,7 +1062,7 @@ func (w *SingleURLWorker) fetchSingleURLActiveTasksRotating(ctx context.Context,
 				maxPages = 1
 			}
 		}
-		if singleURLActiveMinPages > 0 && maxPages < singleURLActiveMinPages {
+		if !explicitLimit && singleURLActiveMinPages > 0 && maxPages < singleURLActiveMinPages {
 			maxPages = singleURLActiveMinPages
 		}
 		for page := 0; page < maxPages && fetched < fetchCap; page++ {

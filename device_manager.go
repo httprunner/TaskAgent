@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/httprunner/httprunner/v5/pkg/gadb"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 )
@@ -15,7 +16,7 @@ const offlineThreshold = 5 * time.Minute
 
 // deviceManager 负责维护设备状态并与 recorder 同步。
 type deviceManager struct {
-	provider     DeviceProvider
+	provider     DeviceStateProvider
 	recorder     DeviceRecorder
 	agentVersion string
 	hostUUID     string
@@ -34,7 +35,7 @@ type deviceState struct {
 	metaReady      bool
 }
 
-func newDeviceManager(provider DeviceProvider, recorder DeviceRecorder, agentVersion, hostUUID string, allowlist map[string]struct{}) *deviceManager {
+func newDeviceManager(provider DeviceStateProvider, recorder DeviceRecorder, agentVersion, hostUUID string, allowlist map[string]struct{}) *deviceManager {
 	return &deviceManager{
 		provider:     provider,
 		recorder:     recorder,
@@ -58,9 +59,13 @@ func (m *deviceManager) Refresh(ctx context.Context, fetchMeta func(serial strin
 	if m == nil || m.provider == nil {
 		return errors.New("device manager: provider is nil")
 	}
-	serials, err := m.provider.ListDevices(ctx)
+	stateBySerial, err := m.provider.ListDevicesWithState(ctx)
 	if err != nil {
-		return errors.Wrap(err, "list devices failed")
+		return errors.Wrap(err, "list devices with state failed")
+	}
+	serials := make([]string, 0, len(stateBySerial))
+	for serial := range stateBySerial {
+		serials = append(serials, serial)
 	}
 	now := time.Now()
 	seen := make(map[string]struct{}, len(serials))
@@ -88,6 +93,39 @@ func (m *deviceManager) Refresh(ctx context.Context, fetchMeta func(serial strin
 			continue
 		}
 		seen[serial] = struct{}{}
+		state := strings.TrimSpace(stateBySerial[serial])
+		if state != "" && state != string(gadb.StateOnline) {
+			meta := deviceMeta{ProviderUUID: m.hostUUID}
+			if dev, ok := m.devices[serial]; ok {
+				dev.lastSeen = now
+				if !dev.metaReady && fetchMeta != nil {
+					dev.meta = fetchMeta(serial)
+					dev.metaReady = true
+				}
+				meta = dev.meta
+				if dev.status == deviceStatusRunning {
+					dev.removeAfterJob = true
+				} else {
+					delete(m.devices, serial)
+				}
+			} else if fetchMeta != nil {
+				meta = fetchMeta(serial)
+			}
+			if strings.TrimSpace(meta.ProviderUUID) == "" {
+				meta.ProviderUUID = m.hostUUID
+			}
+			updates = append(updates, DeviceInfoUpdate{
+				DeviceSerial: serial,
+				Status:       state,
+				OSType:       meta.OSType,
+				OSVersion:    meta.OSVersion,
+				IsRoot:       meta.IsRoot,
+				ProviderUUID: meta.ProviderUUID,
+				AgentVersion: m.agentVersion,
+				LastSeenAt:   now,
+			})
+			continue
+		}
 		dev, exists := m.devices[serial]
 		if exists {
 			dev.lastSeen = now

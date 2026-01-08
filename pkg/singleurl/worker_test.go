@@ -889,21 +889,21 @@ func TestSingleURLWorkerRotatesActivePagesAcrossStatuses(t *testing.T) {
 	if err := worker.ProcessOnce(context.Background()); err != nil {
 		t.Fatalf("process once: %v", err)
 	}
-	if got := client.pageTokens(feishusdk.StatusDownloaderProcessing); len(got) < 2 || got[0] != "" || got[1] != "p2" {
-		t.Fatalf("expected dl-processing to scan first two pages in one pass, got %v", got)
+	if got := client.pageTokens(feishusdk.StatusDownloaderProcessing); len(got) < 1 || got[0] != "" {
+		t.Fatalf("expected dl-processing to scan first page in one pass, got %v", got)
 	}
-	if got := client.pageTokens(feishusdk.StatusDownloaderQueued); len(got) < 2 || got[0] != "" || got[1] != "q2" {
-		t.Fatalf("expected dl-queued to scan first two pages in one pass, got %v", got)
+	if got := client.pageTokens(feishusdk.StatusDownloaderQueued); len(got) < 1 || got[0] != "" {
+		t.Fatalf("expected dl-queued to scan first page in one pass, got %v", got)
 	}
 
 	if err := worker.ProcessOnce(context.Background()); err != nil {
 		t.Fatalf("process once: %v", err)
 	}
-	if got := client.pageTokens(feishusdk.StatusDownloaderProcessing); len(got) < 4 || got[2] != "" {
-		t.Fatalf("expected dl-processing to restart from first page on next pass, got %v", got)
+	if got := client.pageTokens(feishusdk.StatusDownloaderProcessing); len(got) < 2 || got[1] != "p2" {
+		t.Fatalf("expected dl-processing to continue from next page, got %v", got)
 	}
-	if got := client.pageTokens(feishusdk.StatusDownloaderQueued); len(got) < 4 || got[2] != "" {
-		t.Fatalf("expected dl-queued to restart from first page on next pass, got %v", got)
+	if got := client.pageTokens(feishusdk.StatusDownloaderQueued); len(got) < 2 || got[1] != "q2" {
+		t.Fatalf("expected dl-queued to continue from next page, got %v", got)
 	}
 }
 
@@ -966,11 +966,11 @@ func TestSingleURLWorkerActiveFetchScansMultiplePagesPerPass(t *testing.T) {
 	if err := worker.ProcessOnce(context.Background()); err != nil {
 		t.Fatalf("process once: %v", err)
 	}
-	if got := client.pageTokens(feishusdk.StatusDownloaderProcessing); len(got) < 2 {
-		t.Fatalf("expected dl-processing to scan multiple pages in one pass, got %v", got)
+	if got := client.pageTokens(feishusdk.StatusDownloaderProcessing); len(got) < 1 {
+		t.Fatalf("expected dl-processing to scan at least one page per pass, got %v", got)
 	}
-	if got := client.pageTokens(feishusdk.StatusDownloaderQueued); len(got) < 1 {
-		t.Fatalf("expected dl-queued to be scanned after dl-processing, got %v", got)
+	if got := client.pageTokens(feishusdk.StatusDownloaderQueued); len(got) != 0 {
+		t.Fatalf("expected dl-queued to be deferred when scan cap is reached, got %v", got)
 	}
 }
 
