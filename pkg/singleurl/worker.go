@@ -979,6 +979,8 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 	work := w.buildSingleURLDispatchWork(ctx, task)
 	if work.apply == nil {
 		if work.action == singleURLDispatchQueued && work.task != nil {
+			// Ensure ready tasks get queued even in the single-task path
+			// where dispatch uses a nil apply callback.
 			return w.markSingleURLTaskQueued(ctx, work.task, work.group, work.meta)
 		}
 		return nil
