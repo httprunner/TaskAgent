@@ -1894,3 +1894,32 @@ func TestResultRecordCreateLive(t *testing.T) {
 	}
 	t.Logf("live result record created id=%s item_id=%s tags=%s", id, record.ItemID, record.Tags)
 }
+
+func TestBitableOptionalExtraConcatenatesSegments(t *testing.T) {
+	fields := map[string]any{
+		"Extra": []any{
+			map[string]any{"text": "{\"cdn_url\":\"http://example.com/video"},
+			map[string]any{"text": ".mp4\"}"},
+		},
+	}
+	got := bitableOptionalExtra(fields, "Extra")
+	want := "{\"cdn_url\":\"http://example.com/video.mp4\"}"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestBitableOptionalExtraUsesLinkFallback(t *testing.T) {
+	fields := map[string]any{
+		"Extra": []any{
+			map[string]any{"text": "{\"cdn_url\":\""},
+			map[string]any{"link": "http://example.com/video.mp4"},
+			map[string]any{"text": "\"}"},
+		},
+	}
+	got := bitableOptionalExtra(fields, "Extra")
+	want := "{\"cdn_url\":\"http://example.com/video.mp4\"}"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}

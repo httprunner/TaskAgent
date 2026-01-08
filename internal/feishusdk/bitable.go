@@ -2006,7 +2006,7 @@ func decodeTaskRow(rec bitableRecord, fields TaskFields) (TaskRow, error) {
 		Webhook:          bitableOptionalString(rec.Fields, fields.Webhook),
 		UserID:           bitableOptionalString(rec.Fields, fields.UserID),
 		UserName:         bitableOptionalString(rec.Fields, fields.UserName),
-		Extra:            bitableOptionalString(rec.Fields, fields.Extra),
+		Extra:            bitableOptionalExtra(rec.Fields, fields.Extra),
 		Logs:             bitableOptionalString(rec.Fields, fields.Logs),
 		GroupID:          bitableOptionalString(rec.Fields, fields.GroupID),
 		DeviceSerial:     targetDevice,
@@ -2094,6 +2094,67 @@ func bitableOptionalString(fields map[string]any, name string) string {
 		return ""
 	}
 	return toString(val)
+}
+
+func bitableOptionalExtra(fields map[string]any, name string) string {
+	if name == "" {
+		return ""
+	}
+	val, ok := fields[name]
+	if !ok {
+		return ""
+	}
+	switch typed := val.(type) {
+	case []any:
+		var builder strings.Builder
+		for _, item := range typed {
+			builder.WriteString(bitableExtraSegmentString(item))
+		}
+		if len(typed) > 1 {
+			log.Debug().
+				Int("parts", len(typed)).
+				Int("length", builder.Len()).
+				Msg("bitable extra concatenated from rich text segments")
+		} else if len(typed) == 1 && builder.Len() == 0 {
+			log.Warn().
+				Msg("bitable extra has single segment but empty after stringify")
+		}
+		return builder.String()
+	default:
+		return bitableExtraSegmentString(typed)
+	}
+}
+
+func bitableExtraSegmentString(value any) string {
+	switch typed := value.(type) {
+	case map[string]any:
+		if raw, ok := typed["text"]; ok {
+			if str := toString(raw); str != "" {
+				return str
+			}
+		}
+		if raw, ok := typed["value"]; ok {
+			if str := toString(raw); str != "" {
+				return str
+			}
+		}
+		if raw, ok := typed["link"]; ok {
+			if str := toString(raw); str != "" {
+				return str
+			}
+		}
+		if raw, ok := typed["url"]; ok {
+			if str := toString(raw); str != "" {
+				return str
+			}
+		}
+		if encoded, err := json.Marshal(typed); err == nil {
+			return string(encoded)
+		}
+		return ""
+	default:
+		return toString(typed)
+	}
 }
 
 func parseBitableTime(raw string) (time.Time, error) {

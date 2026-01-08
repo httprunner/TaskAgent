@@ -12,6 +12,7 @@ import (
 	taskagent "github.com/httprunner/TaskAgent"
 	"github.com/httprunner/TaskAgent/internal/env"
 	"github.com/httprunner/TaskAgent/internal/feishusdk"
+	"github.com/httprunner/TaskAgent/internal/storage"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
@@ -194,6 +195,7 @@ type SingleURLWorker struct {
 	datePresets        []string
 
 	activePageTokens map[string]string
+	mirror           *storage.TaskMirror
 }
 
 // NewSingleURLWorker builds a worker using the provided configuration.
@@ -227,7 +229,7 @@ func NewSingleURLWorker(cfg SingleURLWorkerConfig) (*SingleURLWorker, error) {
 		concurrency = 1
 	}
 	nodeIndex, nodeTotal := taskagent.NormalizeShardConfig(cfg.NodeIndex, cfg.NodeTotal)
-	return &SingleURLWorker{
+	worker := &SingleURLWorker{
 		client:       client,
 		bitableURL:   bitableURL,
 		limit:        limit,
@@ -249,7 +251,14 @@ func NewSingleURLWorker(cfg SingleURLWorkerConfig) (*SingleURLWorker, error) {
 		},
 		datePresets:      []string{taskagent.TaskDateToday},
 		activePageTokens: make(map[string]string, 4),
-	}, nil
+	}
+	mirror, err := storage.NewTaskMirror()
+	if err != nil {
+		log.Warn().Err(err).Msg("single url worker: open task mirror failed")
+	} else {
+		worker.mirror = mirror
+	}
+	return worker, nil
 }
 
 // NewSingleURLWorkerFromEnv builds a worker using Feishu credentials from env.
@@ -969,6 +978,9 @@ func (w *SingleURLWorker) handleSingleURLTask(ctx context.Context, task *FeishuT
 	}
 	work := w.buildSingleURLDispatchWork(ctx, task)
 	if work.apply == nil {
+		if work.action == singleURLDispatchQueued && work.task != nil {
+			return w.markSingleURLTaskQueued(ctx, work.task, work.group, work.meta)
+		}
 		return nil
 	}
 	return work.apply(ctx)
@@ -1035,6 +1047,7 @@ func (w *SingleURLWorker) fetchSingleURLTasksWithDatePresets(ctx context.Context
 			result = taskagent.AppendUniqueFeishuTasks(result, subset, limit, seen)
 		}
 	}
+	w.mirrorTasks(result)
 	return result, nil
 }
 
@@ -1137,7 +1150,55 @@ func (w *SingleURLWorker) fetchSingleURLActiveTasksRotating(ctx context.Context,
 			w.activePageTokens[status] = pageToken
 		}
 	}
+	w.mirrorTasks(result)
 	return result, nil
+}
+
+func (w *SingleURLWorker) mirrorTasks(tasks []*FeishuTask) {
+	if w == nil || w.mirror == nil || len(tasks) == 0 {
+		return
+	}
+	rows := make([]*storage.TaskStatus, 0, len(tasks))
+	for _, task := range tasks {
+		if task == nil || task.TaskID == 0 {
+			continue
+		}
+		rows = append(rows, &storage.TaskStatus{
+			TaskID:           task.TaskID,
+			BizTaskID:        task.BizTaskID,
+			Params:           task.Params,
+			ItemID:           task.ItemID,
+			BookID:           task.BookID,
+			URL:              task.URL,
+			App:              task.App,
+			Scene:            task.Scene,
+			StartAt:          task.StartAt,
+			StartAtRaw:       task.StartAtRaw,
+			EndAt:            task.EndAt,
+			EndAtRaw:         task.EndAtRaw,
+			Datetime:         task.Datetime,
+			DatetimeRaw:      task.DatetimeRaw,
+			Status:           task.Status,
+			Webhook:          task.Webhook,
+			UserID:           task.UserID,
+			UserName:         task.UserName,
+			Extra:            task.Extra,
+			Logs:             task.Logs,
+			DeviceSerial:     task.DeviceSerial,
+			DispatchedDevice: task.DispatchedDevice,
+			DispatchedAt:     task.DispatchedAt,
+			DispatchedAtRaw:  task.DispatchedAtRaw,
+			ElapsedSeconds:   task.ElapsedSeconds,
+			ItemsCollected:   task.ItemsCollected,
+			RetryCount:       task.RetryCount,
+		})
+	}
+	if len(rows) == 0 {
+		return
+	}
+	if err := w.mirror.UpsertTasks(rows); err != nil {
+		log.Warn().Err(err).Int("task_count", len(rows)).Msg("single url worker: mirror tasks failed")
+	}
 }
 
 func filterFeishuTasksByShard(tasks []*FeishuTask, nodeIndex, nodeTotal int) []*FeishuTask {
