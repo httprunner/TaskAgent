@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/httprunner/TaskAgent/internal/env"
+	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 	"github.com/pkg/errors"
 )
 
@@ -152,6 +153,9 @@ func (c *Client) FetchDeviceTable(ctx context.Context, rawURL string, override *
 		index:  make(map[string]string, len(records)),
 	}
 	for _, rec := range records {
+		if rec == nil {
+			continue
+		}
 		serial := strings.TrimSpace(toString(rec.Fields[fields.DeviceSerial]))
 		if serial == "" {
 			continue
@@ -174,7 +178,7 @@ func (c *Client) FetchDeviceTable(ctx context.Context, rawURL string, override *
 			row.LastSeenAt = ts
 		}
 		table.Rows = append(table.Rows, row)
-		table.index[serial] = rec.RecordID
+		table.index[serial] = strings.TrimSpace(larkcore.StringValue(rec.RecordId))
 	}
 	return table, nil
 }
@@ -234,9 +238,12 @@ func (c *Client) lookupDeviceRecordID(ctx context.Context, ref BitableRef, field
 			return "", err
 		}
 		for _, rec := range records {
+			if rec == nil {
+				continue
+			}
 			val := strings.TrimSpace(toString(rec.Fields[fields.DeviceSerial]))
 			if strings.EqualFold(val, serial) {
-				return rec.RecordID, nil
+				return strings.TrimSpace(larkcore.StringValue(rec.RecordId)), nil
 			}
 		}
 	}

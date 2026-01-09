@@ -269,7 +269,7 @@ func (c *Client) FetchCookieRows(ctx context.Context, rawURL string, override *C
 	}
 	rows := make([]CookieRow, 0, len(records))
 	for _, rec := range records {
-		if rec.Fields == nil {
+		if rec == nil || rec.Fields == nil {
 			continue
 		}
 		value := strings.TrimSpace(bitableOptionalString(rec.Fields, fields.Cookies))
@@ -281,7 +281,7 @@ func (c *Client) FetchCookieRows(ctx context.Context, rawURL string, override *C
 			continue
 		}
 		row := CookieRow{
-			RecordID: rec.RecordID,
+			RecordID: strings.TrimSpace(larkcore.StringValue(rec.RecordId)),
 			Cookies:  value,
 			Platform: strings.TrimSpace(bitableOptionalString(rec.Fields, fields.Platform)),
 			Status:   status,
@@ -630,13 +630,16 @@ func (c *Client) FetchTaskTableWithOptions(ctx context.Context, rawURL string, o
 	table.NextPageToken = strings.TrimSpace(pageInfo.NextPageToken)
 
 	for _, rec := range records {
+		if rec == nil {
+			continue
+		}
 		row, err := decodeTaskRow(rec, fields)
 		if err != nil {
-			table.Invalid = append(table.Invalid, TaskRowError{RecordID: rec.RecordID, Err: err})
+			table.Invalid = append(table.Invalid, TaskRowError{RecordID: strings.TrimSpace(larkcore.StringValue(rec.RecordId)), Err: err})
 			continue
 		}
 		if strings.TrimSpace(row.Status) == "" {
-			table.Invalid = append(table.Invalid, TaskRowError{RecordID: rec.RecordID, Err: errors.New("empty status after decode")})
+			table.Invalid = append(table.Invalid, TaskRowError{RecordID: strings.TrimSpace(larkcore.StringValue(rec.RecordId)), Err: errors.New("empty status after decode")})
 			continue
 		}
 		table.Rows = append(table.Rows, row)
@@ -772,7 +775,13 @@ func (c *Client) FetchBitableRows(ctx context.Context, rawURL string, opts *Task
 	}
 	rows = make([]BitableRow, 0, len(records))
 	for _, rec := range records {
-		rows = append(rows, BitableRow(rec))
+		if rec == nil {
+			continue
+		}
+		rows = append(rows, BitableRow{
+			RecordID: strings.TrimSpace(larkcore.StringValue(rec.RecordId)),
+			Fields:   rec.Fields,
+		})
 	}
 	return rows, nil
 }
@@ -1533,12 +1542,6 @@ func encodeExtraPayload(value any) (string, error) {
 	}
 }
 
-// docs: https://feishu.apifox.cn/doc-436428
-type bitableRecord struct {
-	RecordID string         `json:"record_id"`
-	Fields   map[string]any `json:"fields"`
-}
-
 type bitablePageInfo struct {
 	HasMore       bool
 	NextPageToken string
@@ -1619,22 +1622,25 @@ func (c *Client) BatchGetBitableRows(ctx context.Context, ref BitableRef, record
 	}
 	rows := make([]BitableRow, 0, len(records))
 	for _, rec := range records {
+		if rec == nil {
+			continue
+		}
 		rows = append(rows, BitableRow{
-			RecordID: rec.RecordID,
+			RecordID: strings.TrimSpace(larkcore.StringValue(rec.RecordId)),
 			Fields:   rec.Fields,
 		})
 	}
 	return rows, nil
 }
 
-func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSize int, opts *TaskQueryOptions) ([]bitableRecord, bitablePageInfo, error) {
+func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSize int, opts *TaskQueryOptions) ([]*larkbitable.AppTableRecord, bitablePageInfo, error) {
 	if c.useHTTP() {
 		return c.listBitableRecordsHTTP(ctx, ref, pageSize, opts)
 	}
 	return c.listBitableRecordsSDK(ctx, ref, pageSize, opts)
 }
 
-func (c *Client) listBitableRecordsHTTP(ctx context.Context, ref BitableRef, pageSize int, opts *TaskQueryOptions) ([]bitableRecord, bitablePageInfo, error) {
+func (c *Client) listBitableRecordsHTTP(ctx context.Context, ref BitableRef, pageSize int, opts *TaskQueryOptions) ([]*larkbitable.AppTableRecord, bitablePageInfo, error) {
 	if err := requireBitableAppTable(ref); err != nil {
 		return nil, bitablePageInfo{}, err
 	}
@@ -1696,7 +1702,7 @@ func (c *Client) listBitableRecordsHTTP(ctx context.Context, ref BitableRef, pag
 		}
 	}
 
-	all := make([]bitableRecord, 0, pageSize)
+	all := make([]*larkbitable.AppTableRecord, 0, pageSize)
 	pageToken := ""
 	if opts != nil && strings.TrimSpace(opts.PageToken) != "" {
 		pageToken = strings.TrimSpace(opts.PageToken)
@@ -1735,9 +1741,9 @@ func (c *Client) listBitableRecordsHTTP(ctx context.Context, ref BitableRef, pag
 			Code int    `json:"code"`
 			Msg  string `json:"msg"`
 			Data struct {
-				Items     []bitableRecord `json:"items"`
-				HasMore   bool            `json:"has_more"`
-				PageToken string          `json:"page_token"`
+				Items     []*larkbitable.AppTableRecord `json:"items"`
+				HasMore   bool                          `json:"has_more"`
+				PageToken string                        `json:"page_token"`
 			} `json:"data"`
 		}
 		if err := json.Unmarshal(raw, &resp); err != nil {
@@ -1796,7 +1802,7 @@ func (c *Client) listBitableRecordsHTTP(ctx context.Context, ref BitableRef, pag
 	return all, pageInfo, nil
 }
 
-func (c *Client) listBitableRecordsSDK(ctx context.Context, ref BitableRef, pageSize int, opts *TaskQueryOptions) ([]bitableRecord, bitablePageInfo, error) {
+func (c *Client) listBitableRecordsSDK(ctx context.Context, ref BitableRef, pageSize int, opts *TaskQueryOptions) ([]*larkbitable.AppTableRecord, bitablePageInfo, error) {
 	if err := requireBitableAppTable(ref); err != nil {
 		return nil, bitablePageInfo{}, err
 	}
@@ -1862,7 +1868,7 @@ func (c *Client) listBitableRecordsSDK(ctx context.Context, ref BitableRef, page
 		}
 	}
 
-	all := make([]bitableRecord, 0, pageSize)
+	all := make([]*larkbitable.AppTableRecord, 0, pageSize)
 	pageToken := ""
 	if opts != nil && strings.TrimSpace(opts.PageToken) != "" {
 		pageToken = strings.TrimSpace(opts.PageToken)
@@ -1925,10 +1931,7 @@ func (c *Client) listBitableRecordsSDK(ctx context.Context, ref BitableRef, page
 			if item == nil {
 				continue
 			}
-			all = append(all, bitableRecord{
-				RecordID: larkcore.StringValue(item.RecordId),
-				Fields:   item.Fields,
-			})
+			all = append(all, item)
 		}
 
 		pageInfo.HasMore = hasMore
@@ -1963,17 +1966,20 @@ func (c *Client) listBitableRecordsSDK(ctx context.Context, ref BitableRef, page
 	return all, pageInfo, nil
 }
 
-func decodeTaskRow(rec bitableRecord, fields TaskFields) (TaskRow, error) {
+func decodeTaskRow(rec *larkbitable.AppTableRecord, fields TaskFields) (TaskRow, error) {
+	if rec == nil {
+		return TaskRow{}, errors.New("record is nil")
+	}
 	if rec.Fields == nil {
-		return TaskRow{}, fmt.Errorf("record %s has no fields", rec.RecordID)
+		return TaskRow{}, fmt.Errorf("record %s has no fields", larkcore.StringValue(rec.RecordId))
 	}
 	taskID, err := bitableIntField(rec.Fields, fields.TaskID)
 	if err != nil {
-		return TaskRow{}, fmt.Errorf("record %s: %w", rec.RecordID, err)
+		return TaskRow{}, fmt.Errorf("record %s: %w", larkcore.StringValue(rec.RecordId), err)
 	}
 	status, err := bitableStringField(rec.Fields, fields.Status, true)
 	if err != nil {
-		return TaskRow{}, fmt.Errorf("record %s: %w", rec.RecordID, err)
+		return TaskRow{}, fmt.Errorf("record %s: %w", larkcore.StringValue(rec.RecordId), err)
 	}
 
 	var parentTaskID int64
@@ -1993,7 +1999,7 @@ func decodeTaskRow(rec bitableRecord, fields TaskFields) (TaskRow, error) {
 	targetDevice := strings.TrimSpace(bitableOptionalString(rec.Fields, fields.DeviceSerial))
 	dispatchedDevice := strings.TrimSpace(bitableOptionalString(rec.Fields, fields.DispatchedDevice))
 	row := TaskRow{
-		RecordID:         rec.RecordID,
+		RecordID:         strings.TrimSpace(larkcore.StringValue(rec.RecordId)),
 		TaskID:           taskID,
 		BizTaskID:        bizTaskID,
 		ParentTaskID:     parentTaskID,
@@ -2338,7 +2344,7 @@ func (c *Client) createBitableRecordHTTP(ctx context.Context, ref BitableRef, fi
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 		Data struct {
-			Record bitableRecord `json:"record"`
+			Record *larkbitable.AppTableRecord `json:"record"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
@@ -2347,10 +2353,14 @@ func (c *Client) createBitableRecordHTTP(ctx context.Context, ref BitableRef, fi
 	if resp.Code != 0 {
 		return "", fmt.Errorf("feishu: create record failed code=%d msg=%s", resp.Code, resp.Msg)
 	}
-	if resp.Data.Record.RecordID == "" {
+	if resp.Data.Record == nil {
+		return "", errors.New("feishu: create record response missing record")
+	}
+	id := strings.TrimSpace(larkcore.StringValue(resp.Data.Record.RecordId))
+	if id == "" {
 		return "", errors.New("feishu: create record response missing record id")
 	}
-	return resp.Data.Record.RecordID, nil
+	return id, nil
 }
 
 func (c *Client) createBitableRecordSDK(ctx context.Context, ref BitableRef, fields map[string]any) (recordID string, err error) {
@@ -2433,7 +2443,7 @@ func (c *Client) batchCreateBitableRecordsHTTP(ctx context.Context, ref BitableR
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 		Data struct {
-			Records []bitableRecord `json:"records"`
+			Records []*larkbitable.AppTableRecord `json:"records"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
@@ -2444,10 +2454,14 @@ func (c *Client) batchCreateBitableRecordsHTTP(ctx context.Context, ref BitableR
 	}
 	ids := make([]string, 0, len(resp.Data.Records))
 	for _, rec := range resp.Data.Records {
-		if rec.RecordID == "" {
+		if rec == nil {
+			continue
+		}
+		id := strings.TrimSpace(larkcore.StringValue(rec.RecordId))
+		if id == "" {
 			return nil, errors.New("feishu: batch create response missing record id")
 		}
-		ids = append(ids, rec.RecordID)
+		ids = append(ids, id)
 	}
 	return ids, nil
 }
@@ -2513,30 +2527,30 @@ func (c *Client) batchCreateBitableRecordsSDK(ctx context.Context, ref BitableRe
 	return ids, nil
 }
 
-func (c *Client) getBitableRecord(ctx context.Context, ref BitableRef, recordID string) (bitableRecord, error) {
+func (c *Client) getBitableRecord(ctx context.Context, ref BitableRef, recordID string) (*larkbitable.AppTableRecord, error) {
 	if strings.TrimSpace(recordID) == "" {
-		return bitableRecord{}, errors.New("feishu: record id is empty")
+		return nil, errors.New("feishu: record id is empty")
 	}
 	records, err := c.BatchGetBitableRecords(ctx, ref, []string{recordID}, "")
 	if err != nil {
-		return bitableRecord{}, err
+		return nil, err
 	}
 	if len(records) == 0 {
-		return bitableRecord{}, fmt.Errorf("feishu: record %s not found", recordID)
+		return nil, fmt.Errorf("feishu: record %s not found", recordID)
 	}
 	return records[0], nil
 }
 
 // BatchUpdateBitableRecords updates multiple records in a single request.
 // Max 500 records per request.
-func (c *Client) BatchUpdateBitableRecords(ctx context.Context, ref BitableRef, records []map[string]any) (updated []bitableRecord, err error) {
+func (c *Client) BatchUpdateBitableRecords(ctx context.Context, ref BitableRef, records []map[string]any) (updated []*larkbitable.AppTableRecord, err error) {
 	if c.useHTTP() {
 		return c.batchUpdateBitableRecordsHTTP(ctx, ref, records)
 	}
 	return c.batchUpdateBitableRecordsSDK(ctx, ref, records)
 }
 
-func (c *Client) batchUpdateBitableRecordsHTTP(ctx context.Context, ref BitableRef, records []map[string]any) (updated []bitableRecord, err error) {
+func (c *Client) batchUpdateBitableRecordsHTTP(ctx context.Context, ref BitableRef, records []map[string]any) (updated []*larkbitable.AppTableRecord, err error) {
 	defer func() {
 		if err != nil {
 			err = errors.Wrap(err, "batch update bitable records failed")
@@ -2584,7 +2598,7 @@ func (c *Client) batchUpdateBitableRecordsHTTP(ctx context.Context, ref BitableR
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 		Data struct {
-			Records []bitableRecord `json:"records"`
+			Records []*larkbitable.AppTableRecord `json:"records"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
@@ -2597,7 +2611,7 @@ func (c *Client) batchUpdateBitableRecordsHTTP(ctx context.Context, ref BitableR
 	return resp.Data.Records, nil
 }
 
-func (c *Client) batchUpdateBitableRecordsSDK(ctx context.Context, ref BitableRef, records []map[string]any) (updated []bitableRecord, err error) {
+func (c *Client) batchUpdateBitableRecordsSDK(ctx context.Context, ref BitableRef, records []map[string]any) (updated []*larkbitable.AppTableRecord, err error) {
 	defer func() {
 		if err != nil {
 			err = errors.Wrap(err, "batch update bitable records failed")
@@ -2664,29 +2678,26 @@ func (c *Client) batchUpdateBitableRecordsSDK(ctx context.Context, ref BitableRe
 		return nil, errors.New("feishu: batch update response missing data")
 	}
 
-	out := make([]bitableRecord, 0, len(resp.Data.Records))
+	out := make([]*larkbitable.AppTableRecord, 0, len(resp.Data.Records))
 	for _, rec := range resp.Data.Records {
 		if rec == nil {
 			continue
 		}
-		out = append(out, bitableRecord{
-			RecordID: larkcore.StringValue(rec.RecordId),
-			Fields:   rec.Fields,
-		})
+		out = append(out, rec)
 	}
 	return out, nil
 }
 
 // BatchGetBitableRecords retrieves multiple records by their IDs.
 // Max 100 records per request.
-func (c *Client) BatchGetBitableRecords(ctx context.Context, ref BitableRef, recordIDs []string, userIDType string) (records []bitableRecord, err error) {
+func (c *Client) BatchGetBitableRecords(ctx context.Context, ref BitableRef, recordIDs []string, userIDType string) (records []*larkbitable.AppTableRecord, err error) {
 	if c.useHTTP() {
 		return c.batchGetBitableRecordsHTTP(ctx, ref, recordIDs, userIDType)
 	}
 	return c.batchGetBitableRecordsSDK(ctx, ref, recordIDs, userIDType)
 }
 
-func (c *Client) batchGetBitableRecordsHTTP(ctx context.Context, ref BitableRef, recordIDs []string, userIDType string) (records []bitableRecord, err error) {
+func (c *Client) batchGetBitableRecordsHTTP(ctx context.Context, ref BitableRef, recordIDs []string, userIDType string) (records []*larkbitable.AppTableRecord, err error) {
 	defer func() {
 		if err != nil {
 			err = errors.Wrap(err, "batch get bitable records failed")
@@ -2718,9 +2729,9 @@ func (c *Client) batchGetBitableRecordsHTTP(ctx context.Context, ref BitableRef,
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 		Data struct {
-			Records   []bitableRecord `json:"records"`
-			Absent    []string        `json:"absent_record_ids"`
-			Forbidden []string        `json:"forbidden_record_ids"`
+			Records   []*larkbitable.AppTableRecord `json:"records"`
+			Absent    []string                      `json:"absent_record_ids"`
+			Forbidden []string                      `json:"forbidden_record_ids"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
@@ -2740,7 +2751,7 @@ func (c *Client) batchGetBitableRecordsHTTP(ctx context.Context, ref BitableRef,
 	return resp.Data.Records, nil
 }
 
-func (c *Client) batchGetBitableRecordsSDK(ctx context.Context, ref BitableRef, recordIDs []string, userIDType string) (records []bitableRecord, err error) {
+func (c *Client) batchGetBitableRecordsSDK(ctx context.Context, ref BitableRef, recordIDs []string, userIDType string) (records []*larkbitable.AppTableRecord, err error) {
 	defer func() {
 		if err != nil {
 			err = errors.Wrap(err, "batch get bitable records failed")
@@ -2786,15 +2797,12 @@ func (c *Client) batchGetBitableRecordsSDK(ctx context.Context, ref BitableRef, 
 		log.Warn().Strs("forbidden_ids", resp.Data.ForbiddenRecordIds).Msg("feishu: some records were forbidden")
 	}
 
-	out := make([]bitableRecord, 0, len(resp.Data.Records))
+	out := make([]*larkbitable.AppTableRecord, 0, len(resp.Data.Records))
 	for _, rec := range resp.Data.Records {
 		if rec == nil {
 			continue
 		}
-		out = append(out, bitableRecord{
-			RecordID: larkcore.StringValue(rec.RecordId),
-			Fields:   rec.Fields,
-		})
+		out = append(out, rec)
 	}
 	return out, nil
 }

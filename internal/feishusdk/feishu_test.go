@@ -453,8 +453,8 @@ func TestParseBitableURL(t *testing.T) {
 
 func TestDecodeTaskRow(t *testing.T) {
 	when := time.Date(2025, 11, 8, 10, 30, 0, 0, time.Local)
-	rec := bitableRecord{
-		RecordID: "rec123",
+	rec := &larkbitable.AppTableRecord{
+		RecordId: larkcore.StringPtr("rec123"),
 		Fields: map[string]any{
 			DefaultTaskFields.TaskID:           float64(42),
 			DefaultTaskFields.Params:           "{\"song\":\"foo\"}",
@@ -507,8 +507,8 @@ func TestDecodeTaskRow(t *testing.T) {
 
 func TestDecodeTaskRowAllowsEmptyStatus(t *testing.T) {
 	when := time.Date(2025, 11, 8, 0, 0, 0, 0, time.Local)
-	rec := bitableRecord{
-		RecordID: "recEmpty",
+	rec := &larkbitable.AppTableRecord{
+		RecordId: larkcore.StringPtr("recEmpty"),
 		Fields: map[string]any{
 			DefaultTaskFields.TaskID:           float64(43),
 			DefaultTaskFields.Params:           "{}",
@@ -536,8 +536,8 @@ func TestDecodeTaskRowAllowsEmptyStatus(t *testing.T) {
 }
 
 func TestDecodeTaskRowWithOnlyTargetDeviceSerial(t *testing.T) {
-	rec := bitableRecord{
-		RecordID: "recTargetOnly",
+	rec := &larkbitable.AppTableRecord{
+		RecordId: larkcore.StringPtr("recTargetOnly"),
 		Fields: map[string]any{
 			DefaultTaskFields.TaskID:       float64(55),
 			DefaultTaskFields.Params:       "{}",
@@ -558,8 +558,8 @@ func TestDecodeTaskRowWithOnlyTargetDeviceSerial(t *testing.T) {
 
 func TestDecodeTaskRowMissingStatus(t *testing.T) {
 	when := time.Date(2025, 11, 8, 0, 0, 0, 0, time.Local)
-	rec := bitableRecord{
-		RecordID: "recMissing",
+	rec := &larkbitable.AppTableRecord{
+		RecordId: larkcore.StringPtr("recMissing"),
 		Fields: map[string]any{
 			DefaultTaskFields.TaskID: float64(44),
 			DefaultTaskFields.Params: "{}",
