@@ -1900,25 +1900,31 @@ func TestResultRecordCreateLive(t *testing.T) {
 	t.Logf("live result record created id=%s item_id=%s tags=%s", id, record.ItemID, record.Tags)
 }
 
-func TestBitableOptionalStringReadsString(t *testing.T) {
+func TestBitableOptionalExtraConcatenatesSegments(t *testing.T) {
 	fields := map[string]any{
-		"Extra": "{\"cdn_url\":\"http://example.com/video.mp4\"}",
+		"Extra": []any{
+			map[string]any{"text": "{\"cdn_url\":\"http://example.com/video"},
+			map[string]any{"text": ".mp4\"}"},
+		},
 	}
-	got := bitableOptionalString(fields, "Extra")
+	got := bitableOptionalExtra(fields, "Extra", 0)
 	want := "{\"cdn_url\":\"http://example.com/video.mp4\"}"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
 }
 
-func TestBitableOptionalStringIgnoresNonString(t *testing.T) {
+func TestBitableOptionalExtraUsesLinkFallback(t *testing.T) {
 	fields := map[string]any{
 		"Extra": []any{
-			map[string]any{"text": "{\"cdn_url\":\"http://example.com/video.mp4\"}"},
+			map[string]any{"text": "{\"cdn_url\":\""},
+			map[string]any{"link": "http://example.com/video.mp4"},
+			map[string]any{"text": "\"}"},
 		},
 	}
-	got := bitableOptionalString(fields, "Extra")
-	if got != "" {
-		t.Fatalf("expected empty string, got %q", got)
+	got := bitableOptionalExtra(fields, "Extra", 0)
+	want := "{\"cdn_url\":\"http://example.com/video.mp4\"}"
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
 	}
 }

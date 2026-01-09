@@ -2014,7 +2014,7 @@ func decodeTaskRow(rec *larkbitable.AppTableRecord, fields TaskFields) (TaskRow,
 		Webhook:          bitableOptionalString(rec.Fields, fields.Webhook),
 		UserID:           bitableOptionalString(rec.Fields, fields.UserID),
 		UserName:         bitableOptionalString(rec.Fields, fields.UserName),
-		Extra:            bitableOptionalString(rec.Fields, fields.Extra),
+		Extra:            bitableOptionalExtra(rec.Fields, fields.Extra, taskID),
 		Logs:             bitableOptionalString(rec.Fields, fields.Logs),
 		GroupID:          bitableOptionalString(rec.Fields, fields.GroupID),
 		DeviceSerial:     targetDevice,
@@ -2079,26 +2079,66 @@ func bitableStringField(fields map[string]any, name string, allowEmpty bool) (st
 	if !ok {
 		return "", fmt.Errorf("missing field %q", name)
 	}
-	rec := larkbitable.AppTableRecord{Fields: fields}
-	strPtr := rec.StringField(name)
-	if strPtr == nil {
-		return "", fmt.Errorf("field %q is not a string (value=%T)", name, val)
-	}
-	if *strPtr == "" && !allowEmpty {
+	str := toString(val)
+	if str == "" && !allowEmpty {
 		return "", fmt.Errorf("field %q is empty", name)
 	}
-	return *strPtr, nil
+	return str, nil
 }
 
 func bitableOptionalString(fields map[string]any, name string) string {
 	if name == "" || fields == nil {
 		return ""
 	}
-	rec := larkbitable.AppTableRecord{Fields: fields}
-	if strPtr := rec.StringField(name); strPtr != nil {
-		return *strPtr
+	return toString(fields[name])
+}
+
+func bitableOptionalExtra(fields map[string]any, name string, taskID int64) string {
+	if name == "" || fields == nil {
+		return ""
 	}
-	return ""
+	val, ok := fields[name]
+	if !ok {
+		return ""
+	}
+	log.Debug().Any("extra", val).Int64("taskID", taskID).Msg("decoding bitable extra field")
+	switch typed := val.(type) {
+	case []any:
+		var builder strings.Builder
+		for _, item := range typed {
+			builder.WriteString(bitableExtraSegmentString(item))
+		}
+		return builder.String()
+	default:
+		return bitableExtraSegmentString(typed)
+	}
+}
+
+func bitableExtraSegmentString(value any) string {
+	switch typed := value.(type) {
+	case map[string]any:
+		if raw, ok := typed["text"]; ok {
+			if str := toString(raw); str != "" {
+				return str
+			}
+		}
+		if raw, ok := typed["link"]; ok {
+			if str := toString(raw); str != "" {
+				return str
+			}
+		}
+		if raw, ok := typed["value"]; ok {
+			if str := toString(raw); str != "" {
+				return str
+			}
+		}
+		if encoded, err := json.Marshal(typed); err == nil {
+			return string(encoded)
+		}
+		return ""
+	default:
+		return toString(typed)
+	}
 }
 
 func bitableOptionalTimestamp(fields map[string]any, name string) (string, *time.Time) {
@@ -2226,19 +2266,19 @@ func toString(value any) string {
 	case []any:
 		for _, item := range v {
 			if str := toString(item); str != "" {
-				return str
+				return strings.TrimSpace(str)
 			}
 		}
 		return ""
 	case map[string]any:
 		if raw, ok := v["text"]; ok {
 			if str := toString(raw); str != "" {
-				return str
+				return strings.TrimSpace(str)
 			}
 		}
 		if raw, ok := v["value"]; ok {
 			if str := toString(raw); str != "" {
-				return str
+				return strings.TrimSpace(str)
 			}
 		}
 		return ""
@@ -2635,7 +2675,7 @@ func (c *Client) batchUpdateBitableRecordsSDK(ctx context.Context, ref BitableRe
 		if len(record) == 0 {
 			continue
 		}
-		recordID := strings.TrimSpace(toString(record["record_id"]))
+		recordID := toString(record["record_id"])
 		if recordID == "" {
 			return nil, errors.New("feishu: record_id is missing in update payload")
 		}

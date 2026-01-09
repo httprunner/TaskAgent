@@ -156,7 +156,7 @@ func (c *Client) FetchDeviceTable(ctx context.Context, rawURL string, override *
 		if rec == nil {
 			continue
 		}
-		serial := strings.TrimSpace(toString(rec.Fields[fields.DeviceSerial]))
+		serial := toString(rec.Fields[fields.DeviceSerial])
 		if serial == "" {
 			continue
 		}
@@ -241,7 +241,7 @@ func (c *Client) lookupDeviceRecordID(ctx context.Context, ref BitableRef, field
 			if rec == nil {
 				continue
 			}
-			val := strings.TrimSpace(toString(rec.Fields[fields.DeviceSerial]))
+			val := toString(rec.Fields[fields.DeviceSerial])
 			if strings.EqualFold(val, serial) {
 				return strings.TrimSpace(larkcore.StringValue(rec.RecordId)), nil
 			}
@@ -367,7 +367,7 @@ func toStrings(val any) []string {
 	case []any:
 		result := make([]string, 0, len(v))
 		for _, item := range v {
-			if s := strings.TrimSpace(toString(item)); s != "" {
+			if s := toString(item); s != "" {
 				result = append(result, s)
 			}
 		}
@@ -379,7 +379,7 @@ func toStrings(val any) []string {
 		}
 		return []string{trimmed}
 	default:
-		if s := strings.TrimSpace(toString(v)); s != "" {
+		if s := toString(v); s != "" {
 			return []string{s}
 		}
 		return nil

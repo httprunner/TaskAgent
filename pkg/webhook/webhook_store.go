@@ -300,9 +300,9 @@ func decodeWebhookResultRow(row taskagent.BitableRow, fields webhookResultFields
 	if row.Fields == nil {
 		return out
 	}
-	out.BizType = strings.TrimSpace(toString(row.Fields[fields.BizType]))
-	out.GroupID = strings.TrimSpace(toString(row.Fields[fields.GroupID]))
-	out.Status = strings.ToLower(strings.TrimSpace(toString(row.Fields[fields.Status])))
+	out.BizType = toString(row.Fields[fields.BizType])
+	out.GroupID = toString(row.Fields[fields.GroupID])
+	out.Status = strings.ToLower(toString(row.Fields[fields.Status]))
 	out.TaskIDs = parseTaskIDs(row.Fields[fields.TaskIDs])
 	out.TaskIDsByStatus = parseTaskIDsStatusMap(row.Fields[fields.TaskIDs])
 	out.DramaInfo = strings.TrimSpace(toJSONString(row.Fields[fields.DramaInfo]))
@@ -313,7 +313,7 @@ func decodeWebhookResultRow(row taskagent.BitableRow, fields webhookResultFields
 	out.StartAtMs = toInt64(row.Fields[fields.StartAt])
 	out.EndAtMs = toInt64(row.Fields[fields.EndAt])
 	out.RetryCount = int(toInt64(row.Fields[fields.RetryCount]))
-	out.LastError = strings.TrimSpace(toString(row.Fields[fields.LastError]))
+	out.LastError = toString(row.Fields[fields.LastError])
 	return out
 }
 
