@@ -874,8 +874,9 @@ func (w *SingleURLWorker) buildSingleURLDispatchWork(ctx context.Context, task *
 		work.apply = func(context.Context) error { return errors.New("single url worker: nil instance") }
 		return work
 	}
-	meta := decodeSingleURLMetadata(task.Logs)
-	if strings.TrimSpace(task.Status) == feishusdk.StatusDownloaderFailed {
+
+	status := strings.TrimSpace(task.Status)
+	if status == feishusdk.StatusDownloaderFailed {
 		work.action = singleURLDispatchFailForDevice
 		work.apply = func(ctx context.Context) error {
 			// Keep existing Logs (attempt history) when resetting dl-failed back to failed.
@@ -885,13 +886,10 @@ func (w *SingleURLWorker) buildSingleURLDispatchWork(ctx context.Context, task *
 		return work
 	}
 
-	retryRequired := false
-	switch strings.TrimSpace(task.Status) {
-	case feishusdk.StatusFailed, feishusdk.StatusDownloaderFailed:
-		retryRequired = true
-	}
-
-	if strings.TrimSpace(task.Status) != feishusdk.StatusReady && !retryRequired {
+	meta := decodeSingleURLMetadata(task.Logs)
+	// buildSingleURLDispatchWork is only used for newTaskStatuses (ready + dl-failed by default),
+	// so we reconcile only for non-ready cases to avoid duplicate crawler tasks.
+	if status != feishusdk.StatusReady {
 		if taskID := meta.latestTaskID(); taskID != "" {
 			work.action = singleURLDispatchReconcile
 			work.apply = func(ctx context.Context) error {
@@ -908,6 +906,14 @@ func (w *SingleURLWorker) buildSingleURLDispatchWork(ctx context.Context, task *
 	bookID := strings.TrimSpace(task.BookID)
 	userID := strings.TrimSpace(task.UserID)
 	url := strings.TrimSpace(task.URL)
+	failWork := func(reason string) singleURLUpdateWork {
+		work.action = singleURLDispatchFail
+		work.reason = reason
+		work.apply = func(ctx context.Context) error {
+			return w.failSingleURLTask(ctx, task, reason, nil)
+		}
+		return work
+	}
 	if bookID == "" || userID == "" || url == "" {
 		missingFields := make([]string, 0, 3)
 		if bookID == "" {
@@ -919,13 +925,7 @@ func (w *SingleURLWorker) buildSingleURLDispatchWork(ctx context.Context, task *
 		if url == "" {
 			missingFields = append(missingFields, "URL")
 		}
-		reason := fmt.Sprintf("missing fields: %s", strings.Join(missingFields, ","))
-		work.action = singleURLDispatchFail
-		work.reason = reason
-		work.apply = func(ctx context.Context) error {
-			return w.failSingleURLTask(ctx, task, reason, nil)
-		}
-		return work
+		return failWork(fmt.Sprintf("missing fields: %s", strings.Join(missingFields, ",")))
 	}
 
 	metaPayload := make(map[string]string, 6)
@@ -937,7 +937,7 @@ func (w *SingleURLWorker) buildSingleURLDispatchWork(ctx context.Context, task *
 	cdnURL := extractSingleURLCDNURL(task.Extra)
 	if cdnURL != "" {
 		metaPayload["cdn_url"] = cdnURL
-	} else if strings.TrimSpace(task.Status) == feishusdk.StatusReady {
+	} else if status == feishusdk.StatusReady {
 		log.Warn().
 			Int64("task_id", task.TaskID).
 			Str("extra", task.Extra).
@@ -945,13 +945,7 @@ func (w *SingleURLWorker) buildSingleURLDispatchWork(ctx context.Context, task *
 	}
 	taskID, err := w.crawler.CreateTask(ctx, url, metaPayload)
 	if err != nil {
-		reason := fmt.Sprintf("create crawler task failed: %v", err)
-		work.action = singleURLDispatchFail
-		work.reason = reason
-		work.apply = func(ctx context.Context) error {
-			return w.failSingleURLTask(ctx, task, reason, nil)
-		}
-		return work
+		return failWork(fmt.Sprintf("create crawler task failed: %v", err))
 	}
 
 	createdAt := w.clock()
