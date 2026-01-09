@@ -618,7 +618,7 @@ func TestSingleURLReadyWorkerFetchesYesterdayTasks(t *testing.T) {
 	}
 }
 
-func TestSingleURLReadyWorkerReconcilesWhenLogsHasCrawlerTaskID(t *testing.T) {
+func TestSingleURLReadyWorkerCreatesNewTaskWhenLogsHasCrawlerTaskID(t *testing.T) {
 	client := &singleURLTestClient{
 		rows: map[string][]feishusdk.TaskRow{
 			feishusdk.StatusReady: {
@@ -637,11 +637,7 @@ func TestSingleURLReadyWorkerReconcilesWhenLogsHasCrawlerTaskID(t *testing.T) {
 			},
 		},
 	}
-	crawler := &stubCrawlerClient{
-		statuses: map[string]*crawlerTaskStatus{
-			"task-31": {Status: "WAITING"},
-		},
-	}
+	crawler := &stubCrawlerClient{createTaskID: "task-new"}
 	worker, err := NewSingleURLWorker(SingleURLWorkerConfig{
 		Client:        client,
 		CrawlerClient: crawler,
@@ -659,21 +655,34 @@ func TestSingleURLReadyWorkerReconcilesWhenLogsHasCrawlerTaskID(t *testing.T) {
 	if err := worker.ProcessOnce(context.Background()); err != nil {
 		t.Fatalf("process once: %v", err)
 	}
-	found := false
+	if len(crawler.createdURLs) != 1 {
+		t.Fatalf("expected crawler task to be created, got %d", len(crawler.createdURLs))
+	}
+	if len(crawler.queriedTaskID) != 0 {
+		t.Fatalf("expected no crawler task query, got %#v", crawler.queriedTaskID)
+	}
+	foundStatus := false
+	foundLogs := false
+	logsField := feishusdk.DefaultTaskFields.Logs
 	for _, call := range client.updateCalls {
 		if call.taskID != 31 {
 			continue
 		}
 		if v, ok := call.fields[feishusdk.DefaultTaskFields.Status]; ok && v == feishusdk.StatusDownloaderQueued {
-			found = true
-			break
+			foundStatus = true
+		}
+		if v, ok := call.fields[logsField]; ok {
+			logsStr, _ := v.(string)
+			if strings.Contains(logsStr, "task-31") && strings.Contains(logsStr, "task-new") {
+				foundLogs = true
+			}
 		}
 	}
-	if !found {
+	if !foundStatus {
 		t.Fatalf("expected task to be marked %q", feishusdk.StatusDownloaderQueued)
 	}
-	if len(crawler.queriedTaskID) == 0 || crawler.queriedTaskID[0] != "task-31" {
-		t.Fatalf("expected crawler task to be queried, got %#v", crawler.queriedTaskID)
+	if !foundLogs {
+		t.Fatalf("expected logs to append new task id, got %#v", client.updateCalls)
 	}
 }
 

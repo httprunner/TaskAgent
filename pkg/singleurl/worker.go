@@ -891,6 +891,20 @@ func (w *SingleURLWorker) buildSingleURLDispatchWork(ctx context.Context, task *
 		retryRequired = true
 	}
 
+	if strings.TrimSpace(task.Status) != feishusdk.StatusReady && !retryRequired {
+		if taskID := meta.latestTaskID(); taskID != "" {
+			work.action = singleURLDispatchReconcile
+			work.apply = func(ctx context.Context) error {
+				log.Info().
+					Int64("task_id", task.TaskID).
+					Str("crawler_task_id", taskID).
+					Msg("single url task already has crawler task id; reconciling")
+				return w.reconcileSingleURLTask(ctx, task)
+			}
+			return work
+		}
+	}
+
 	bookID := strings.TrimSpace(task.BookID)
 	userID := strings.TrimSpace(task.UserID)
 	url := strings.TrimSpace(task.URL)
@@ -912,20 +926,6 @@ func (w *SingleURLWorker) buildSingleURLDispatchWork(ctx context.Context, task *
 			return w.failSingleURLTask(ctx, task, reason, nil)
 		}
 		return work
-	}
-
-	if !retryRequired {
-		if taskID := meta.latestTaskID(); taskID != "" {
-			work.action = singleURLDispatchReconcile
-			work.apply = func(ctx context.Context) error {
-				log.Info().
-					Int64("task_id", task.TaskID).
-					Str("crawler_task_id", taskID).
-					Msg("single url task already has crawler task id; reconciling")
-				return w.reconcileSingleURLTask(ctx, task)
-			}
-			return work
-		}
 	}
 
 	metaPayload := make(map[string]string, 6)
