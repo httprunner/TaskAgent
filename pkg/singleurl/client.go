@@ -95,8 +95,11 @@ func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, meta
 	}
 
 	var extraPayload map[string]any
-	if rawBizTaskID := strings.TrimSpace(cleanMeta["biz_task_id"]); rawBizTaskID != "" {
+	if rawBizTaskID := cleanMeta["biz_task_id"]; rawBizTaskID != "" {
 		extraPayload = map[string]any{"biz_task_id": rawBizTaskID}
+	}
+	if rawTaskID := cleanMeta["task_id"]; rawTaskID != "" {
+		extraPayload = map[string]any{"task_id": rawTaskID}
 	}
 
 	payload := requestBody{
@@ -126,8 +129,6 @@ func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, meta
 	endpoint := fmt.Sprintf("%s/download/tasks", c.baseURL)
 	c.logger.Info().
 		Str("method", http.MethodPost).
-		Str("url", endpoint).
-		Str("cdn_url", payload.CDNURL).
 		RawJSON("payload", body).
 		Msg("crawler create tasks request")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
