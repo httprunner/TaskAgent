@@ -452,14 +452,15 @@ func TestParseBitableURL(t *testing.T) {
 }
 
 func TestDecodeTaskRow(t *testing.T) {
+	when := time.Date(2025, 11, 8, 10, 30, 0, 0, time.Local)
 	rec := bitableRecord{
 		RecordID: "rec123",
 		Fields: map[string]any{
 			DefaultTaskFields.TaskID:           float64(42),
-			DefaultTaskFields.Params:           []any{"{\"song\":\"foo\"}"},
+			DefaultTaskFields.Params:           "{\"song\":\"foo\"}",
 			DefaultTaskFields.App:              "netease",
 			DefaultTaskFields.Scene:            "auto",
-			DefaultTaskFields.Date:             "2025-11-08 10:30:00",
+			DefaultTaskFields.Date:             when.UnixMilli(),
 			DefaultTaskFields.Status:           "pending",
 			DefaultTaskFields.UserID:           "user-123",
 			DefaultTaskFields.UserName:         "tester",
@@ -505,6 +506,7 @@ func TestDecodeTaskRow(t *testing.T) {
 }
 
 func TestDecodeTaskRowAllowsEmptyStatus(t *testing.T) {
+	when := time.Date(2025, 11, 8, 0, 0, 0, 0, time.Local)
 	rec := bitableRecord{
 		RecordID: "recEmpty",
 		Fields: map[string]any{
@@ -512,7 +514,7 @@ func TestDecodeTaskRowAllowsEmptyStatus(t *testing.T) {
 			DefaultTaskFields.Params:           "{}",
 			DefaultTaskFields.App:              "netease",
 			DefaultTaskFields.Scene:            "auto",
-			DefaultTaskFields.Date:             "2025-11-08",
+			DefaultTaskFields.Date:             when.UnixMilli(),
 			DefaultTaskFields.Status:           "",
 			DefaultTaskFields.UserID:           "",
 			DefaultTaskFields.UserName:         "",
@@ -555,6 +557,7 @@ func TestDecodeTaskRowWithOnlyTargetDeviceSerial(t *testing.T) {
 }
 
 func TestDecodeTaskRowMissingStatus(t *testing.T) {
+	when := time.Date(2025, 11, 8, 0, 0, 0, 0, time.Local)
 	rec := bitableRecord{
 		RecordID: "recMissing",
 		Fields: map[string]any{
@@ -562,7 +565,7 @@ func TestDecodeTaskRowMissingStatus(t *testing.T) {
 			DefaultTaskFields.Params: "{}",
 			DefaultTaskFields.App:    "netease",
 			DefaultTaskFields.Scene:  "auto",
-			DefaultTaskFields.Date:   "2025-11-08",
+			DefaultTaskFields.Date:   when.UnixMilli(),
 		},
 	}
 	if _, err := decodeTaskRow(rec, DefaultTaskFields); err == nil {
@@ -596,6 +599,8 @@ func TestFetchTaskTableExampleMock(t *testing.T) {
 	runBitableTransports(t, func(t *testing.T, transport string) {
 		ctx := context.Background()
 		const wikiResponse = `{"code":0,"msg":"success","data":{"node":{"obj_token":"bascnMockToken","obj_type":"bitable"}}}`
+		firstWhen := time.Date(2025, 11, 7, 12, 30, 0, 0, time.Local).UnixMilli()
+		secondWhen := time.Date(2025, 11, 7, 13, 0, 0, 0, time.Local).UnixMilli()
 		listResponseData := map[string]any{
 			"code": 0,
 			"msg":  "success",
@@ -608,7 +613,7 @@ func TestFetchTaskTableExampleMock(t *testing.T) {
 							DefaultTaskFields.Params: "{\"song\":\"foo\"}",
 							DefaultTaskFields.App:    "netease",
 							DefaultTaskFields.Scene:  "batch",
-							DefaultTaskFields.Date:   "2025-11-07 12:30:00",
+							DefaultTaskFields.Date:   firstWhen,
 							DefaultTaskFields.Status: "pending",
 						},
 					},
@@ -619,7 +624,7 @@ func TestFetchTaskTableExampleMock(t *testing.T) {
 							DefaultTaskFields.Params: "{\"song\":\"bar\"}",
 							DefaultTaskFields.App:    "qqmusic",
 							DefaultTaskFields.Scene:  "batch",
-							DefaultTaskFields.Date:   "2025-11-07 13:00:00",
+							DefaultTaskFields.Date:   secondWhen,
 							DefaultTaskFields.Status: "done",
 						},
 					},
@@ -1895,31 +1900,25 @@ func TestResultRecordCreateLive(t *testing.T) {
 	t.Logf("live result record created id=%s item_id=%s tags=%s", id, record.ItemID, record.Tags)
 }
 
-func TestBitableOptionalExtraConcatenatesSegments(t *testing.T) {
+func TestBitableOptionalStringReadsString(t *testing.T) {
 	fields := map[string]any{
-		"Extra": []any{
-			map[string]any{"text": "{\"cdn_url\":\"http://example.com/video"},
-			map[string]any{"text": ".mp4\"}"},
-		},
+		"Extra": "{\"cdn_url\":\"http://example.com/video.mp4\"}",
 	}
-	got := bitableOptionalExtra(fields, "Extra", 123)
+	got := bitableOptionalString(fields, "Extra")
 	want := "{\"cdn_url\":\"http://example.com/video.mp4\"}"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
 }
 
-func TestBitableOptionalExtraUsesLinkFallback(t *testing.T) {
+func TestBitableOptionalStringIgnoresNonString(t *testing.T) {
 	fields := map[string]any{
 		"Extra": []any{
-			map[string]any{"text": "{\"cdn_url\":\""},
-			map[string]any{"link": "http://example.com/video.mp4"},
-			map[string]any{"text": "\"}"},
+			map[string]any{"text": "{\"cdn_url\":\"http://example.com/video.mp4\"}"},
 		},
 	}
-	got := bitableOptionalExtra(fields, "Extra", 123)
-	want := "{\"cdn_url\":\"http://example.com/video.mp4\"}"
-	if got != want {
-		t.Fatalf("expected %q, got %q", want, got)
+	got := bitableOptionalString(fields, "Extra")
+	if got != "" {
+		t.Fatalf("expected empty string, got %q", got)
 	}
 }

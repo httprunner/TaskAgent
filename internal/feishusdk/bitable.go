@@ -1533,6 +1533,7 @@ func encodeExtraPayload(value any) (string, error) {
 	}
 }
 
+// docs: https://feishu.apifox.cn/doc-436428
 type bitableRecord struct {
 	RecordID string         `json:"record_id"`
 	Fields   map[string]any `json:"fields"`
@@ -2006,38 +2007,28 @@ func decodeTaskRow(rec bitableRecord, fields TaskFields) (TaskRow, error) {
 		Webhook:          bitableOptionalString(rec.Fields, fields.Webhook),
 		UserID:           bitableOptionalString(rec.Fields, fields.UserID),
 		UserName:         bitableOptionalString(rec.Fields, fields.UserName),
-		Extra:            bitableOptionalExtra(rec.Fields, fields.Extra, taskID),
+		Extra:            bitableOptionalString(rec.Fields, fields.Extra),
 		Logs:             bitableOptionalString(rec.Fields, fields.Logs),
 		GroupID:          bitableOptionalString(rec.Fields, fields.GroupID),
 		DeviceSerial:     targetDevice,
 		DispatchedDevice: dispatchedDevice,
 	}
 
-	if start := bitableOptionalString(rec.Fields, fields.StartAt); start != "" {
-		row.StartAtRaw = start
-		if parsed, err := parseBitableTime(start); err == nil {
-			row.StartAt = &parsed
-		}
+	if raw, parsed := bitableOptionalTimestamp(rec.Fields, fields.StartAt); raw != "" {
+		row.StartAtRaw = raw
+		row.StartAt = parsed
 	}
-	if end := bitableOptionalString(rec.Fields, fields.EndAt); end != "" {
-		row.EndAtRaw = end
-		if parsed, err := parseBitableTime(end); err == nil {
-			row.EndAt = &parsed
-		}
+	if raw, parsed := bitableOptionalTimestamp(rec.Fields, fields.EndAt); raw != "" {
+		row.EndAtRaw = raw
+		row.EndAt = parsed
 	}
-
-	if dt := bitableOptionalString(rec.Fields, fields.Date); dt != "" {
-		row.DatetimeRaw = dt
-		if parsed, err := parseBitableTime(dt); err == nil {
-			row.Datetime = &parsed
-		}
+	if raw, parsed := bitableOptionalTimestamp(rec.Fields, fields.Date); raw != "" {
+		row.DatetimeRaw = raw
+		row.Datetime = parsed
 	}
-
-	if dispatched := bitableOptionalString(rec.Fields, fields.DispatchedAt); dispatched != "" {
-		row.DispatchedAtRaw = dispatched
-		if parsed, err := parseBitableTime(dispatched); err == nil {
-			row.DispatchedAt = &parsed
-		}
+	if raw, parsed := bitableOptionalTimestamp(rec.Fields, fields.DispatchedAt); raw != "" {
+		row.DispatchedAtRaw = raw
+		row.DispatchedAt = parsed
 	}
 
 	if field := strings.TrimSpace(fields.ElapsedSeconds); field != "" {
@@ -2074,78 +2065,80 @@ func bitableIntField(fields map[string]any, name string) (int64, error) {
 }
 
 func bitableStringField(fields map[string]any, name string, allowEmpty bool) (string, error) {
+	if fields == nil {
+		return "", fmt.Errorf("missing field %q", name)
+	}
 	val, ok := fields[name]
 	if !ok {
 		return "", fmt.Errorf("missing field %q", name)
 	}
-	str := toString(val)
-	if str == "" && !allowEmpty {
+	rec := larkbitable.AppTableRecord{Fields: fields}
+	strPtr := rec.StringField(name)
+	if strPtr == nil {
+		return "", fmt.Errorf("field %q is not a string (value=%T)", name, val)
+	}
+	if *strPtr == "" && !allowEmpty {
 		return "", fmt.Errorf("field %q is empty", name)
 	}
-	return str, nil
+	return *strPtr, nil
 }
 
 func bitableOptionalString(fields map[string]any, name string) string {
-	if name == "" {
+	if name == "" || fields == nil {
 		return ""
 	}
-	val, ok := fields[name]
-	if !ok {
-		return ""
+	rec := larkbitable.AppTableRecord{Fields: fields}
+	if strPtr := rec.StringField(name); strPtr != nil {
+		return *strPtr
 	}
-	return toString(val)
+	return ""
 }
 
-func bitableOptionalExtra(fields map[string]any, name string, taskID int64) string {
-	if name == "" {
-		return ""
+func bitableOptionalTimestamp(fields map[string]any, name string) (string, *time.Time) {
+	if name == "" || fields == nil {
+		return "", nil
 	}
 	val, ok := fields[name]
+	if !ok || val == nil {
+		return "", nil
+	}
+	ts, ok := bitableTimestampValue(val)
 	if !ok {
-		return ""
+		return "", nil
 	}
-	log.Debug().Any("extra", val).Int64("taskID", taskID).Msg("decoding bitable extra field")
-	switch typed := val.(type) {
-	case []any:
-		var builder strings.Builder
-		for _, item := range typed {
-			builder.WriteString(bitableExtraSegmentString(item))
-		}
-		return builder.String()
-	default:
-		return bitableExtraSegmentString(typed)
-	}
+	parsed := time.UnixMilli(ts).In(time.Local)
+	return strconv.FormatInt(ts, 10), &parsed
 }
 
-func bitableExtraSegmentString(value any) string {
-	switch typed := value.(type) {
-	case map[string]any:
-		if raw, ok := typed["text"]; ok {
-			if str := toString(raw); str != "" {
-				return str
-			}
+func bitableTimestampValue(value any) (int64, bool) {
+	switch v := value.(type) {
+	case float64:
+		if math.Mod(v, 1) != 0 {
+			return 0, false
 		}
-		if raw, ok := typed["value"]; ok {
-			if str := toString(raw); str != "" {
-				return str
-			}
+		return int64(v), true
+	case int:
+		return int64(v), true
+	case int64:
+		return v, true
+	case json.Number:
+		n, err := v.Int64()
+		if err != nil {
+			return 0, false
 		}
-		if raw, ok := typed["link"]; ok {
-			if str := toString(raw); str != "" {
-				return str
-			}
+		return n, true
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return 0, false
 		}
-		if raw, ok := typed["url"]; ok {
-			if str := toString(raw); str != "" {
-				return str
-			}
+		n, err := strconv.ParseInt(trimmed, 10, 64)
+		if err != nil {
+			return 0, false
 		}
-		if encoded, err := json.Marshal(typed); err == nil {
-			return string(encoded)
-		}
-		return ""
+		return n, true
 	default:
-		return toString(typed)
+		return 0, false
 	}
 }
 
@@ -2196,11 +2189,6 @@ func toInt64(value any) (int64, error) {
 			return 0, errors.New("empty numeric string")
 		}
 		return strconv.ParseInt(trimmed, 10, 64)
-	case []any:
-		if len(v) == 0 {
-			return 0, fmt.Errorf("cannot parse empty list as integer")
-		}
-		return toInt64(v[0])
 	default:
 		return 0, fmt.Errorf("unsupported numeric type %T", value)
 	}
