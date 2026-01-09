@@ -2106,7 +2106,11 @@ func bitableOptionalExtra(fields map[string]any, name string, taskID int64) stri
 	case []any:
 		var builder strings.Builder
 		for _, item := range typed {
-			builder.WriteString(bitableExtraSegmentString(item))
+			segment := bitableExtraSegmentString(item)
+			if segment == "" {
+				continue
+			}
+			builder.WriteString(segment)
 		}
 		return builder.String()
 	default:
@@ -2131,9 +2135,6 @@ func bitableExtraSegmentString(value any) string {
 			if str := toString(raw); str != "" {
 				return str
 			}
-		}
-		if encoded, err := json.Marshal(typed); err == nil {
-			return string(encoded)
 		}
 		return ""
 	default:

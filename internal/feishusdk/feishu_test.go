@@ -1928,3 +1928,52 @@ func TestBitableOptionalExtraUsesLinkFallback(t *testing.T) {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
 }
+
+func TestBitableOptionalExtraExamplesFromLogs(t *testing.T) {
+	cases := []struct {
+		name   string
+		extra  []any
+		expect string
+	}{
+		{
+			name: "text-link-text-with-error",
+			extra: []any{
+				map[string]any{"text": "{\"cdn_url\":\""},
+				map[string]any{"link": "http://cdn.example/video.m3u8?foo=1"},
+				map[string]any{"text": "\",\"job_error\":\"timeout\"}"},
+			},
+			expect: "{\"cdn_url\":\"http://cdn.example/video.m3u8?foo=1\",\"job_error\":\"timeout\"}",
+		},
+		{
+			name: "text-only-json",
+			extra: []any{
+				map[string]any{"text": "{\"cdn_url\":\"http://cdn.example/v1.m3u8\",\"job_error\":\"timeout\"}"},
+			},
+			expect: "{\"cdn_url\":\"http://cdn.example/v1.m3u8\",\"job_error\":\"timeout\"}",
+		},
+		{
+			name: "text-only-json-no-error",
+			extra: []any{
+				map[string]any{"text": "{\"cdn_url\":\"http://cdn.example/v2.m3u8\"}"},
+			},
+			expect: "{\"cdn_url\":\"http://cdn.example/v2.m3u8\"}",
+		},
+		{
+			name: "empty-cdn-url-with-error",
+			extra: []any{
+				map[string]any{"text": "{\"cdn_url\":\"\",\"job_error\":\"ItemCDNURL not found\"}"},
+			},
+			expect: "{\"cdn_url\":\"\",\"job_error\":\"ItemCDNURL not found\"}",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fields := map[string]any{"Extra": tc.extra}
+			got := bitableOptionalExtra(fields, "Extra", 0)
+			if got != tc.expect {
+				t.Fatalf("expected %q, got %q", tc.expect, got)
+			}
+		})
+	}
+}
