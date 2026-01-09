@@ -2006,7 +2006,7 @@ func decodeTaskRow(rec bitableRecord, fields TaskFields) (TaskRow, error) {
 		Webhook:          bitableOptionalString(rec.Fields, fields.Webhook),
 		UserID:           bitableOptionalString(rec.Fields, fields.UserID),
 		UserName:         bitableOptionalString(rec.Fields, fields.UserName),
-		Extra:            bitableOptionalExtra(rec.Fields, fields.Extra),
+		Extra:            bitableOptionalExtra(rec.Fields, fields.Extra, taskID),
 		Logs:             bitableOptionalString(rec.Fields, fields.Logs),
 		GroupID:          bitableOptionalString(rec.Fields, fields.GroupID),
 		DeviceSerial:     targetDevice,
@@ -2096,7 +2096,7 @@ func bitableOptionalString(fields map[string]any, name string) string {
 	return toString(val)
 }
 
-func bitableOptionalExtra(fields map[string]any, name string) string {
+func bitableOptionalExtra(fields map[string]any, name string, taskID int64) string {
 	if name == "" {
 		return ""
 	}
@@ -2104,20 +2104,12 @@ func bitableOptionalExtra(fields map[string]any, name string) string {
 	if !ok {
 		return ""
 	}
+	log.Debug().Any("extra", val).Int64("taskID", taskID).Msg("decoding bitable extra field")
 	switch typed := val.(type) {
 	case []any:
 		var builder strings.Builder
 		for _, item := range typed {
 			builder.WriteString(bitableExtraSegmentString(item))
-		}
-		if len(typed) > 1 {
-			log.Debug().
-				Int("parts", len(typed)).
-				Int("length", builder.Len()).
-				Msg("bitable extra concatenated from rich text segments")
-		} else if len(typed) == 1 && builder.Len() == 0 {
-			log.Warn().
-				Msg("bitable extra has single segment but empty after stringify")
 		}
 		return builder.String()
 	default:

@@ -1902,7 +1902,7 @@ func TestBitableOptionalExtraConcatenatesSegments(t *testing.T) {
 			map[string]any{"text": ".mp4\"}"},
 		},
 	}
-	got := bitableOptionalExtra(fields, "Extra")
+	got := bitableOptionalExtra(fields, "Extra", 123)
 	want := "{\"cdn_url\":\"http://example.com/video.mp4\"}"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
@@ -1917,7 +1917,7 @@ func TestBitableOptionalExtraUsesLinkFallback(t *testing.T) {
 			map[string]any{"text": "\"}"},
 		},
 	}
-	got := bitableOptionalExtra(fields, "Extra")
+	got := bitableOptionalExtra(fields, "Extra", 123)
 	want := "{\"cdn_url\":\"http://example.com/video.mp4\"}"
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)

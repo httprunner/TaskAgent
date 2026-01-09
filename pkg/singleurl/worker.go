@@ -941,6 +941,7 @@ func (w *SingleURLWorker) buildSingleURLDispatchWork(ctx context.Context, task *
 	} else if strings.TrimSpace(task.Status) == feishusdk.StatusReady {
 		log.Warn().
 			Int64("task_id", task.TaskID).
+			Str("extra", task.Extra).
 			Msg("single url task missing cdn_url; dispatching without cdn_url")
 	}
 	taskID, err := w.crawler.CreateTask(ctx, url, metaPayload)

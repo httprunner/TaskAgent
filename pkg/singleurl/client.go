@@ -127,6 +127,7 @@ func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, meta
 	c.logger.Info().
 		Str("method", http.MethodPost).
 		Str("url", endpoint).
+		Str("cdn_url", payload.CDNURL).
 		RawJSON("payload", body).
 		Msg("crawler create tasks request")
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
