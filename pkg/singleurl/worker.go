@@ -887,8 +887,8 @@ func (w *SingleURLWorker) buildSingleURLDispatchWork(ctx context.Context, task *
 	}
 
 	meta := decodeSingleURLMetadata(task.Logs)
-	// buildSingleURLDispatchWork is only used for newTaskStatuses (ready + dl-failed by default),
-	// so we reconcile only for non-ready cases to avoid duplicate crawler tasks.
+	// buildSingleURLDispatchWork is used for newTaskStatuses; ready always creates
+	// a fresh crawler task, while non-ready tasks reuse existing task_id to avoid duplicates.
 	if status != feishusdk.StatusReady {
 		if taskID := meta.latestTaskID(); taskID != "" {
 			work.action = singleURLDispatchReconcile
@@ -1364,7 +1364,9 @@ func (w *SingleURLWorker) updateTasksExtra(ctx context.Context, updates []single
 		}
 
 		var updateErr error
+		batchSupported := false
 		if batcher, ok := group.client.(taskFieldsBatchUpdater); ok && len(batchUpdates) > 1 {
+			batchSupported = true
 			updateErr = batcher.BatchUpdateTaskFields(ctx, group.table, batchUpdates)
 			if updateErr != nil {
 				log.Warn().
@@ -1373,7 +1375,7 @@ func (w *SingleURLWorker) updateTasksExtra(ctx context.Context, updates []single
 					Msg("single url worker: batch update logs failed; falling back to per-task updates")
 			}
 		}
-		if updateErr != nil || len(batchUpdates) == 1 {
+		if updateErr != nil || !batchSupported || len(batchUpdates) == 1 {
 			for _, item := range group.items {
 				if err := group.client.UpdateTaskFields(ctx, group.table, item.taskID, item.payload); err != nil {
 					errs = append(errs, fmt.Sprintf("task %d: %v", item.taskID, err))
@@ -1507,7 +1509,9 @@ func (w *SingleURLWorker) markSingleURLTasksQueued(ctx context.Context, works []
 		}
 
 		var updateErr error
+		batchSupported := false
 		if batcher, ok := group.client.(taskFieldsBatchUpdater); ok && len(group.items) > 1 {
+			batchSupported = true
 			updateErr = batcher.BatchUpdateTaskFields(ctx, group.table, group.items)
 			if updateErr != nil {
 				log.Warn().
@@ -1516,7 +1520,7 @@ func (w *SingleURLWorker) markSingleURLTasksQueued(ctx context.Context, works []
 					Msg("single url worker: batch update queued fields failed; falling back to per-task updates")
 			}
 		}
-		if updateErr != nil || len(group.items) == 1 {
+		if updateErr != nil || !batchSupported || len(group.items) == 1 {
 			for _, item := range group.items {
 				if err := group.client.UpdateTaskFields(ctx, group.table, item.TaskID, item.Fields); err != nil {
 					errs = append(errs, fmt.Sprintf("task %d: %v", item.TaskID, err))

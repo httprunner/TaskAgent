@@ -38,6 +38,7 @@
 3. 对于 `ready` 且字段完整的任务：
    - Worker 会调用下载服务 `POST /download/tasks`，请求体包含 `{platform,bid,uid,url}`（可选 `cdn_url`）；
    - 成功后会把任务 `Status` 更新为 `dl-queued`，将 `GroupID` 写成 `BookID_UserID`，并把下载服务返回的 `task_id` 写入 `Logs`（JSON 数组；兼容旧版单对象格式）；
+   - 若 `Logs` 已存在旧的 `task_id`，仍会创建新任务，并将新的 `task_id` 追加到 `Logs` 里保留历史尝试；
    - `DispatchedAt/StartAt` 同步为当前时间，用于后续统计；若创建失败则标记 `dl-failed` 并写入错误信息（随后回退为 `failed`）。
 4. `SingleURLWorker` 继续在每轮 `ProcessOnce` 中拉取 `Status ∈ {dl-queued,dl-processing}` 的任务并轮询 `GET /download/tasks/<task_id>`：
    - 为避免跨天任务（例如任务 `Date=2025-12-27`，但在 `2025-12-28` 仍处于 `dl-queued/dl-processing`）因 `Date` 过滤导致永远拉不到，**active 状态轮询不会附加 Date 条件**；
