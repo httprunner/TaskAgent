@@ -46,6 +46,7 @@
 ## 8. Documentation touchpoints
 - README → high-level overview, `docs/ENVIRONMENT.md` → authoritative env reference, `docs/` → subsystem deep dives. Keep them in sync with code changes.
 - If you add a new env var or CLI flag, update `docs/ENVIRONMENT.md` plus the relevant doc (storage, webhook, recorder, etc.).
+- Feishu API reference → prioritize official Feishu Apifox docs when working on Feishu-related APIs/parameters: https://feishu.apifox.cn/llms.txt
 
 ## 9. Language & submission rules
 - Use Chinese for day-to-day discussions in code reviews, PR descriptions, and issues unless stakeholders request otherwise.

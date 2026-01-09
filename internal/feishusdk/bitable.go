@@ -635,6 +635,7 @@ func (c *Client) FetchTaskTableWithOptions(ctx context.Context, rawURL string, o
 		}
 		row, err := decodeTaskRow(rec, fields)
 		if err != nil {
+			log.Error().Err(err).Str("record_id", larkcore.StringValue(rec.RecordId)).Msg("decode task row failed")
 			table.Invalid = append(table.Invalid, TaskRowError{RecordID: strings.TrimSpace(larkcore.StringValue(rec.RecordId)), Err: err})
 			continue
 		}
