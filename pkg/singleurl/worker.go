@@ -1225,6 +1225,9 @@ func (w *SingleURLWorker) markSingleURLTaskFailedForDeviceStage(ctx context.Cont
 		return errors.New("single url worker: status field is empty")
 	}
 	fields := map[string]any{statusField: feishusdk.StatusFailed}
+	if endField := strings.TrimSpace(table.Fields.EndAt); endField != "" {
+		fields[endField] = time.Now().UTC().UnixMilli()
+	}
 	if resetLogs {
 		if logsField := strings.TrimSpace(table.Fields.Logs); logsField != "" {
 			fields[logsField] = "[]"
@@ -1410,6 +1413,9 @@ func (w *SingleURLWorker) failSingleURLTask(ctx context.Context, task *FeishuTas
 	statusField := strings.TrimSpace(table.Fields.Status)
 	if statusField != "" {
 		fields[statusField] = feishusdk.StatusDownloaderFailed
+	}
+	if endField := strings.TrimSpace(table.Fields.EndAt); endField != "" {
+		fields[endField] = time.Now().UTC().UnixMilli()
 	}
 	if logsField := strings.TrimSpace(table.Fields.Logs); logsField != "" {
 		encoded := ""

@@ -277,7 +277,8 @@ func (c *FeishuTaskClient) OnTaskStarted(ctx context.Context, deviceSerial strin
 		if ft == nil {
 			continue
 		}
-		if strings.TrimSpace(ft.OriginalStatus) != feishusdk.StatusFailed {
+		original := strings.TrimSpace(ft.OriginalStatus)
+		if original != feishusdk.StatusFailed && !(original == feishusdk.StatusError && isBackoffRetrySceneName(ft.Scene)) {
 			continue
 		}
 		next := ft.RetryCount + 1
@@ -558,14 +559,19 @@ const (
 	SceneVideoScreenCapture = "视频录屏采集"
 	SceneSingleURLCapture   = "单个链接采集"
 
-	// MaxTaskRetries controls how many failed→running transitions are allowed
+	// failedRetryLimit controls how many failed→running transitions are allowed
 	// before a failed task is permanently marked as error.
 	//
-	// "At most retry once" means:
+	// "At most retry twice" means:
 	// - first run: pending -> running -> failed (RetryCount=0)
-	// - one retry: failed -> running (RetryCount=1) -> failed
-	// - next cycle: failed tasks with RetryCount>=1 will be marked error
-	MaxTaskRetries = 1
+	// - retry #1: failed -> running (RetryCount=1) -> failed
+	// - retry #2: failed -> running (RetryCount=2) -> failed
+	// - next cycle: failed tasks with RetryCount>=2 will be marked error
+	failedRetryLimit        = 2
+	errorRetryLimit         = 3
+	backoffFirstRetryDelay  = 5 * time.Minute
+	backoffSecondRetryDelay = 10 * time.Minute
+	backoffErrorRetryDelay  = 30 * time.Minute
 )
 
 var defaultDeviceScenes = []string{
@@ -604,6 +610,7 @@ func fetchPendingFeishuTasksByDatePreset(ctx context.Context, client TargetTable
 		{scene: SceneVideoScreenCapture, status: feishusdk.StatusFailed},
 		{scene: SceneSingleURLCapture, status: feishusdk.StatusPending},
 		{scene: SceneSingleURLCapture, status: feishusdk.StatusFailed},
+		{scene: SceneSingleURLCapture, status: feishusdk.StatusError},
 		// failed
 		{scene: SceneProfileSearch, status: feishusdk.StatusFailed},
 		{scene: SceneCollection, status: feishusdk.StatusFailed},
@@ -649,15 +656,35 @@ func fetchPendingFeishuTasksByDatePreset(ctx context.Context, client TargetTable
 	}
 
 	if len(result) > 0 {
+		now := time.Now()
 		ready := make([]*FeishuTask, 0, len(result))
 		toError := make([]*FeishuTask, 0)
+		toErrorWithEndAt := make([]*FeishuTask, 0)
 
 		for _, t := range result {
 			if t == nil {
 				continue
 			}
 			status := strings.TrimSpace(t.Status)
-			if status == feishusdk.StatusFailed && t.RetryCount >= MaxTaskRetries {
+			if isBackoffRetrySceneName(t.Scene) {
+				switch status {
+				case feishusdk.StatusFailed:
+					if t.RetryCount >= failedRetryLimit {
+						toErrorWithEndAt = append(toErrorWithEndAt, t)
+						continue
+					}
+					if !backoffRetryReady(t, now, feishusdk.StatusFailed) {
+						continue
+					}
+				case feishusdk.StatusError:
+					if t.RetryCount >= errorRetryLimit {
+						continue
+					}
+					if !backoffRetryReady(t, now, feishusdk.StatusError) {
+						continue
+					}
+				}
+			} else if status == feishusdk.StatusFailed && t.RetryCount >= failedRetryLimit {
 				toError = append(toError, t)
 				continue
 			}
@@ -680,7 +707,32 @@ func fetchPendingFeishuTasksByDatePreset(ctx context.Context, client TargetTable
 				log.Info().
 					Int("task_count", len(ids)).
 					Interface("task_ids", ids).
-					Int("max_retries", MaxTaskRetries).
+					Int("max_retries", failedRetryLimit).
+					Msg("feishusdk: tasks exceeded retry limit and were marked error")
+			}
+		}
+		if len(toErrorWithEndAt) > 0 {
+			completed := now
+			if completed.IsZero() {
+				completed = time.Now()
+			}
+			if err := UpdateFeishuTaskStatuses(ctx, toErrorWithEndAt, feishusdk.StatusError, "",
+				&TaskStatusMeta{CompletedAt: &completed}); err != nil {
+				log.Error().
+					Err(err).
+					Int("task_count", len(toErrorWithEndAt)).
+					Msg("feishusdk: mark tasks as error due to retry limit failed")
+			} else {
+				ids := make([]int64, 0, len(toErrorWithEndAt))
+				for _, t := range toErrorWithEndAt {
+					if t != nil && t.TaskID > 0 {
+						ids = append(ids, t.TaskID)
+					}
+				}
+				log.Info().
+					Int("task_count", len(ids)).
+					Interface("task_ids", ids).
+					Int("max_failed_retries", failedRetryLimit).
 					Msg("feishusdk: tasks exceeded retry limit and were marked error")
 			}
 		}
@@ -1467,6 +1519,76 @@ func elapsedSecondsForTask(task *FeishuTask, completedAt time.Time) (int64, bool
 		secs = 0
 	}
 	return secs, true
+}
+
+func isBackoffRetrySceneName(scene string) bool {
+	// NOTE: Backoff/error retry is enabled only for single-url now.
+	// Other scenes can be enabled by uncommenting the cases below when ready.
+	switch strings.TrimSpace(scene) {
+	case SceneSingleURLCapture:
+		return true
+	// case SceneGeneralSearch:
+	// 	return true
+	// case SceneProfileSearch:
+	// 	return true
+	// case SceneCollection:
+	// 	return true
+	// case SceneAnchorCapture:
+	// 	return true
+	default:
+		return false
+	}
+}
+
+func backoffRetryReady(task *FeishuTask, now time.Time, status string) bool {
+	if task == nil {
+		return false
+	}
+	var delay time.Duration
+	if strings.TrimSpace(status) == feishusdk.StatusError {
+		delay = backoffErrorRetryDelay
+	} else {
+		delay = backoffRetryDelayForCount(task.RetryCount)
+	}
+	if delay <= 0 {
+		return true
+	}
+	endAt, ok := resolveTaskEndAt(task)
+	if !ok {
+		return true
+	}
+	return now.Sub(endAt) >= delay
+}
+
+func backoffRetryDelayForCount(retryCount int64) time.Duration {
+	switch retryCount {
+	case 0:
+		return backoffFirstRetryDelay
+	case 1:
+		return backoffSecondRetryDelay
+	default:
+		return 0
+	}
+}
+
+func resolveTaskEndAt(task *FeishuTask) (time.Time, bool) {
+	if task == nil {
+		return time.Time{}, false
+	}
+	if task.EndAt != nil && !task.EndAt.IsZero() {
+		return *task.EndAt, true
+	}
+	raw := strings.TrimSpace(task.EndAtRaw)
+	if raw == "" {
+		return time.Time{}, false
+	}
+	if ms, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		return time.UnixMilli(ms), true
+	}
+	if ts, err := time.Parse(time.RFC3339, raw); err == nil {
+		return ts, true
+	}
+	return time.Time{}, false
 }
 
 func extractFeishuTasks(tasks []*Task) ([]*FeishuTask, error) {

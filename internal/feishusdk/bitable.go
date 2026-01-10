@@ -2101,7 +2101,7 @@ func bitableOptionalExtra(fields map[string]any, name string, taskID int64) stri
 	if !ok {
 		return ""
 	}
-	log.Debug().Any("extra", val).Int64("taskID", taskID).Msg("decoding bitable extra field")
+	log.Trace().Any("extra", val).Int64("taskID", taskID).Msg("decoding bitable extra field")
 	switch typed := val.(type) {
 	case []any:
 		var builder strings.Builder
