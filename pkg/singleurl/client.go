@@ -94,12 +94,14 @@ func (c *restCrawlerTaskClient) CreateTask(ctx context.Context, url string, meta
 		Extra    any    `json:"extra,omitempty"`
 	}
 
-	var extraPayload map[string]any
-	if rawBizTaskID := cleanMeta["biz_task_id"]; rawBizTaskID != "" {
-		extraPayload = map[string]any{"biz_task_id": rawBizTaskID}
+	var extraPayload = make(map[string]any)
+	rawBizTaskID := cleanMeta["biz_task_id"]
+	if rawBizTaskID != "" {
+		extraPayload["biz_task_id"] = rawBizTaskID
 	}
-	if rawTaskID := cleanMeta["task_id"]; rawTaskID != "" {
-		extraPayload = map[string]any{"task_id": rawTaskID}
+	rawTaskID := cleanMeta["task_id"]
+	if rawTaskID != "" {
+		extraPayload["task_id"] = rawTaskID
 	}
 
 	payload := requestBody{
