@@ -368,10 +368,6 @@ func (w *SingleURLWorker) ProcessOnce(ctx context.Context) (retErr error) {
 		effectiveLimit = DefaultSingleURLWorkerLimit
 	}
 	activeLimit := effectiveLimit / 2
-	newLimit := effectiveLimit - activeLimit
-	if newLimit < 1 {
-		newLimit = 1
-	}
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Fprintf(os.Stderr, "single url worker panic (ProcessOnce): %v\n", r)
@@ -395,6 +391,11 @@ func (w *SingleURLWorker) ProcessOnce(ctx context.Context) (retErr error) {
 			return err
 		}
 		w.reconcileSingleURLActiveTasks(ctx, activeTasks)
+	}
+
+	newLimit := effectiveLimit - len(activeTasks)
+	if newLimit < 1 {
+		newLimit = 1
 	}
 
 	newTasks, err := w.fetchSingleURLTasks(ctx, w.newTaskStatuses, newLimit)
