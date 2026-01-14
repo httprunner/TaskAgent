@@ -442,7 +442,12 @@ func (c *FeishuTaskClient) syncTaskMirror(tasks []*FeishuTask) error {
 	if len(rows) == 0 {
 		return nil
 	}
-	return c.mirror.UpsertTasks(rows)
+	err := c.mirror.UpsertTasks(rows)
+	if err != nil {
+		log.Error().Err(err).Msg("mirror sync feishusdk tasks to sqlite failed")
+		return err
+	}
+	return nil
 }
 
 func (c *FeishuTaskClient) now() time.Time {
