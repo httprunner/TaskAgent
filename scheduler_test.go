@@ -119,6 +119,10 @@ type stubDispatchPlanner struct {
 	assignments []DispatchAssignment
 }
 
+func defaultTestFetchFilters() []TaskFetchFilter {
+	return []TaskFetchFilter{{Scene: SceneGeneralSearch, Status: StatusPending, Date: TaskDateToday}}
+}
+
 func (s *stubDispatchPlanner) PlanDispatch(ctx context.Context, idleDevices []string, tasks []*Task) ([]DispatchAssignment, error) {
 	return s.assignments, nil
 }
@@ -136,10 +140,11 @@ func TestDevicePoolAgentDispatchesAcrossIdleDevices(t *testing.T) {
 	runner := &channelJobRunner{ch: jobCh}
 
 	agent, err := NewDevicePoolAgent(Config{
-		PollInterval:   time.Millisecond,
-		MaxTasksPerJob: 5,
-		Provider:       provider,
-		TaskManager:    manager,
+		PollInterval:     time.Millisecond,
+		MaxTasksPerJob:   5,
+		Provider:         provider,
+		TaskManager:      manager,
+		FetchTaskFilters: defaultTestFetchFilters(),
 	}, runner)
 	if err != nil {
 		t.Fatalf("NewDevicePoolAgent returned error: %v", err)
@@ -179,10 +184,11 @@ func TestDevicePoolAgentAssignsTasks(t *testing.T) {
 	runner := &channelJobRunner{ch: jobCh}
 
 	agent, err := NewDevicePoolAgent(Config{
-		PollInterval:   time.Millisecond,
-		MaxTasksPerJob: 2,
-		Provider:       provider,
-		TaskManager:    manager,
+		PollInterval:     time.Millisecond,
+		MaxTasksPerJob:   2,
+		Provider:         provider,
+		TaskManager:      manager,
+		FetchTaskFilters: defaultTestFetchFilters(),
 	}, runner)
 	if err != nil {
 		t.Fatalf("NewDevicePoolAgent returned error: %v", err)
@@ -234,10 +240,11 @@ func TestDevicePoolAgentRespectsTargetDeviceSerial(t *testing.T) {
 	runner := &channelJobRunner{ch: jobCh}
 
 	agent, err := NewDevicePoolAgent(Config{
-		PollInterval:   time.Millisecond,
-		MaxTasksPerJob: 2,
-		Provider:       provider,
-		TaskManager:    manager,
+		PollInterval:     time.Millisecond,
+		MaxTasksPerJob:   2,
+		Provider:         provider,
+		TaskManager:      manager,
+		FetchTaskFilters: defaultTestFetchFilters(),
 	}, runner)
 	if err != nil {
 		t.Fatalf("NewDevicePoolAgent returned error: %v", err)
@@ -289,14 +296,15 @@ func TestDevicePoolAgentUsesDispatchPlanner(t *testing.T) {
 	}}}
 
 	agent, err := NewDevicePoolAgent(Config{
-		PollInterval:    time.Millisecond,
-		MaxTasksPerJob:  10,
-		Provider:        provider,
-		TaskManager:     manager,
-		DispatchPlanner: planner,
-		MaxJobRetries:   1,
-		JobRetryBackoff: time.Millisecond,
-		MaxFetchPerPoll: 0,
+		PollInterval:     time.Millisecond,
+		MaxTasksPerJob:   10,
+		Provider:         provider,
+		TaskManager:      manager,
+		DispatchPlanner:  planner,
+		MaxJobRetries:    1,
+		JobRetryBackoff:  time.Millisecond,
+		MaxFetchPerPoll:  0,
+		FetchTaskFilters: defaultTestFetchFilters(),
 	}, runner)
 	if err != nil {
 		t.Fatalf("NewDevicePoolAgent returned error: %v", err)
@@ -335,12 +343,13 @@ func TestDevicePoolAgentPropagatesJobError(t *testing.T) {
 	runner := &channelJobRunner{ch: jobCh, resultErr: errors.New("boom")}
 
 	agent, err := NewDevicePoolAgent(Config{
-		PollInterval:    time.Millisecond,
-		MaxTasksPerJob:  1,
-		MaxJobRetries:   1,
-		JobRetryBackoff: time.Millisecond,
-		Provider:        provider,
-		TaskManager:     manager,
+		PollInterval:     time.Millisecond,
+		MaxTasksPerJob:   1,
+		MaxJobRetries:    1,
+		JobRetryBackoff:  time.Millisecond,
+		Provider:         provider,
+		TaskManager:      manager,
+		FetchTaskFilters: defaultTestFetchFilters(),
 	}, runner)
 	if err != nil {
 		t.Fatalf("NewDevicePoolAgent returned error: %v", err)
@@ -372,12 +381,13 @@ func TestDevicePoolAgentRetriesFailedJobs(t *testing.T) {
 	runner := &flakyJobRunner{failures: 1, ch: jobCh}
 
 	agent, err := NewDevicePoolAgent(Config{
-		PollInterval:    time.Millisecond,
-		MaxTasksPerJob:  1,
-		MaxJobRetries:   2,
-		JobRetryBackoff: time.Millisecond,
-		Provider:        provider,
-		TaskManager:     manager,
+		PollInterval:     time.Millisecond,
+		MaxTasksPerJob:   1,
+		MaxJobRetries:    2,
+		JobRetryBackoff:  time.Millisecond,
+		Provider:         provider,
+		TaskManager:      manager,
+		FetchTaskFilters: defaultTestFetchFilters(),
 	}, runner)
 	if err != nil {
 		t.Fatalf("NewDevicePoolAgent returned error: %v", err)
@@ -420,12 +430,13 @@ func TestDevicePoolAgentStartRunsInitialCycleImmediately(t *testing.T) {
 	runner := &channelJobRunner{ch: jobCh}
 
 	agent, err := NewDevicePoolAgent(Config{
-		PollInterval:    10 * time.Second,
-		MaxTasksPerJob:  1,
-		MaxJobRetries:   1,
-		JobRetryBackoff: time.Millisecond,
-		Provider:        provider,
-		TaskManager:     manager,
+		PollInterval:     10 * time.Second,
+		MaxTasksPerJob:   1,
+		MaxJobRetries:    1,
+		JobRetryBackoff:  time.Millisecond,
+		Provider:         provider,
+		TaskManager:      manager,
+		FetchTaskFilters: defaultTestFetchFilters(),
 	}, runner)
 	if err != nil {
 		t.Fatalf("NewDevicePoolAgent returned error: %v", err)
@@ -470,10 +481,11 @@ func TestDevicePoolAgentRespectsDeviceAllowlistEnv(t *testing.T) {
 	runner := &channelJobRunner{ch: jobCh}
 
 	agent, err := NewDevicePoolAgent(Config{
-		PollInterval:   time.Millisecond,
-		MaxTasksPerJob: 5,
-		Provider:       provider,
-		TaskManager:    manager,
+		PollInterval:     time.Millisecond,
+		MaxTasksPerJob:   5,
+		Provider:         provider,
+		TaskManager:      manager,
+		FetchTaskFilters: defaultTestFetchFilters(),
 	}, runner)
 	if err != nil {
 		t.Fatalf("NewDevicePoolAgent returned error: %v", err)
@@ -527,6 +539,7 @@ func TestDevicePoolAgentDeviceAllowlistConfigOverridesEnv(t *testing.T) {
 		TaskManager:           manager,
 		MaxJobRetries:         1,
 		JobRetryBackoff:       time.Millisecond,
+		FetchTaskFilters:      defaultTestFetchFilters(),
 	}, runner)
 	if err != nil {
 		t.Fatalf("NewDevicePoolAgent returned error: %v", err)
