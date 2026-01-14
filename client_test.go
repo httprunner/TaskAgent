@@ -119,109 +119,20 @@ func TestFetchTodayPendingFeishuTasksSceneStatusPriorityStopsAfterLimit(t *testi
 		},
 	}
 
-	tasks, err := fetchTodayPendingFeishuTasks(ctx, client, "https://example.com/bitable/foo", "com.app", 3, nil)
+	filters := []TaskFetchFilter{
+		{Scene: SceneProfileSearch, Status: feishusdk.StatusFailed, Date: TaskDateToday},
+		{Scene: SceneProfileSearch, Status: feishusdk.StatusPending, Date: TaskDateToday},
+		{Scene: SceneGeneralSearch, Status: feishusdk.StatusPending, Date: TaskDateToday},
+	}
+	tasks, err := fetchPendingFeishuTasksByCombos(ctx, client, "https://example.com/bitable/foo", "com.app", 3, filters)
 	if err != nil {
-		t.Fatalf("fetchTodayPendingFeishuTasks returned error: %v", err)
+		t.Fatalf("fetchPendingFeishuTasksByCombos returned error: %v", err)
 	}
 	got := collectTaskIDs(tasks)
-	// Order follows priorityCombos in client.go: video-screen -> single-url -> failed -> pending.
+	// Order follows the explicit filters in this test.
 	want := []int64{14, 11, 12}
 	if !equalIDs(got, want) {
 		t.Fatalf("unexpected ids: got %v, want %v", got, want)
-	}
-}
-
-func TestFetchTodayPendingFeishuTasksRespectsAllowedScenes(t *testing.T) {
-	ctx := context.Background()
-	client := &sceneStatusTargetClient{
-		rows: map[string][]feishusdk.TaskRow{
-			"单个链接采集|pending|with": {
-				{TaskID: 50, Params: "S1", App: "com.app", Scene: SceneSingleURLCapture},
-				{TaskID: 51, Params: "S2", App: "com.app", Scene: SceneSingleURLCapture},
-			},
-			"综合页搜索|pending|with": {
-				{TaskID: 60, Params: "E1", App: "com.app", Scene: SceneGeneralSearch},
-			},
-		},
-	}
-	allowed := map[string]struct{}{SceneGeneralSearch: {}}
-	tasks, err := fetchTodayPendingFeishuTasks(ctx, client, "https://example.com/bitable/foo", "com.app", 2, allowed)
-	if err != nil {
-		t.Fatalf("fetchTodayPendingFeishuTasks returned error: %v", err)
-	}
-	got := collectTaskIDs(tasks)
-	want := []int64{60}
-	if !equalIDs(got, want) {
-		t.Fatalf("unexpected ids: got %v want %v", got, want)
-	}
-}
-
-func TestFetchTodayPendingFeishuTasksReturnsEmptyWhenSceneNotAllowed(t *testing.T) {
-	ctx := context.Background()
-	client := &sceneStatusTargetClient{
-		rows: map[string][]feishusdk.TaskRow{
-			"单个链接采集|pending|with": {
-				{TaskID: 70, Params: "S1", App: "com.app", Scene: SceneSingleURLCapture},
-			},
-		},
-	}
-	allowed := map[string]struct{}{SceneGeneralSearch: {}}
-	tasks, err := fetchTodayPendingFeishuTasks(ctx, client, "https://example.com/bitable/foo", "com.app", 5, allowed)
-	if err != nil {
-		t.Fatalf("fetchTodayPendingFeishuTasks returned error: %v", err)
-	}
-	if len(tasks) != 0 {
-		t.Fatalf("expected no tasks when scene not allowed, got %v", collectTaskIDs(tasks))
-	}
-}
-
-func TestFetchTodayPendingFeishuTasksAllowedScenesOrderPreserved(t *testing.T) {
-	ctx := context.Background()
-	client := &sceneStatusTargetClient{
-		rows: map[string][]feishusdk.TaskRow{
-			"综合页搜索|pending|with": {
-				{TaskID: 201, Params: "G1", App: "com.app", Scene: SceneGeneralSearch},
-			},
-			"个人页搜索|pending|with": {
-				{TaskID: 301, Params: "P1", App: "com.app", Scene: SceneProfileSearch},
-				{TaskID: 302, Params: "P2", App: "com.app", Scene: SceneProfileSearch},
-			},
-		},
-	}
-	allowed := map[string]struct{}{SceneGeneralSearch: {}, SceneProfileSearch: {}}
-	tasks, err := fetchTodayPendingFeishuTasks(ctx, client, "https://example.com/bitable/foo", "com.app", 3, allowed)
-	if err != nil {
-		t.Fatalf("fetchTodayPendingFeishuTasks returned error: %v", err)
-	}
-	got := collectTaskIDs(tasks)
-	// priorityCombos checks failed before pending within the same scene ordering.
-	want := []int64{301, 302, 201}
-	if !equalIDs(got, want) {
-		t.Fatalf("unexpected ids: got %v want %v", got, want)
-	}
-}
-
-func TestNormalizeAllowedScenesDefaultsIncludeSingleURL(t *testing.T) {
-	set := normalizeAllowedScenes(nil)
-	if set == nil {
-		t.Fatalf("expected default scene set")
-	}
-	if _, ok := set[SceneSingleURLCapture]; !ok {
-		t.Fatalf("default scenes should include single url capture")
-	}
-	if len(set) != len(defaultDeviceScenes) {
-		t.Fatalf("expected %d default scenes, got %d", len(defaultDeviceScenes), len(set))
-	}
-}
-
-func TestNormalizeAllowedScenesRespectsExplicitList(t *testing.T) {
-	custom := []string{SceneSingleURLCapture}
-	set := normalizeAllowedScenes(custom)
-	if len(set) != len(custom) {
-		t.Fatalf("expected len %d got %d", len(custom), len(set))
-	}
-	if _, ok := set[SceneSingleURLCapture]; !ok {
-		t.Fatalf("expected single url scene to be allowed when explicitly provided")
 	}
 }
 

@@ -50,7 +50,7 @@ type stubTaskManager struct {
 	lastErr     error
 }
 
-func (s *stubTaskManager) FetchAvailableTasks(ctx context.Context, app string, max int) ([]*Task, error) {
+func (s *stubTaskManager) FetchAvailableTasks(ctx context.Context, max int, combos []TaskFetchFilter) ([]*Task, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.tasks) == 0 {

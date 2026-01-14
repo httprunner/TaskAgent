@@ -20,6 +20,9 @@ func NewGroupTaskPrioritizer(base TaskManager, taskTableURL string, prioritizerO
 		return nil, errors.New("task table url is empty")
 	}
 	prioritizerOpts = normalizeGroupTaskPrioritizerOptions(prioritizerOpts)
+	if strings.TrimSpace(prioritizerOpts.App) == "" {
+		return nil, errors.New("group prioritizer app is required")
+	}
 	counter, err := NewGroupTaskRemainingCounter(url, prioritizerOpts.CountCap)
 	if err != nil {
 		return nil, err
@@ -178,6 +181,8 @@ type GroupRemainingCounter interface {
 }
 
 type GroupTaskPrioritizerOptions struct {
+	// App is the bound app for this prioritizer instance.
+	App string
 	// Oversample controls how many candidates are fetched from the base task manager
 	// before re-ordering and truncating to the requested limit.
 	Oversample int
@@ -216,7 +221,7 @@ type GroupTaskPrioritizer struct {
 	cache map[string]groupCountEntry
 }
 
-func (p *GroupTaskPrioritizer) FetchAvailableTasks(ctx context.Context, app string, limit int) ([]*Task, error) {
+func (p *GroupTaskPrioritizer) FetchAvailableTasks(ctx context.Context, limit int, filters []TaskFetchFilter) ([]*Task, error) {
 	if p == nil || p.Base == nil {
 		return nil, nil
 	}
@@ -234,7 +239,7 @@ func (p *GroupTaskPrioritizer) FetchAvailableTasks(ctx context.Context, app stri
 			candidateLimit = next
 		}
 	}
-	candidates, err := p.Base.FetchAvailableTasks(ctx, app, candidateLimit)
+	candidates, err := p.Base.FetchAvailableTasks(ctx, candidateLimit, filters)
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +250,7 @@ func (p *GroupTaskPrioritizer) FetchAvailableTasks(ctx context.Context, app stri
 		return candidates, nil
 	}
 
-	remainingByTask := p.resolveRemaining(ctx, strings.TrimSpace(app), candidates)
+	remainingByTask := p.resolveRemaining(ctx, candidates)
 	if len(remainingByTask) == 0 {
 		if len(candidates) > limit {
 			return candidates[:limit], nil
@@ -426,13 +431,14 @@ func (p *GroupTaskPrioritizer) now() time.Time {
 	return time.Now()
 }
 
-func (p *GroupTaskPrioritizer) resolveRemaining(ctx context.Context, app string, tasks []*Task) map[*Task]int {
+func (p *GroupTaskPrioritizer) resolveRemaining(ctx context.Context, tasks []*Task) map[*Task]int {
 	if p == nil || p.Counter == nil || len(tasks) == 0 {
 		return nil
 	}
 	p.ensureDefaults()
 	keys := make([]GroupKey, 0, len(tasks))
 	keyByTask := make(map[*Task]GroupKey, len(tasks))
+	defaultApp := strings.TrimSpace(p.Opts.App)
 	seen := make(map[string]struct{})
 	for _, t := range tasks {
 		key, ok := groupKeyFromTask(t)
@@ -464,7 +470,8 @@ func (p *GroupTaskPrioritizer) resolveRemaining(ctx context.Context, app string,
 			remainingByKey[k] = remaining
 			continue
 		}
-		remaining, err := p.Counter.CountRemaining(ctx, app, key)
+		targetApp := defaultApp
+		remaining, err := p.Counter.CountRemaining(ctx, targetApp, key)
 		if err != nil {
 			remainingByKey[k] = p.defaultLargeRemaining()
 			continue

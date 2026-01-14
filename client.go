@@ -22,10 +22,8 @@ import (
 
 // FeishuTaskClientOptions customizes Feishu task fetching behavior.
 type FeishuTaskClientOptions struct {
-	AllowedScenes []string
-	DatePolicy    TaskDatePolicy
-	NodeIndex     int
-	NodeTotal     int
+	NodeIndex int
+	NodeTotal int
 }
 
 const (
@@ -43,14 +41,18 @@ type TaskDatePolicy struct {
 }
 
 // NewFeishuTaskClient constructs a reusable client for fetching and updating Feishu tasks.
-func NewFeishuTaskClient(bitableURL string) (*FeishuTaskClient, error) {
-	return NewFeishuTaskClientWithOptions(bitableURL, FeishuTaskClientOptions{})
+func NewFeishuTaskClient(bitableURL, app string) (*FeishuTaskClient, error) {
+	return NewFeishuTaskClientWithOptions(bitableURL, app, FeishuTaskClientOptions{})
 }
 
 // NewFeishuTaskClientWithOptions constructs a client with advanced options.
-func NewFeishuTaskClientWithOptions(bitableURL string, opts FeishuTaskClientOptions) (*FeishuTaskClient, error) {
+func NewFeishuTaskClientWithOptions(bitableURL, app string, opts FeishuTaskClientOptions) (*FeishuTaskClient, error) {
 	if strings.TrimSpace(bitableURL) == "" {
 		return nil, errors.New("feishusdk task config missing bitable url")
+	}
+	app = strings.TrimSpace(app)
+	if app == "" {
+		return nil, errors.New("feishusdk task config missing app")
 	}
 
 	client, err := feishusdk.NewClientFromEnv()
@@ -63,57 +65,23 @@ func NewFeishuTaskClientWithOptions(bitableURL string, opts FeishuTaskClientOpti
 	}
 	nodeIndex, nodeTotal := NormalizeShardConfig(opts.NodeIndex, opts.NodeTotal)
 	return &FeishuTaskClient{
-		client:        client,
-		bitableURL:    bitableURL,
-		mirror:        mirror,
-		allowedScenes: normalizeAllowedScenes(opts.AllowedScenes),
-		datePolicy:    normalizeDatePolicy(opts.DatePolicy),
-		nodeIndex:     nodeIndex,
-		nodeTotal:     nodeTotal,
+		client:     client,
+		bitableURL: bitableURL,
+		app:        app,
+		mirror:     mirror,
+		nodeIndex:  nodeIndex,
+		nodeTotal:  nodeTotal,
 	}, nil
 }
 
 type FeishuTaskClient struct {
-	client        *feishusdk.Client
-	bitableURL    string
-	clock         func() time.Time
-	mirror        *storage.TaskMirror
-	allowedScenes map[string]struct{}
-	datePolicy    TaskDatePolicy
-	nodeIndex     int
-	nodeTotal     int
-}
-
-func buildSceneSet(scenes []string) map[string]struct{} {
-	if len(scenes) == 0 {
-		return nil
-	}
-	set := make(map[string]struct{}, len(scenes))
-	for _, scene := range scenes {
-		trimmed := strings.TrimSpace(scene)
-		if trimmed == "" {
-			continue
-		}
-		set[trimmed] = struct{}{}
-	}
-	if len(set) == 0 {
-		return nil
-	}
-	return set
-}
-
-func normalizeAllowedScenes(scenes []string) map[string]struct{} {
-	if len(scenes) == 0 {
-		return buildSceneSet(defaultDeviceScenes)
-	}
-	return buildSceneSet(scenes)
-}
-
-func normalizeDatePolicy(policy TaskDatePolicy) TaskDatePolicy {
-	if strings.TrimSpace(policy.Primary) == "" {
-		policy.Primary = TaskDateToday
-	}
-	return policy
+	client     *feishusdk.Client
+	bitableURL string
+	app        string
+	clock      func() time.Time
+	mirror     *storage.TaskMirror
+	nodeIndex  int
+	nodeTotal  int
 }
 
 // ShardConfig returns the shard config and whether sharding is enabled.
@@ -124,7 +92,7 @@ func (c *FeishuTaskClient) ShardConfig() (int, int, bool) {
 	return c.nodeIndex, c.nodeTotal, true
 }
 
-func (c *FeishuTaskClient) FetchAvailableTasks(ctx context.Context, app string, limit int) ([]*Task, error) {
+func (c *FeishuTaskClient) FetchAvailableTasks(ctx context.Context, limit int, filters []TaskFetchFilter) ([]*Task, error) {
 	fetchLimit := limit
 	if c != nil && c.nodeTotal > 1 && limit > 0 {
 		fetchLimit = limit * c.nodeTotal
@@ -132,25 +100,12 @@ func (c *FeishuTaskClient) FetchAvailableTasks(ctx context.Context, app string, 
 			fetchLimit = limit
 		}
 	}
-	feishuTasks, err := fetchPendingFeishuTasksByDatePreset(
-		ctx, c.client, c.bitableURL, app, fetchLimit, c.allowedScenes, c.datePolicy.Primary)
+	if len(filters) == 0 {
+		return nil, errors.New("task fetch filters are required")
+	}
+	feishuTasks, err := fetchPendingFeishuTasksByCombos(ctx, c.client, c.bitableURL, c.app, fetchLimit, filters)
 	if err != nil {
 		return nil, err
-	}
-	if len(feishuTasks) == 0 && len(c.datePolicy.Fallback) > 0 {
-		for _, preset := range c.datePolicy.Fallback {
-			if strings.TrimSpace(preset) == "" {
-				continue
-			}
-			feishuTasks, err = fetchPendingFeishuTasksByDatePreset(
-				ctx, c.client, c.bitableURL, app, fetchLimit, c.allowedScenes, preset)
-			if err != nil {
-				return nil, err
-			}
-			if len(feishuTasks) > 0 {
-				break
-			}
-		}
 	}
 	if err := c.syncTaskMirror(feishuTasks); err != nil {
 		return nil, err
@@ -579,20 +534,7 @@ const (
 	backoffErrorRetryDelay  = 30 * time.Minute
 )
 
-var defaultDeviceScenes = []string{
-	SceneVideoScreenCapture,
-	SceneSingleURLCapture,
-	SceneGeneralSearch,
-	SceneProfileSearch,
-	SceneCollection,
-	SceneAnchorCapture,
-}
-
-func fetchTodayPendingFeishuTasks(ctx context.Context, client TargetTableClient, bitableURL, app string, limit int, allowedScenes map[string]struct{}) ([]*FeishuTask, error) {
-	return fetchPendingFeishuTasksByDatePreset(ctx, client, bitableURL, app, limit, allowedScenes, TaskDateToday)
-}
-
-func fetchPendingFeishuTasksByDatePreset(ctx context.Context, client TargetTableClient, bitableURL, app string, limit int, allowedScenes map[string]struct{}, datePreset string) ([]*FeishuTask, error) {
+func fetchPendingFeishuTasksByCombos(ctx context.Context, client TargetTableClient, bitableURL, app string, limit int, combos []TaskFetchFilter) ([]*FeishuTask, error) {
 	if client == nil {
 		return nil, errors.New("feishusdk: client is nil")
 	}
@@ -602,42 +544,19 @@ func fetchPendingFeishuTasksByDatePreset(ctx context.Context, client TargetTable
 	if limit <= 0 {
 		limit = maxFeishuTasksPerApp
 	}
+	if len(combos) == 0 {
+		return nil, errors.New("feishusdk: fetch filters are required")
+	}
 
 	fields := feishusdk.DefaultTaskFields
 	result := make([]*FeishuTask, 0, limit)
 	seen := make(map[int64]struct{}, limit)
 
-	priorityCombos := []struct {
-		scene  string
-		status string
-	}{
-		{scene: SceneVideoScreenCapture, status: feishusdk.StatusPending},
-		{scene: SceneVideoScreenCapture, status: feishusdk.StatusFailed},
-		{scene: SceneSingleURLCapture, status: feishusdk.StatusPending},
-		{scene: SceneSingleURLCapture, status: feishusdk.StatusFailed},
-		{scene: SceneSingleURLCapture, status: feishusdk.StatusError},
-		// failed
-		{scene: SceneProfileSearch, status: feishusdk.StatusFailed},
-		{scene: SceneCollection, status: feishusdk.StatusFailed},
-		{scene: SceneAnchorCapture, status: feishusdk.StatusFailed},
-		{scene: SceneGeneralSearch, status: feishusdk.StatusFailed},
-		// pending
-		{scene: SceneProfileSearch, status: feishusdk.StatusPending},
-		{scene: SceneCollection, status: feishusdk.StatusPending},
-		{scene: SceneAnchorCapture, status: feishusdk.StatusPending},
-		{scene: SceneGeneralSearch, status: feishusdk.StatusPending},
-	}
-
 	appendAndMaybeReturn := func(batch []*FeishuTask) {
 		result = AppendUniqueFeishuTasks(result, batch, limit, seen)
 	}
 
-	for _, combo := range priorityCombos {
-		if len(allowedScenes) > 0 {
-			if _, ok := allowedScenes[combo.scene]; !ok {
-				continue
-			}
-		}
+	for _, combo := range combos {
 		if limit > 0 && len(result) >= limit {
 			break
 		}
@@ -648,9 +567,21 @@ func fetchPendingFeishuTasksByDatePreset(ctx context.Context, client TargetTable
 				break
 			}
 		}
-		batch, err := FetchFeishuTasksWithStrategy(ctx, client, bitableURL, fields, app, []string{combo.status}, remaining, combo.scene, datePreset)
+		scene := strings.TrimSpace(combo.Scene)
+		if scene == "" {
+			return nil, errors.New("feishusdk: fetch filter missing scene")
+		}
+		status := strings.TrimSpace(combo.Status)
+		if status == "" {
+			status = feishusdk.StatusPending
+		}
+		datePreset := strings.TrimSpace(combo.Date)
+		if datePreset == "" {
+			datePreset = TaskDateToday
+		}
+		batch, err := FetchFeishuTasksWithStrategy(ctx, client, bitableURL, fields, app, []string{status}, remaining, scene, datePreset)
 		if err != nil {
-			log.Warn().Err(err).Str("scene", combo.scene).Msg("fetch feishusdk tasks failed for scene; skipping")
+			log.Warn().Err(err).Str("scene", scene).Msg("fetch feishusdk tasks failed for scene; skipping")
 			continue
 		}
 		appendAndMaybeReturn(batch)

@@ -12,14 +12,14 @@ import (
 
 // FetchTasksByIDs returns tasks matched by TaskIDs, filtered by app and status.
 // Status filtering is limited to pending/failed to align with dispatch requirements.
-func (c *FeishuTaskClient) FetchTasksByIDs(ctx context.Context, app string, taskIDs []int64, limit int) ([]*Task, error) {
+func (c *FeishuTaskClient) FetchTasksByIDs(ctx context.Context, taskIDs []int64, limit int) ([]*Task, error) {
 	if c == nil {
 		return nil, errors.New("feishusdk: task client is nil")
 	}
-	log.Info().Str("app", app).Ints64("task_ids", taskIDs).Int("limit", limit).Msg("fetching tasks by IDs")
+	log.Info().Str("app", c.app).Ints64("task_ids", taskIDs).Int("limit", limit).Msg("fetching tasks by IDs")
 
 	// Explicit TaskID queries should not be constrained by date presets
-	feishuTasks, err := fetchFeishuTasksByIDsWithDatePreset(ctx, c.client, c.bitableURL, app, taskIDs, limit, TaskDateAny)
+	feishuTasks, err := fetchFeishuTasksByIDsWithDatePreset(ctx, c.client, c.bitableURL, c.app, taskIDs, limit, TaskDateAny)
 	if err != nil {
 		return nil, err
 	}
@@ -30,11 +30,6 @@ func (c *FeishuTaskClient) FetchTasksByIDs(ctx context.Context, app string, task
 	for _, task := range feishuTasks {
 		if task == nil {
 			continue
-		}
-		if len(c.allowedScenes) > 0 {
-			if _, ok := c.allowedScenes[strings.TrimSpace(task.Scene)]; !ok {
-				continue
-			}
 		}
 		status := strings.TrimSpace(task.Status)
 		if status != feishusdk.StatusPending && status != feishusdk.StatusFailed {

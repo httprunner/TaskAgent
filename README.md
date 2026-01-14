@@ -188,6 +188,7 @@ Feishu Task Table ──> FeishuTaskClient (task)
 - Field overrides: `TASK_FIELD_*`, `RESULT_FIELD_*`, `DRAMA_FIELD_*`, `DEVICE_FIELD_*`, `DEVICE_TASK_FIELD_*`.
 - Storage knobs: `TRACKING_STORAGE_DISABLE_JSONL`, `TRACKING_STORAGE_DB_PATH`, `RESULT_STORAGE_ENABLE_FEISHU`, `RESULT_SQLITE_TABLE`, `DRAMA_SQLITE_TABLE`.
 - Reporter throttles: `RESULT_REPORT_POLL_INTERVAL`, `RESULT_REPORT_BATCH`, `RESULT_REPORT_HTTP_TIMEOUT`, `FEISHU_REPORT_RPS`.
+- App binding: `Config.App` and `NewFeishuTaskClient` require a non-empty app value.
 Refer to [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md) for the authoritative table describing defaults, requirements, and consuming packages.
 
 ## Task lifecycle & priority
@@ -205,9 +206,9 @@ running ──> TaskManager.OnTaskResult (success/failed)
 OnTasksCompleted → Feishu updates + recorder cleanup
 ```
 
-`FeishuTaskClient` fetches tasks in prioritized bands (个人页搜索 before 综合页搜索, same-day before backlog, failed before untouched) and only fills the shortfall to `MaxTasksPerJob`. See [`client.go`](client.go) for the full prioritization table.
+`FeishuTaskClient` does not apply default prioritization. Callers must pass explicit `TaskFetchFilter` lists to control scene/status/date order.
 
-When `TASK_GROUP_PRIORITY_ENABLE=1`, `DevicePoolAgent` additionally re-orders fetched tasks by remaining group size (ascending) per `<BizType, GroupID, DateDay>` so "almost done" groups finish earlier and downstream webhook pushes can be triggered sooner.
+When `TASK_GROUP_PRIORITY_ENABLE=1`, `DevicePoolAgent` additionally re-orders fetched tasks by remaining group size (ascending) per `<BizType, GroupID, DateDay>` so "almost done" groups finish earlier and downstream webhook pushes can be triggered sooner. `GroupTaskPrioritizer` requires an `App` binding.
 
 ## Multi-scenario scheduling (Multi*)
 
@@ -230,7 +231,11 @@ runner := &taskagent.MultiJobRunner{SearchRunner: searchRunner, SingleURLRunner:
 agent, _ := taskagent.NewDevicePoolAgent(taskagent.Config{
   PollInterval: 30 * time.Second,
   MaxTasksPerJob: 10,
+  App: "com.smile.gifmaker",
   TaskManager: multiTM,
+  FetchCombos: []taskagent.TaskFetchFilter{
+    {Scene: taskagent.SceneGeneralSearch, Status: taskagent.StatusPending, Date: taskagent.TaskDateToday},
+  },
   DispatchPlanner: planner,
 }, runner)
 _ = agent.Start(ctx, "com.smile.gifmaker")
@@ -238,6 +243,7 @@ _ = agent.Start(ctx, "com.smile.gifmaker")
 
 Notes:
 - `MultiDispatchPlanner` currently recognizes `SceneSingleURLCapture` as the "single-url" scene and treats everything else as "search".
+- `FetchCombos` are required; TaskAgent does not provide default fetch filters.
 - If you need different sharding keys, per-scene priorities, or a different mixing policy, implement your own `DispatchPlanner`.
 
 ## Troubleshooting

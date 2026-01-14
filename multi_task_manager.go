@@ -17,7 +17,7 @@ type MultiTaskManager struct {
 	SingleURLFetchLimit int
 }
 
-func (m *MultiTaskManager) FetchAvailableTasks(ctx context.Context, app string, limit int) ([]*Task, error) {
+func (m *MultiTaskManager) FetchAvailableTasks(ctx context.Context, limit int, filters []TaskFetchFilter) ([]*Task, error) {
 	if m == nil {
 		return nil, nil
 	}
@@ -32,8 +32,9 @@ func (m *MultiTaskManager) FetchAvailableTasks(ctx context.Context, app string, 
 	var searchTasks []*Task
 	var singleURLTasks []*Task
 
+	searchCombos, singleCombos := splitFetchCombosByScene(filters)
 	if searchLimit > 0 && m.Search != nil {
-		tasks, err := m.Search.FetchAvailableTasks(ctx, app, searchLimit)
+		tasks, err := m.Search.FetchAvailableTasks(ctx, searchLimit, searchCombos)
 		if err != nil {
 			log.Warn().Err(err).Int("limit", searchLimit).Msg("multi: fetch search tasks failed")
 		} else {
@@ -41,7 +42,7 @@ func (m *MultiTaskManager) FetchAvailableTasks(ctx context.Context, app string, 
 		}
 	}
 	if singleLimit > 0 && m.SingleURL != nil {
-		tasks, err := m.SingleURL.FetchAvailableTasks(ctx, app, singleLimit)
+		tasks, err := m.SingleURL.FetchAvailableTasks(ctx, singleLimit, singleCombos)
 		if err != nil {
 			log.Warn().Err(err).Int("limit", singleLimit).Msg("multi: fetch single url tasks failed")
 		} else {
@@ -97,7 +98,7 @@ func (m *MultiTaskManager) FetchAvailableTasks(ctx context.Context, app string, 
 				}
 			}
 			if top > 0 {
-				if extra, err := m.Search.FetchAvailableTasks(ctx, app, top); err != nil {
+				if extra, err := m.Search.FetchAvailableTasks(ctx, top, searchCombos); err != nil {
 					log.Warn().Err(err).Int("limit", top).Msg("multi: top up search tasks failed")
 				} else {
 					searchTasks = appendUnique(searchTasks, extra, 0)
@@ -113,7 +114,7 @@ func (m *MultiTaskManager) FetchAvailableTasks(ctx context.Context, app string, 
 				}
 			}
 			if top > 0 {
-				if extra, err := m.SingleURL.FetchAvailableTasks(ctx, app, top); err != nil {
+				if extra, err := m.SingleURL.FetchAvailableTasks(ctx, top, singleCombos); err != nil {
 					log.Warn().Err(err).Int("limit", top).Msg("multi: top up single url tasks failed")
 				} else {
 					singleURLTasks = appendUnique(singleURLTasks, extra, 0)
@@ -130,6 +131,23 @@ func (m *MultiTaskManager) FetchAvailableTasks(ctx context.Context, app string, 
 		combined = combined[:limit]
 	}
 	return combined, nil
+}
+
+func splitFetchCombosByScene(combos []TaskFetchFilter) ([]TaskFetchFilter, []TaskFetchFilter) {
+	if len(combos) == 0 {
+		return nil, nil
+	}
+	searchCombos := make([]TaskFetchFilter, 0, len(combos))
+	singleCombos := make([]TaskFetchFilter, 0, len(combos))
+	for _, combo := range combos {
+		scene := strings.TrimSpace(combo.Scene)
+		if scene == SceneSingleURLCapture {
+			singleCombos = append(singleCombos, combo)
+		} else {
+			searchCombos = append(searchCombos, combo)
+		}
+	}
+	return searchCombos, singleCombos
 }
 
 func (m *MultiTaskManager) OnTasksDispatched(ctx context.Context, deviceSerial string, tasks []*Task) error {

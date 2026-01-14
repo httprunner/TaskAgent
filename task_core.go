@@ -25,11 +25,17 @@ type TaskNotifier interface {
 
 // TaskManager 定义任务来源需要实现的能力。
 type TaskManager interface {
-	FetchAvailableTasks(ctx context.Context, app string, limit int) ([]*Task, error)
+	FetchAvailableTasks(ctx context.Context, limit int, filters []TaskFetchFilter) ([]*Task, error)
 	OnTasksDispatched(ctx context.Context, deviceSerial string, tasks []*Task) error
 	OnTaskStarted(ctx context.Context, deviceSerial string, task *Task) error
 	OnTaskResult(ctx context.Context, deviceSerial string, task *Task, runErr error) error
 	OnTasksCompleted(ctx context.Context, deviceSerial string, tasks []*Task, jobErr error) error
+}
+
+type TaskFetchFilter struct {
+	Scene  string
+	Status string
+	Date   string
 }
 
 // JobRequest bundles the execution details for a device.

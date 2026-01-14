@@ -27,8 +27,8 @@ type WebhookTaskPrioritizer struct {
 
 // TaskFetcher provides task fetching methods needed for webhook prioritization.
 type TaskFetcher interface {
-	FetchAvailableTasks(ctx context.Context, app string, limit int) ([]*taskagent.Task, error)
-	FetchTasksByIDs(ctx context.Context, app string, taskIDs []int64, limit int) ([]*taskagent.Task, error)
+	FetchAvailableTasks(ctx context.Context, limit int, filters []taskagent.TaskFetchFilter) ([]*taskagent.Task, error)
+	FetchTasksByIDs(ctx context.Context, taskIDs []int64, limit int) ([]*taskagent.Task, error)
 }
 
 type shardConfigProvider interface {
@@ -100,14 +100,13 @@ func (p *WebhookTaskPrioritizer) ListTaskIDs(ctx context.Context, limit int) ([]
 // It applies shard filtering when nodeTotal > 1.
 func (p *WebhookTaskPrioritizer) FetchAvailableTasks(
 	ctx context.Context,
-	app string,
 	limit int,
+	filters []taskagent.TaskFetchFilter,
 ) ([]*taskagent.Task, error) {
 	if p == nil || p.fetcher == nil {
 		return nil, errors.New("webhook task prioritizer fetcher is nil")
 	}
 	fetcher := p.fetcher
-	app = strings.TrimSpace(app)
 	if limit <= 0 {
 		limit = 1
 	}
@@ -134,7 +133,6 @@ func (p *WebhookTaskPrioritizer) FetchAvailableTasks(
 	}
 
 	log.Info().
-		Str("app", app).
 		Int("node_index", nodeIndex).
 		Int("node_total", nodeTotal).
 		Int("fetch_limit", planFetchLimit).
@@ -144,21 +142,19 @@ func (p *WebhookTaskPrioritizer) FetchAvailableTasks(
 		log.Warn().Err(planErr).Msg("failed to load webhook plans; fallback to normal task fetching")
 	}
 	if len(planIDs) > 0 {
-		tasks, err := fetcher.FetchTasksByIDs(ctx, app, planIDs, planFetchLimit)
+		tasks, err := fetcher.FetchTasksByIDs(ctx, planIDs, planFetchLimit)
 		if err != nil {
 			return nil, err
 		}
 		filtered := taskagent.FilterTasksByShard(tasks, nodeIndex, nodeTotal, limit)
 		if len(filtered) == 0 {
 			log.Warn().
-				Str("app", app).
 				Int("node_index", nodeIndex).
 				Int("node_total", nodeTotal).
 				Int("plan_ids", len(planIDs)).
 				Msg("webhook plan tasks filtered out by shard; fallback to normal task fetching")
 		} else {
 			log.Info().
-				Str("app", app).
 				Int("node_index", nodeIndex).
 				Int("node_total", nodeTotal).
 				Int("plan_ids", len(planIDs)).
@@ -168,7 +164,7 @@ func (p *WebhookTaskPrioritizer) FetchAvailableTasks(
 		}
 	}
 
-	tasks, err := fetcher.FetchAvailableTasks(ctx, app, fallbackLimit)
+	tasks, err := fetcher.FetchAvailableTasks(ctx, fallbackLimit, filters)
 	if err != nil {
 		return nil, err
 	}

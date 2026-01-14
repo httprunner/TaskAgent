@@ -26,6 +26,7 @@ type Config struct {
 	MaxJobRetries   int
 	JobRetryBackoff time.Duration
 	OSType          string
+	App             string
 	// DeviceSerialAllowlist optionally restricts scheduling to these device serials.
 	// When empty, all connected devices are eligible unless overridden by env.
 	DeviceSerialAllowlist []string
@@ -34,7 +35,7 @@ type Config struct {
 	BitableURL            string
 	AgentVersion          string
 	DeviceRecorder        DeviceRecorder
-	AllowedScenes         []string
+	FetchTaskFilters      []TaskFetchFilter
 	DispatchPlanner       DispatchPlanner
 }
 
@@ -78,16 +79,6 @@ type deviceAssignment struct {
 	meta     deviceMeta
 	tasks    []*Task
 	capacity int
-}
-
-func defaultDeviceAllowedScenes() []string {
-	return []string{
-		SceneVideoScreenCapture,
-		SceneGeneralSearch,
-		SceneProfileSearch,
-		SceneCollection,
-		SceneAnchorCapture,
-	}
 }
 
 // NewDevicePoolAgent builds an agent with the provided configuration and job runner.
@@ -134,16 +125,11 @@ func NewDevicePoolAgent(cfg Config, runner JobRunner) (*DevicePoolAgent, error) 
 
 	manager := cfg.TaskManager
 	if manager == nil {
-		allowed := cfg.AllowedScenes
-		if len(allowed) == 0 {
-			allowed = defaultDeviceAllowedScenes()
-		}
 		var err error
 		manager, err = NewFeishuTaskClientWithOptions(
 			cfg.BitableURL,
-			FeishuTaskClientOptions{
-				AllowedScenes: allowed,
-			},
+			strings.TrimSpace(cfg.App),
+			FeishuTaskClientOptions{},
 		)
 		if err != nil {
 			return nil, err
@@ -166,6 +152,7 @@ func NewDevicePoolAgent(cfg Config, runner JobRunner) (*DevicePoolAgent, error) 
 			wrapped, err := NewGroupTaskPrioritizer(
 				manager, bitableURL,
 				GroupTaskPrioritizerOptions{
+					App:               strings.TrimSpace(cfg.App),
 					Oversample:        oversample,
 					CountTTL:          ttl,
 					MaxGroupsPerFetch: maxGroups,
@@ -372,7 +359,11 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 			Int("max_fetch", maxTasks).
 			Msg("device pool dispatch requesting tasks")
 
-		tasks, err := a.taskManager.FetchAvailableTasks(ctx, app, maxTasks)
+		combos := a.cfg.FetchTaskFilters
+		if len(combos) == 0 {
+			return errors.New("fetch filters must be provided")
+		}
+		tasks, err := a.taskManager.FetchAvailableTasks(ctx, maxTasks, combos)
 		if err != nil {
 			return errors.Wrap(err, "fetch available tasks failed")
 		}

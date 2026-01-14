@@ -12,7 +12,7 @@ type stubGroupBaseTM struct {
 	tasks []*Task
 }
 
-func (s *stubGroupBaseTM) FetchAvailableTasks(_ context.Context, _ string, limit int) ([]*Task, error) {
+func (s *stubGroupBaseTM) FetchAvailableTasks(_ context.Context, limit int, combos []TaskFetchFilter) ([]*Task, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
@@ -82,7 +82,7 @@ func TestGroupTaskPrioritizerOrdersByRemaining(t *testing.T) {
 		},
 	}
 
-	out, err := p.FetchAvailableTasks(context.Background(), "kwai", 2)
+	out, err := p.FetchAvailableTasks(context.Background(), 2, nil)
 	if err != nil {
 		t.Fatalf("FetchAvailableTasks error: %v", err)
 	}
@@ -122,10 +122,10 @@ func TestGroupTaskPrioritizerCacheTTL(t *testing.T) {
 		},
 	}
 
-	if _, err := p.FetchAvailableTasks(context.Background(), "kwai", 1); err != nil {
+	if _, err := p.FetchAvailableTasks(context.Background(), 1, nil); err != nil {
 		t.Fatalf("fetch 1 error: %v", err)
 	}
-	if _, err := p.FetchAvailableTasks(context.Background(), "kwai", 1); err != nil {
+	if _, err := p.FetchAvailableTasks(context.Background(), 1, nil); err != nil {
 		t.Fatalf("fetch 2 error: %v", err)
 	}
 	if counter.calls[key] != 1 {
@@ -133,7 +133,7 @@ func TestGroupTaskPrioritizerCacheTTL(t *testing.T) {
 	}
 
 	now = now.Add(31 * time.Second)
-	if _, err := p.FetchAvailableTasks(context.Background(), "kwai", 1); err != nil {
+	if _, err := p.FetchAvailableTasks(context.Background(), 1, nil); err != nil {
 		t.Fatalf("fetch 3 error: %v", err)
 	}
 	if counter.calls[key] != 2 {
@@ -161,7 +161,7 @@ func TestGroupTaskPrioritizerOnTaskResultDecrementsCacheOnSuccess(t *testing.T) 
 			MaxGroupsPerFetch: 10,
 		},
 	}
-	out, err := p.FetchAvailableTasks(context.Background(), "kwai", 1)
+	out, err := p.FetchAvailableTasks(context.Background(), 1, nil)
 	if err != nil {
 		t.Fatalf("fetch error: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestGroupTaskPrioritizerFocusGroups(t *testing.T) {
 		},
 	}
 
-	out, err := p.FetchAvailableTasks(context.Background(), "kwai", 2)
+	out, err := p.FetchAvailableTasks(context.Background(), 2, nil)
 	if err != nil {
 		t.Fatalf("FetchAvailableTasks error: %v", err)
 	}

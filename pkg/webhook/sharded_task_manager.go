@@ -19,6 +19,7 @@ type ShardedTaskManager struct {
 type ShardedTaskManagerOptions struct {
 	FeishuClient *taskagent.FeishuTaskClient
 	FeishuOpts   taskagent.FeishuTaskClientOptions
+	App          string
 
 	NodeIndex int
 	NodeTotal int
@@ -43,7 +44,7 @@ func NewShardedTaskManagerWithOptions(bitableURL string, opts ShardedTaskManager
 			feishuOpts.NodeTotal = opts.NodeTotal
 		}
 		var err error
-		base, err = taskagent.NewFeishuTaskClientWithOptions(bitableURL, feishuOpts)
+		base, err = taskagent.NewFeishuTaskClientWithOptions(bitableURL, strings.TrimSpace(opts.App), feishuOpts)
 		if err != nil {
 			return nil, err
 		}
@@ -80,18 +81,17 @@ func NewShardedTaskManagerWithOptions(bitableURL string, opts ShardedTaskManager
 	}, nil
 }
 
-func (m *ShardedTaskManager) FetchAvailableTasks(ctx context.Context, app string, limit int) ([]*taskagent.Task, error) {
+func (m *ShardedTaskManager) FetchAvailableTasks(ctx context.Context, limit int, filters []taskagent.TaskFetchFilter) ([]*taskagent.Task, error) {
 	if m == nil || m.base == nil {
 		return nil, errors.New("sharded task manager is not initialized")
 	}
-	app = strings.TrimSpace(app)
 	if limit <= 0 {
 		limit = 1
 	}
 	if m.priority != nil {
-		return m.priority.FetchAvailableTasks(ctx, app, limit)
+		return m.priority.FetchAvailableTasks(ctx, limit, filters)
 	}
-	return m.base.FetchAvailableTasks(ctx, app, limit)
+	return m.base.FetchAvailableTasks(ctx, limit, filters)
 }
 
 func (m *ShardedTaskManager) OnTasksDispatched(ctx context.Context, deviceSerial string, tasks []*taskagent.Task) error {
