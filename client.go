@@ -103,10 +103,115 @@ func (c *FeishuTaskClient) FetchAvailableTasks(ctx context.Context, limit int, f
 	if len(filters) == 0 {
 		return nil, errors.New("task fetch filters are required")
 	}
-	feishuTasks, err := fetchPendingFeishuTasksByCombos(ctx, c.client, c.bitableURL, c.app, fetchLimit, filters)
-	if err != nil {
-		return nil, err
+	fields := feishusdk.DefaultTaskFields
+	feishuTasks := make([]*FeishuTask, 0, fetchLimit)
+	seen := make(map[int64]struct{}, fetchLimit)
+
+	for _, filter := range filters {
+		if fetchLimit > 0 && len(feishuTasks) >= fetchLimit {
+			break
+		}
+		remaining := fetchLimit
+		if remaining > 0 {
+			remaining = fetchLimit - len(feishuTasks)
+			if remaining <= 0 {
+				break
+			}
+		}
+		batch, _, err := FetchFeishuTasks(ctx, c.client, c.bitableURL, fields, c.app, filter, remaining, FeishuTaskQueryOptions{})
+		if err != nil {
+			log.Warn().Err(err).Str("scene", strings.TrimSpace(filter.Scene)).Msg("fetch feishusdk tasks failed for scene; skipping")
+			continue
+		}
+		feishuTasks = AppendUniqueFeishuTasks(feishuTasks, batch, fetchLimit, seen)
 	}
+	if len(feishuTasks) > fetchLimit && fetchLimit > 0 {
+		feishuTasks = feishuTasks[:fetchLimit]
+	}
+	if len(feishuTasks) > 0 {
+		now := time.Now()
+		ready := make([]*FeishuTask, 0, len(feishuTasks))
+		toError := make([]*FeishuTask, 0)
+		toErrorWithEndAt := make([]*FeishuTask, 0)
+
+		for _, t := range feishuTasks {
+			if t == nil {
+				continue
+			}
+			status := strings.TrimSpace(t.Status)
+			if isBackoffRetrySceneName(t.Scene) {
+				switch status {
+				case feishusdk.StatusFailed:
+					if t.RetryCount >= failedRetryLimit {
+						toErrorWithEndAt = append(toErrorWithEndAt, t)
+						continue
+					}
+					if !backoffRetryReady(t, now, feishusdk.StatusFailed) {
+						continue
+					}
+				case feishusdk.StatusError:
+					if t.RetryCount >= errorRetryLimit {
+						continue
+					}
+					if !backoffRetryReady(t, now, feishusdk.StatusError) {
+						continue
+					}
+				}
+			} else if status == feishusdk.StatusFailed && t.RetryCount >= failedRetryLimit {
+				toError = append(toError, t)
+				continue
+			}
+			ready = append(ready, t)
+		}
+
+		if len(toError) > 0 {
+			if err := UpdateFeishuTaskStatuses(ctx, toError, feishusdk.StatusError, "", nil); err != nil {
+				log.Error().
+					Err(err).
+					Int("task_count", len(toError)).
+					Msg("feishusdk: mark tasks as error due to RetryCount limit failed")
+			} else {
+				ids := make([]int64, 0, len(toError))
+				for _, t := range toError {
+					if t != nil && t.TaskID > 0 {
+						ids = append(ids, t.TaskID)
+					}
+				}
+				log.Info().
+					Int("task_count", len(ids)).
+					Interface("task_ids", ids).
+					Int("max_retries", failedRetryLimit).
+					Msg("feishusdk: tasks exceeded retry limit and were marked error")
+			}
+		}
+		if len(toErrorWithEndAt) > 0 {
+			completed := now
+			if completed.IsZero() {
+				completed = time.Now()
+			}
+			if err := UpdateFeishuTaskStatuses(ctx, toErrorWithEndAt, feishusdk.StatusError, "",
+				&TaskStatusMeta{CompletedAt: &completed}); err != nil {
+				log.Error().
+					Err(err).
+					Int("task_count", len(toErrorWithEndAt)).
+					Msg("feishusdk: mark tasks as error due to retry limit failed")
+			} else {
+				ids := make([]int64, 0, len(toErrorWithEndAt))
+				for _, t := range toErrorWithEndAt {
+					if t != nil && t.TaskID > 0 {
+						ids = append(ids, t.TaskID)
+					}
+				}
+				log.Info().
+					Int("task_count", len(ids)).
+					Interface("task_ids", ids).
+					Int("max_failed_retries", failedRetryLimit).
+					Msg("feishusdk: tasks exceeded retry limit and were marked error")
+			}
+		}
+		feishuTasks = ready
+	}
+
 	if err := c.syncTaskMirror(feishuTasks); err != nil {
 		return nil, err
 	}
@@ -534,167 +639,40 @@ const (
 	backoffErrorRetryDelay  = 30 * time.Minute
 )
 
-func fetchPendingFeishuTasksByCombos(ctx context.Context, client TargetTableClient, bitableURL, app string, limit int, combos []TaskFetchFilter) ([]*FeishuTask, error) {
+func FetchFeishuTasks(
+	ctx context.Context,
+	client TargetTableClient,
+	bitableURL string,
+	fields feishusdk.TaskFields,
+	app string,
+	filter TaskFetchFilter,
+	limit int,
+	queryOpts FeishuTaskQueryOptions,
+) ([]*FeishuTask, FeishuFetchPageInfo, error) {
 	if client == nil {
-		return nil, errors.New("feishusdk: client is nil")
+		return nil, FeishuFetchPageInfo{}, errors.New("feishusdk: client is nil")
 	}
 	if strings.TrimSpace(bitableURL) == "" {
-		return nil, errors.New("feishusdk: bitable url is empty")
+		return nil, FeishuFetchPageInfo{}, errors.New("feishusdk: bitable url is empty")
 	}
-	if limit <= 0 {
-		limit = maxFeishuTasksPerApp
+	scene := strings.TrimSpace(filter.Scene)
+	if scene == "" {
+		return nil, FeishuFetchPageInfo{}, errors.New("feishusdk: fetch filter missing scene")
 	}
-	if len(combos) == 0 {
-		return nil, errors.New("feishusdk: fetch filters are required")
+	status := strings.TrimSpace(filter.Status)
+	if status == "" {
+		status = feishusdk.StatusPending
 	}
-
-	fields := feishusdk.DefaultTaskFields
-	result := make([]*FeishuTask, 0, limit)
-	seen := make(map[int64]struct{}, limit)
-
-	appendAndMaybeReturn := func(batch []*FeishuTask) {
-		result = AppendUniqueFeishuTasks(result, batch, limit, seen)
-	}
-
-	for _, combo := range combos {
-		if limit > 0 && len(result) >= limit {
-			break
-		}
-		remaining := limit
-		if remaining > 0 {
-			remaining = limit - len(result)
-			if remaining <= 0 {
-				break
-			}
-		}
-		scene := strings.TrimSpace(combo.Scene)
-		if scene == "" {
-			return nil, errors.New("feishusdk: fetch filter missing scene")
-		}
-		status := strings.TrimSpace(combo.Status)
-		if status == "" {
-			status = feishusdk.StatusPending
-		}
-		datePreset := strings.TrimSpace(combo.Date)
-		if datePreset == "" {
-			datePreset = TaskDateToday
-		}
-		batch, err := FetchFeishuTasksWithStrategy(ctx, client, bitableURL, fields, app, []string{status}, remaining, scene, datePreset)
-		if err != nil {
-			log.Warn().Err(err).Str("scene", scene).Msg("fetch feishusdk tasks failed for scene; skipping")
-			continue
-		}
-		appendAndMaybeReturn(batch)
-	}
-
-	if len(result) > limit && limit > 0 {
-		result = result[:limit]
-	}
-
-	if len(result) > 0 {
-		now := time.Now()
-		ready := make([]*FeishuTask, 0, len(result))
-		toError := make([]*FeishuTask, 0)
-		toErrorWithEndAt := make([]*FeishuTask, 0)
-
-		for _, t := range result {
-			if t == nil {
-				continue
-			}
-			status := strings.TrimSpace(t.Status)
-			if isBackoffRetrySceneName(t.Scene) {
-				switch status {
-				case feishusdk.StatusFailed:
-					if t.RetryCount >= failedRetryLimit {
-						toErrorWithEndAt = append(toErrorWithEndAt, t)
-						continue
-					}
-					if !backoffRetryReady(t, now, feishusdk.StatusFailed) {
-						continue
-					}
-				case feishusdk.StatusError:
-					if t.RetryCount >= errorRetryLimit {
-						continue
-					}
-					if !backoffRetryReady(t, now, feishusdk.StatusError) {
-						continue
-					}
-				}
-			} else if status == feishusdk.StatusFailed && t.RetryCount >= failedRetryLimit {
-				toError = append(toError, t)
-				continue
-			}
-			ready = append(ready, t)
-		}
-
-		if len(toError) > 0 {
-			if err := UpdateFeishuTaskStatuses(ctx, toError, feishusdk.StatusError, "", nil); err != nil {
-				log.Error().
-					Err(err).
-					Int("task_count", len(toError)).
-					Msg("feishusdk: mark tasks as error due to RetryCount limit failed")
-			} else {
-				ids := make([]int64, 0, len(toError))
-				for _, t := range toError {
-					if t != nil && t.TaskID > 0 {
-						ids = append(ids, t.TaskID)
-					}
-				}
-				log.Info().
-					Int("task_count", len(ids)).
-					Interface("task_ids", ids).
-					Int("max_retries", failedRetryLimit).
-					Msg("feishusdk: tasks exceeded retry limit and were marked error")
-			}
-		}
-		if len(toErrorWithEndAt) > 0 {
-			completed := now
-			if completed.IsZero() {
-				completed = time.Now()
-			}
-			if err := UpdateFeishuTaskStatuses(ctx, toErrorWithEndAt, feishusdk.StatusError, "",
-				&TaskStatusMeta{CompletedAt: &completed}); err != nil {
-				log.Error().
-					Err(err).
-					Int("task_count", len(toErrorWithEndAt)).
-					Msg("feishusdk: mark tasks as error due to retry limit failed")
-			} else {
-				ids := make([]int64, 0, len(toErrorWithEndAt))
-				for _, t := range toErrorWithEndAt {
-					if t != nil && t.TaskID > 0 {
-						ids = append(ids, t.TaskID)
-					}
-				}
-				log.Info().
-					Int("task_count", len(ids)).
-					Interface("task_ids", ids).
-					Int("max_failed_retries", failedRetryLimit).
-					Msg("feishusdk: tasks exceeded retry limit and were marked error")
-			}
-		}
-
-		result = ready
-	}
-
-	return result, nil
-}
-
-func FetchFeishuTasksWithStrategy(ctx context.Context, client TargetTableClient, bitableURL string, fields feishusdk.TaskFields, app string, statuses []string, limit int, scene, datePreset string) ([]*FeishuTask, error) {
-	tasks, _, err := FetchFeishuTasksWithStrategyPage(ctx, client, bitableURL, fields, app, statuses, limit, scene, datePreset, FeishuTaskQueryOptions{})
-	return tasks, err
-}
-
-func FetchFeishuTasksWithStrategyPage(ctx context.Context, client TargetTableClient, bitableURL string, fields feishusdk.TaskFields, app string, statuses []string, limit int, scene, datePreset string, queryOpts FeishuTaskQueryOptions) ([]*FeishuTask, FeishuFetchPageInfo, error) {
-	if len(statuses) == 0 {
-		return nil, FeishuFetchPageInfo{}, nil
+	datePreset := strings.TrimSpace(filter.Date)
+	if datePreset == "" {
+		datePreset = TaskDateToday
 	}
 	fetchLimit := limit
 	if fetchLimit <= 0 {
 		fetchLimit = maxFeishuTasksPerApp
 	}
-
-	filter := buildFeishuFilterInfo(fields, app, statuses, scene, datePreset)
-	if filter != nil {
+	filterInfo := buildFeishuFilterInfo(fields, app, []string{status}, scene, datePreset)
+	if filterInfo != nil {
 		filterQuery := feishusdk.TaskQueryOptions{
 			ViewID:     strings.TrimSpace(queryOpts.ViewID),
 			IgnoreView: queryOpts.IgnoreView,
@@ -702,47 +680,49 @@ func FetchFeishuTasksWithStrategyPage(ctx context.Context, client TargetTableCli
 			MaxPages:   queryOpts.MaxPages,
 			Limit:      fetchLimit,
 		}
-		filter.QueryOptions = &filterQuery
+		filterInfo.QueryOptions = &filterQuery
 	}
 	log.Debug().
 		Str("app", app).
-		Strs("statuses", statuses).
-		Str("scene", strings.TrimSpace(scene)).
+		Str("status", status).
+		Str("scene", scene).
 		Int("fetch_limit", fetchLimit).
 		Bool("ignore_view", queryOpts.IgnoreView).
 		Str("page_token", strings.TrimSpace(queryOpts.PageToken)).
 		Int("max_pages", queryOpts.MaxPages).
-		Str("filter", formatFilterForLog(filter)).
+		Str("filter", formatFilterForLog(filterInfo)).
 		Msg("fetching feishusdk tasks from bitable")
-	subset, pageInfo, err := FetchFeishuTasksWithFilter(ctx, client, bitableURL, filter)
+
+	table, err := client.FetchTaskTableWithOptions(ctx, bitableURL, nil, buildQueryOptions(filterInfo))
 	if err != nil {
-		return nil, FeishuFetchPageInfo{}, err
+		return nil, FeishuFetchPageInfo{}, errors.Wrap(err, "fetch task table with options failed")
 	}
-	if len(subset) > 0 {
+	tasks, pageInfo := decodeFeishuTasksFromTable(table, client, fetchLimit)
+	if limit > 0 && len(tasks) > limit {
+		log.Info().
+			Int("batch_limit", limit).
+			Int("aggregated", len(tasks)).
+			Msg("feishusdk tasks aggregated over limit; trimming to cap")
+		tasks = tasks[:limit]
+	}
+	if len(tasks) > 0 {
 		log.Info().
 			Str("app", app).
-			Strs("statuses", statuses).
+			Str("status", status).
 			Int("batch_limit", limit).
 			Int("fetch_limit", fetchLimit).
 			Bool("ignore_view", queryOpts.IgnoreView).
 			Str("next_page_token", strings.TrimSpace(pageInfo.NextPageToken)).
 			Bool("has_more", pageInfo.HasMore).
 			Int("pages", pageInfo.Pages).
-			Int("selected", len(subset)).
-			Interface("tasks", summarizeFeishuTasks(subset)).
+			Int("selected", len(tasks)).
+			Interface("tasks", summarizeFeishuTasks(tasks)).
 			Msg("feishusdk tasks selected after filtering")
 	}
-	if limit > 0 && len(subset) > limit {
-		log.Info().
-			Int("batch_limit", limit).
-			Int("aggregated", len(subset)).
-			Msg("feishusdk tasks aggregated over limit; trimming to cap")
-		subset = subset[:limit]
-	}
-	return subset, pageInfo, nil
+	return tasks, pageInfo, nil
 }
 
-func FetchFeishuTasksWithFilter(ctx context.Context, client TargetTableClient, bitableURL string, filter *feishusdk.FilterInfo) ([]*FeishuTask, FeishuFetchPageInfo, error) {
+func buildQueryOptions(filter *feishusdk.FilterInfo) *feishusdk.TaskQueryOptions {
 	limit := 0
 	if filter != nil && filter.QueryOptions != nil {
 		limit = filter.QueryOptions.Limit
@@ -766,17 +746,16 @@ func FetchFeishuTasksWithFilter(ctx context.Context, client TargetTableClient, b
 			opts.MaxPages = queryOpts.MaxPages
 		}
 	}
-	table, err := client.FetchTaskTableWithOptions(ctx, bitableURL, nil, opts)
-	if err != nil {
-		return nil, FeishuFetchPageInfo{}, errors.Wrap(err, "fetch task table with options failed")
-	}
+	return opts
+}
+
+func decodeFeishuTasksFromTable(table *feishusdk.TaskTable, client TargetTableClient, limit int) ([]*FeishuTask, FeishuFetchPageInfo) {
 	if table == nil || len(table.Rows) == 0 {
 		if table == nil {
-			return nil, FeishuFetchPageInfo{}, nil
+			return nil, FeishuFetchPageInfo{}
 		}
-		return nil, FeishuFetchPageInfo{HasMore: table.HasMore, NextPageToken: strings.TrimSpace(table.NextPageToken), Pages: table.Pages}, nil
+		return nil, FeishuFetchPageInfo{HasMore: table.HasMore, NextPageToken: strings.TrimSpace(table.NextPageToken), Pages: table.Pages}
 	}
-
 	source := &feishuTaskSource{client: client, table: table}
 	tasks := make([]*FeishuTask, 0, len(table.Rows))
 	for _, row := range table.Rows {
@@ -833,7 +812,7 @@ func FetchFeishuTasksWithFilter(ctx context.Context, client TargetTableClient, b
 		NextPageToken: strings.TrimSpace(table.NextPageToken),
 		Pages:         table.Pages,
 	}
-	return tasks, pageInfo, nil
+	return tasks, pageInfo
 }
 
 func buildFeishuFilterInfo(fields feishusdk.TaskFields, app string, statuses []string, scene, datePreset string) *feishusdk.FilterInfo {

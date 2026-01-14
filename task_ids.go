@@ -106,10 +106,11 @@ func fetchFeishuTasksByIDsWithDatePreset(ctx context.Context, client TargetTable
 			query := feishusdk.TaskQueryOptions{Limit: remaining}
 			filter.QueryOptions = &query
 		}
-		batch, _, err := FetchFeishuTasksWithFilter(ctx, client, bitableURL, filter)
+		table, err := client.FetchTaskTableWithOptions(ctx, bitableURL, nil, buildQueryOptions(filter))
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "fetch task table with options failed")
 		}
+		batch, _ := decodeFeishuTasksFromTable(table, client, remaining)
 		result = AppendUniqueFeishuTasks(result, batch, limit, seen)
 		if limit > 0 && len(result) >= limit {
 			break

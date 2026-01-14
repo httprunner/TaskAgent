@@ -11,7 +11,7 @@ import (
 	"github.com/httprunner/TaskAgent/internal/feishusdk"
 )
 
-func TestFetchFeishuTasksWithStrategyFiltersInvalidTasks(t *testing.T) {
+func TestFetchFeishuTasksFiltersInvalidTasks(t *testing.T) {
 	ctx := context.Background()
 	loc := time.FixedZone("UTC+8", 8*3600)
 
@@ -32,9 +32,13 @@ func TestFetchFeishuTasksWithStrategyFiltersInvalidTasks(t *testing.T) {
 		},
 	}
 
-	tasks, err := FetchFeishuTasksWithStrategy(ctx, client, "https://example.com/bitable/abc", feishusdk.DefaultTaskFields, "com.app", []string{""}, 5, "", TaskDateToday)
+	tasks, _, err := FetchFeishuTasks(
+		ctx, client, "https://example.com/bitable/abc", feishusdk.DefaultTaskFields, "com.app",
+		TaskFetchFilter{Scene: SceneGeneralSearch, Status: StatusPending, Date: TaskDateToday},
+		5, FeishuTaskQueryOptions{},
+	)
 	if err != nil {
-		t.Fatalf("fetchFeishuTasksWithStrategy returned error: %v", err)
+		t.Fatalf("fetchFeishuTasks returned error: %v", err)
 	}
 	expectedIDs := []int64{1, 2, 3, 4}
 	if len(tasks) != len(expectedIDs) {
@@ -47,7 +51,7 @@ func TestFetchFeishuTasksWithStrategyFiltersInvalidTasks(t *testing.T) {
 	}
 }
 
-func TestFetchFeishuTasksWithFilterAllowsBookOrURLOnlyRows(t *testing.T) {
+func TestFetchFeishuTasksAllowsBookOrURLOnlyRows(t *testing.T) {
 	ctx := context.Background()
 	client := &stubTargetClient{
 		tables: []*feishusdk.TaskTable{
@@ -62,9 +66,13 @@ func TestFetchFeishuTasksWithFilterAllowsBookOrURLOnlyRows(t *testing.T) {
 			},
 		},
 	}
-	tasks, _, err := FetchFeishuTasksWithFilter(ctx, client, "https://example.com/bitable/rows", nil)
+	tasks, _, err := FetchFeishuTasks(
+		ctx, client, "https://example.com/bitable/rows", feishusdk.DefaultTaskFields, "com.app",
+		TaskFetchFilter{Scene: SceneGeneralSearch, Status: StatusPending, Date: TaskDateToday},
+		0, FeishuTaskQueryOptions{},
+	)
 	if err != nil {
-		t.Fatalf("fetchFeishuTasksWithFilter returned error: %v", err)
+		t.Fatalf("fetchFeishuTasks returned error: %v", err)
 	}
 	got := collectTaskIDs(tasks)
 	want := []int64{101, 102, 103}
@@ -124,11 +132,24 @@ func TestFetchTodayPendingFeishuTasksSceneStatusPriorityStopsAfterLimit(t *testi
 		{Scene: SceneProfileSearch, Status: feishusdk.StatusPending, Date: TaskDateToday},
 		{Scene: SceneGeneralSearch, Status: feishusdk.StatusPending, Date: TaskDateToday},
 	}
-	tasks, err := fetchPendingFeishuTasksByCombos(ctx, client, "https://example.com/bitable/foo", "com.app", 3, filters)
-	if err != nil {
-		t.Fatalf("fetchPendingFeishuTasksByCombos returned error: %v", err)
+	limit := 3
+	result := make([]*FeishuTask, 0, limit)
+	seen := make(map[int64]struct{}, limit)
+	for _, filter := range filters {
+		if limit > 0 && len(result) >= limit {
+			break
+		}
+		remaining := limit - len(result)
+		subset, _, err := FetchFeishuTasks(
+			ctx, client, "https://example.com/bitable/foo", feishusdk.DefaultTaskFields, "com.app",
+			filter, remaining, FeishuTaskQueryOptions{},
+		)
+		if err != nil {
+			t.Fatalf("FetchFeishuTasks returned error: %v", err)
+		}
+		result = AppendUniqueFeishuTasks(result, subset, limit, seen)
 	}
-	got := collectTaskIDs(tasks)
+	got := collectTaskIDs(result)
 	// Order follows the explicit filters in this test.
 	want := []int64{14, 11, 12}
 	if !equalIDs(got, want) {
