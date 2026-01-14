@@ -33,8 +33,8 @@ func TestFetchFeishuTasksFiltersInvalidTasks(t *testing.T) {
 	}
 
 	tasks, _, err := FetchFeishuTasks(
-		ctx, client, "https://example.com/bitable/abc", feishusdk.DefaultTaskFields, "com.app",
-		TaskFetchFilter{Scene: SceneGeneralSearch, Status: StatusPending, Date: TaskDateToday},
+		ctx, client, "https://example.com/bitable/abc", feishusdk.DefaultTaskFields,
+		TaskFetchFilter{App: "com.app", Scene: SceneGeneralSearch, Status: StatusPending, Date: TaskDateToday},
 		5, FeishuTaskQueryOptions{},
 	)
 	if err != nil {
@@ -67,8 +67,8 @@ func TestFetchFeishuTasksAllowsBookOrURLOnlyRows(t *testing.T) {
 		},
 	}
 	tasks, _, err := FetchFeishuTasks(
-		ctx, client, "https://example.com/bitable/rows", feishusdk.DefaultTaskFields, "com.app",
-		TaskFetchFilter{Scene: SceneGeneralSearch, Status: StatusPending, Date: TaskDateToday},
+		ctx, client, "https://example.com/bitable/rows", feishusdk.DefaultTaskFields,
+		TaskFetchFilter{App: "com.app", Scene: SceneGeneralSearch, Status: StatusPending, Date: TaskDateToday},
 		0, FeishuTaskQueryOptions{},
 	)
 	if err != nil {
@@ -128,9 +128,9 @@ func TestFetchTodayPendingFeishuTasksSceneStatusPriorityStopsAfterLimit(t *testi
 	}
 
 	filters := []TaskFetchFilter{
-		{Scene: SceneProfileSearch, Status: feishusdk.StatusFailed, Date: TaskDateToday},
-		{Scene: SceneProfileSearch, Status: feishusdk.StatusPending, Date: TaskDateToday},
-		{Scene: SceneGeneralSearch, Status: feishusdk.StatusPending, Date: TaskDateToday},
+		{App: "com.app", Scene: SceneProfileSearch, Status: feishusdk.StatusFailed, Date: TaskDateToday},
+		{App: "com.app", Scene: SceneProfileSearch, Status: feishusdk.StatusPending, Date: TaskDateToday},
+		{App: "com.app", Scene: SceneGeneralSearch, Status: feishusdk.StatusPending, Date: TaskDateToday},
 	}
 	limit := 3
 	result := make([]*FeishuTask, 0, limit)
@@ -140,8 +140,8 @@ func TestFetchTodayPendingFeishuTasksSceneStatusPriorityStopsAfterLimit(t *testi
 			break
 		}
 		remaining := limit - len(result)
-		subset, _, err := FetchFeishuTasks(
-			ctx, client, "https://example.com/bitable/foo", feishusdk.DefaultTaskFields, "com.app",
+			subset, _, err := FetchFeishuTasks(
+			ctx, client, "https://example.com/bitable/foo", feishusdk.DefaultTaskFields,
 			filter, remaining, FeishuTaskQueryOptions{},
 		)
 		if err != nil {

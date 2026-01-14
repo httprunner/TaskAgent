@@ -233,8 +233,8 @@ agent, _ := taskagent.NewDevicePoolAgent(taskagent.Config{
   MaxTasksPerJob: 10,
   App: "com.smile.gifmaker",
   TaskManager: multiTM,
-  FetchCombos: []taskagent.TaskFetchFilter{
-    {Scene: taskagent.SceneGeneralSearch, Status: taskagent.StatusPending, Date: taskagent.TaskDateToday},
+  FetchTaskFilters: []taskagent.TaskFetchFilter{
+    {App: "com.smile.gifmaker", Scene: taskagent.SceneGeneralSearch, Status: taskagent.StatusPending, Date: taskagent.TaskDateToday},
   },
   DispatchPlanner: planner,
 }, runner)
@@ -243,7 +243,7 @@ _ = agent.Start(ctx, "com.smile.gifmaker")
 
 Notes:
 - `MultiDispatchPlanner` currently recognizes `SceneSingleURLCapture` as the "single-url" scene and treats everything else as "search".
-- `FetchCombos` are required; TaskAgent does not provide default fetch filters.
+- `FetchTaskFilters` are required; TaskAgent does not provide default fetch filters.
 - If you need different sharding keys, per-scene priorities, or a different mixing policy, implement your own `DispatchPlanner`.
 
 ## Troubleshooting

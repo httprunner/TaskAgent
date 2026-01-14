@@ -120,7 +120,7 @@ type stubDispatchPlanner struct {
 }
 
 func defaultTestFetchFilters() []TaskFetchFilter {
-	return []TaskFetchFilter{{Scene: SceneGeneralSearch, Status: StatusPending, Date: TaskDateToday}}
+	return []TaskFetchFilter{{App: "com.smile.gifmaker", Scene: SceneGeneralSearch, Status: StatusPending, Date: TaskDateToday}}
 }
 
 func (s *stubDispatchPlanner) PlanDispatch(ctx context.Context, idleDevices []string, tasks []*Task) ([]DispatchAssignment, error) {

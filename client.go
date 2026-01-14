@@ -33,12 +33,6 @@ const (
 	TaskDateAny = "Any"
 )
 
-// TaskDatePolicy controls how Feishu tasks are fetched by date preset.
-// Primary is attempted first; Fallback presets are tried in order only if Primary yields no tasks.
-type TaskDatePolicy struct {
-	Primary  string
-	Fallback []string
-}
 
 // NewFeishuTaskClient constructs a reusable client for fetching and updating Feishu tasks.
 func NewFeishuTaskClient(bitableURL, app string) (*FeishuTaskClient, error) {
@@ -118,7 +112,14 @@ func (c *FeishuTaskClient) FetchAvailableTasks(ctx context.Context, limit int, f
 				break
 			}
 		}
-		batch, _, err := FetchFeishuTasks(ctx, c.client, c.bitableURL, fields, c.app, filter, remaining, FeishuTaskQueryOptions{})
+		filterApp := strings.TrimSpace(filter.App)
+		if filterApp == "" {
+			return nil, errors.New("task fetch filter missing app")
+		}
+		if strings.TrimSpace(c.app) != filterApp {
+			return nil, errors.New("task fetch filter app mismatch")
+		}
+		batch, _, err := FetchFeishuTasks(ctx, c.client, c.bitableURL, fields, filter, remaining, FeishuTaskQueryOptions{})
 		if err != nil {
 			log.Warn().Err(err).Str("scene", strings.TrimSpace(filter.Scene)).Msg("fetch feishusdk tasks failed for scene; skipping")
 			continue
@@ -644,7 +645,6 @@ func FetchFeishuTasks(
 	client TargetTableClient,
 	bitableURL string,
 	fields feishusdk.TaskFields,
-	app string,
 	filter TaskFetchFilter,
 	limit int,
 	queryOpts FeishuTaskQueryOptions,
@@ -654,6 +654,10 @@ func FetchFeishuTasks(
 	}
 	if strings.TrimSpace(bitableURL) == "" {
 		return nil, FeishuFetchPageInfo{}, errors.New("feishusdk: bitable url is empty")
+	}
+	app := strings.TrimSpace(filter.App)
+	if app == "" {
+		return nil, FeishuFetchPageInfo{}, errors.New("feishusdk: fetch filter missing app")
 	}
 	scene := strings.TrimSpace(filter.Scene)
 	if scene == "" {

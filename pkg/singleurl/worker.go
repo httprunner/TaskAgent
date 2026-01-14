@@ -169,7 +169,7 @@ type SingleURLWorkerConfig struct {
 	// within a single ProcessOnce cycle. Feishu updates are still applied serially to avoid
 	// triggering rate limits.
 	Concurrency int
-	// AppFilter optionally scopes tasks by the App column in the task table.
+	// AppFilter scopes tasks by the App column in the task table.
 	AppFilter string
 	// NodeIndex and NodeTotal enable optional sharding (BookID+App) across multiple nodes.
 	NodeIndex int
@@ -212,6 +212,10 @@ func NewSingleURLWorker(cfg SingleURLWorkerConfig) (*SingleURLWorker, error) {
 	if bitableURL == "" {
 		return nil, errors.New("single url worker: bitable url is empty")
 	}
+	appFilter := strings.TrimSpace(cfg.AppFilter)
+	if appFilter == "" {
+		return nil, errors.New("single url worker: app filter is empty")
+	}
 	limit := cfg.Limit
 	poll := cfg.PollInterval
 	if poll <= 0 {
@@ -237,7 +241,7 @@ func NewSingleURLWorker(cfg SingleURLWorkerConfig) (*SingleURLWorker, error) {
 		clock:        clock,
 		crawler:      crawler,
 		concurrency:  concurrency,
-		appFilter:    strings.TrimSpace(cfg.AppFilter),
+		appFilter:    appFilter,
 		nodeIndex:    nodeIndex,
 		nodeTotal:    nodeTotal,
 		newTaskStatuses: []string{
@@ -1028,8 +1032,9 @@ func (w *SingleURLWorker) fetchSingleURLTasksWithDatePresets(ctx context.Context
 				}
 			}
 			subset, _, err := taskagent.FetchFeishuTasks(
-				ctx, w.client, w.bitableURL, fields, w.appFilter,
+				ctx, w.client, w.bitableURL, fields,
 				taskagent.TaskFetchFilter{
+					App:    w.appFilter,
 					Scene:  taskagent.SceneSingleURLCapture,
 					Status: status,
 					Date:   preset,
@@ -1122,8 +1127,9 @@ func (w *SingleURLWorker) fetchSingleURLActiveTasksRotating(ctx context.Context,
 				break
 			}
 			subset, pageInfo, err := taskagent.FetchFeishuTasks(
-				ctx, w.client, w.bitableURL, fields, w.appFilter,
+				ctx, w.client, w.bitableURL, fields,
 				taskagent.TaskFetchFilter{
+					App:    w.appFilter,
 					Scene:  taskagent.SceneSingleURLCapture,
 					Status: status,
 					Date:   taskagent.TaskDateAny,

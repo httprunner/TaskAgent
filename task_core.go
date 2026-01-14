@@ -33,6 +33,7 @@ type TaskManager interface {
 }
 
 type TaskFetchFilter struct {
+	App    string
 	Scene  string
 	Status string
 	Date   string
