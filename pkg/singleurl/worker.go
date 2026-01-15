@@ -1034,13 +1034,13 @@ func (w *SingleURLWorker) fetchSingleURLTasksWithDatePresets(ctx context.Context
 			subset, _, err := taskagent.FetchFeishuTasks(
 				ctx, w.client, w.bitableURL, fields,
 				taskagent.FilterOptions{
-					Filter: taskagent.TaskFetchFilter{
+					TaskFetchFilter: taskagent.TaskFetchFilter{
 						App:    w.appFilter,
 						Scene:  taskagent.SceneSingleURLCapture,
 						Status: status,
 						Date:   preset,
 					},
-					Query: taskagent.FeishuTaskQueryOptions{IgnoreView: true, Limit: remaining},
+					FeishuTaskQueryOptions: taskagent.FeishuTaskQueryOptions{IgnoreView: true, Limit: remaining},
 				})
 			if err != nil {
 				log.Warn().Err(err).
@@ -1130,13 +1130,13 @@ func (w *SingleURLWorker) fetchSingleURLActiveTasksRotating(ctx context.Context,
 			subset, pageInfo, err := taskagent.FetchFeishuTasks(
 				ctx, w.client, w.bitableURL, fields,
 				taskagent.FilterOptions{
-					Filter: taskagent.TaskFetchFilter{
+					TaskFetchFilter: taskagent.TaskFetchFilter{
 						App:    w.appFilter,
 						Scene:  taskagent.SceneSingleURLCapture,
 						Status: status,
 						Date:   taskagent.TaskDateAny,
 					},
-					Query: taskagent.FeishuTaskQueryOptions{IgnoreView: true, PageToken: pageToken, MaxPages: 1, Limit: pageLimit},
+					FeishuTaskQueryOptions: taskagent.FeishuTaskQueryOptions{IgnoreView: true, PageToken: pageToken, MaxPages: 1, Limit: pageLimit},
 				},
 			)
 			if err != nil {

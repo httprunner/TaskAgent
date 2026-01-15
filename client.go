@@ -119,8 +119,8 @@ func (c *FeishuTaskClient) FetchAvailableTasks(ctx context.Context, limit int, f
 			return nil, errors.New("task fetch filter app mismatch")
 		}
 		batch, _, err := FetchFeishuTasks(ctx, c.client, c.bitableURL, fields, FilterOptions{
-			Filter: filter,
-			Query:  FeishuTaskQueryOptions{Limit: remaining},
+			TaskFetchFilter:        filter,
+			FeishuTaskQueryOptions: FeishuTaskQueryOptions{IgnoreView: true, Limit: remaining},
 		})
 		if err != nil {
 			log.Warn().Err(err).Str("scene", strings.TrimSpace(filter.Scene)).Msg("fetch feishusdk tasks failed for scene; skipping")
@@ -611,8 +611,8 @@ type FeishuFetchPageInfo struct {
 }
 
 type FilterOptions struct {
-	Filter TaskFetchFilter
-	Query  FeishuTaskQueryOptions
+	TaskFetchFilter
+	FeishuTaskQueryOptions
 }
 
 type bitableMediaUploader interface {
@@ -660,8 +660,8 @@ func FetchFeishuTasks(
 	if strings.TrimSpace(bitableURL) == "" {
 		return nil, FeishuFetchPageInfo{}, errors.New("feishusdk: bitable url is empty")
 	}
-	filter := opts.Filter
-	queryOpts := opts.Query
+	filter := opts.TaskFetchFilter
+	queryOpts := opts.FeishuTaskQueryOptions
 	app := strings.TrimSpace(filter.App)
 	if app == "" {
 		return nil, FeishuFetchPageInfo{}, errors.New("feishusdk: fetch filter missing app")
@@ -678,7 +678,7 @@ func FetchFeishuTasks(
 	if datePreset == "" {
 		datePreset = TaskDateToday
 	}
-	fetchLimit := opts.Query.Limit
+	fetchLimit := opts.Limit
 	if fetchLimit <= 0 {
 		fetchLimit = maxFeishuTasksPerApp
 	}
@@ -709,18 +709,18 @@ func FetchFeishuTasks(
 		return nil, FeishuFetchPageInfo{}, errors.Wrap(err, "fetch task table with options failed")
 	}
 	tasks, pageInfo := decodeFeishuTasksFromTable(table, client, fetchLimit)
-	if opts.Query.Limit > 0 && len(tasks) > opts.Query.Limit {
+	if opts.Limit > 0 && len(tasks) > opts.Limit {
 		log.Info().
-			Int("batch_limit", opts.Query.Limit).
+			Int("batch_limit", opts.Limit).
 			Int("aggregated", len(tasks)).
 			Msg("feishusdk tasks aggregated over limit; trimming to cap")
-		tasks = tasks[:opts.Query.Limit]
+		tasks = tasks[:opts.Limit]
 	}
 	if len(tasks) > 0 {
 		log.Info().
 			Str("app", app).
 			Str("status", status).
-			Int("batch_limit", opts.Query.Limit).
+			Int("batch_limit", opts.Limit).
 			Int("fetch_limit", fetchLimit).
 			Bool("ignore_view", queryOpts.IgnoreView).
 			Str("next_page_token", strings.TrimSpace(pageInfo.NextPageToken)).

@@ -35,8 +35,8 @@ func TestFetchFeishuTasksFiltersInvalidTasks(t *testing.T) {
 	tasks, _, err := FetchFeishuTasks(
 		ctx, client, "https://example.com/bitable/abc", feishusdk.DefaultTaskFields,
 		FilterOptions{
-			Filter: TaskFetchFilter{App: "com.app", Scene: SceneGeneralSearch, Status: StatusPending, Date: TaskDateToday},
-			Query:  FeishuTaskQueryOptions{Limit: 5},
+			TaskFetchFilter:        TaskFetchFilter{App: "com.app", Scene: SceneGeneralSearch, Status: StatusPending, Date: TaskDateToday},
+			FeishuTaskQueryOptions: FeishuTaskQueryOptions{Limit: 5},
 		},
 	)
 	if err != nil {
@@ -71,7 +71,7 @@ func TestFetchFeishuTasksAllowsBookOrURLOnlyRows(t *testing.T) {
 	tasks, _, err := FetchFeishuTasks(
 		ctx, client, "https://example.com/bitable/rows", feishusdk.DefaultTaskFields,
 		FilterOptions{
-			Filter: TaskFetchFilter{App: "com.app", Scene: SceneGeneralSearch, Status: StatusPending, Date: TaskDateToday},
+			TaskFetchFilter: TaskFetchFilter{App: "com.app", Scene: SceneGeneralSearch, Status: StatusPending, Date: TaskDateToday},
 		},
 	)
 	if err != nil {
@@ -146,8 +146,8 @@ func TestFetchTodayPendingFeishuTasksSceneStatusPriorityStopsAfterLimit(t *testi
 		subset, _, err := FetchFeishuTasks(
 			ctx, client, "https://example.com/bitable/foo", feishusdk.DefaultTaskFields,
 			FilterOptions{
-				Filter: filter,
-				Query:  FeishuTaskQueryOptions{Limit: remaining},
+				TaskFetchFilter:        filter,
+				FeishuTaskQueryOptions: FeishuTaskQueryOptions{Limit: remaining},
 			},
 		)
 		if err != nil {
