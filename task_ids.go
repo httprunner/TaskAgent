@@ -48,7 +48,7 @@ func (c *FeishuTaskClient) FetchTasksByIDs(ctx context.Context, taskIDs []int64,
 	return result, nil
 }
 
-func fetchFeishuTasksByIDsWithDatePreset(ctx context.Context, client TargetTableClient, bitableURL, app string, taskIDs []int64, limit int, datePreset string) ([]*FeishuTask, error) {
+func fetchFeishuTasksByIDsWithDatePreset(ctx context.Context, client TaskTableClient, bitableURL, app string, taskIDs []int64, limit int, datePreset string) ([]*FeishuTask, error) {
 	if client == nil {
 		return nil, errors.New("feishusdk: client is nil")
 	}

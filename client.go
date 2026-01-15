@@ -595,11 +595,11 @@ func toStorageTaskStatus(task *FeishuTask) *storage.TaskStatus {
 }
 
 type feishuTaskSource struct {
-	client TargetTableClient
+	client TaskTableClient
 	table  *feishusdk.TaskTable
 }
 
-type TargetTableClient interface {
+type TaskTableClient interface {
 	FetchTaskTableWithOptions(ctx context.Context, rawURL string, override *feishusdk.TaskFields, opts *feishusdk.QueryOptions) (*feishusdk.TaskTable, error)
 	UpdateTaskStatus(ctx context.Context, table *feishusdk.TaskTable, taskID int64, newStatus string) error
 	UpdateTaskFields(ctx context.Context, table *feishusdk.TaskTable, taskID int64, fields map[string]any) error
@@ -646,7 +646,7 @@ const (
 
 func FetchFeishuTasks(
 	ctx context.Context,
-	client TargetTableClient,
+	client TaskTableClient,
 	bitableURL string,
 	fields feishusdk.TaskFields,
 	filter TaskFetchFilter,
@@ -756,7 +756,7 @@ func buildQueryOptions(filter *feishusdk.FilterInfo) *feishusdk.QueryOptions {
 	return opts
 }
 
-func decodeFeishuTasksFromTable(table *feishusdk.TaskTable, client TargetTableClient, limit int) ([]*FeishuTask, FeishuFetchPageInfo) {
+func decodeFeishuTasksFromTable(table *feishusdk.TaskTable, client TaskTableClient, limit int) ([]*FeishuTask, FeishuFetchPageInfo) {
 	if table == nil || len(table.Rows) == 0 {
 		if table == nil {
 			return nil, FeishuFetchPageInfo{}
@@ -1499,7 +1499,7 @@ func AppendUniqueFeishuTasks(dst []*FeishuTask, src []*FeishuTask, limit int, se
 var ErrMissingTaskSource = errors.New("feishusdk: task missing source context")
 
 // TaskSourceContext exposes the raw table + client backing a task.
-func TaskSourceContext(task *FeishuTask) (TargetTableClient, *feishusdk.TaskTable, error) {
+func TaskSourceContext(task *FeishuTask) (TaskTableClient, *feishusdk.TaskTable, error) {
 	if task == nil || task.source == nil || task.source.client == nil || task.source.table == nil {
 		return nil, nil, ErrMissingTaskSource
 	}

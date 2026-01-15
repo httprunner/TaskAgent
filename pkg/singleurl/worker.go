@@ -159,7 +159,7 @@ func (m *singleURLMetadata) markFailure(reason string, ts time.Time) {
 // SingleURLWorkerConfig captures the dependencies required to process
 // "单个链接采集" (single URL) tasks independently from device runners.
 type SingleURLWorkerConfig struct {
-	Client        taskagent.TargetTableClient
+	Client        taskagent.TaskTableClient
 	BitableURL    string
 	Limit         int
 	PollInterval  time.Duration
@@ -179,7 +179,7 @@ type SingleURLWorkerConfig struct {
 // SingleURLWorker pulls single-URL capture tasks and dispatches them via
 // API stubs without using physical devices.
 type SingleURLWorker struct {
-	client       taskagent.TargetTableClient
+	client       taskagent.TaskTableClient
 	bitableURL   string
 	limit        int
 	pollInterval time.Duration
@@ -1322,7 +1322,7 @@ func (w *SingleURLWorker) updateTasksExtra(ctx context.Context, updates []single
 	}
 
 	type groupedUpdates struct {
-		client taskagent.TargetTableClient
+		client taskagent.TaskTableClient
 		table  *feishusdk.TaskTable
 		items  []struct {
 			taskID  int64
@@ -1474,7 +1474,7 @@ func (w *SingleURLWorker) markSingleURLTasksQueued(ctx context.Context, works []
 	}
 
 	type groupedUpdates struct {
-		client taskagent.TargetTableClient
+		client taskagent.TaskTableClient
 		table  *feishusdk.TaskTable
 		items  []feishusdk.TaskFieldUpdate
 	}
