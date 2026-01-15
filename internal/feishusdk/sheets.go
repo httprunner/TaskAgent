@@ -34,6 +34,17 @@ type SheetData struct {
 	BaseName         string
 }
 
+// SheetMeta contains spreadsheet metadata and header row.
+type SheetMeta struct {
+	Ref         SpreadsheetRef
+	Header      []string
+	SheetTitle  string
+	SheetID     string
+	ColumnCount int
+	RowCount    int
+	RangeRef    string
+}
+
 // SheetCellUpdate represents a single-cell update in a spreadsheet.
 // Row and Col are 1-based indices.
 type SheetCellUpdate struct {
@@ -147,6 +158,66 @@ func (c *Client) FetchSheet(ctx context.Context, rawURL string) (*SheetData, err
 		SpreadsheetToken: ref.SpreadsheetToken,
 		BaseName:         base,
 	}, nil
+}
+
+// FetchSheetMeta returns sheet metadata and header row for large-sheet processing.
+func (c *Client) FetchSheetMeta(ctx context.Context, rawURL string) (*SheetMeta, error) {
+	ref, err := ParseSpreadsheetURL(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	sheet, err := c.selectSheet(ctx, &ref)
+	if err != nil {
+		return nil, err
+	}
+	colCount := 26
+	rowCount := 0
+	if gp := sheet.GridProperties; gp != nil {
+		if gp.ColumnCount != nil && *gp.ColumnCount > 0 {
+			colCount = *gp.ColumnCount
+		}
+		if gp.RowCount != nil && *gp.RowCount > 0 {
+			rowCount = *gp.RowCount
+		}
+	}
+	rangeRef := sheetRangeReference(sheet)
+	headerValues, err := c.fetchSheetValuesByRange(ctx, ref, fmt.Sprintf("%s!A1:%s1", rangeRef, columnLabel(colCount)))
+	if err != nil {
+		return nil, err
+	}
+	header := []string{}
+	if len(headerValues) > 0 {
+		header = make([]string, len(headerValues[0]))
+		copy(header, headerValues[0])
+		for i := range header {
+			header[i] = stripBOM(strings.TrimSpace(header[i]))
+		}
+	}
+	return &SheetMeta{
+		Ref:         ref,
+		Header:      header,
+		SheetTitle:  sheetTitle(sheet),
+		SheetID:     sheetID(sheet),
+		ColumnCount: colCount,
+		RowCount:    rowCount,
+		RangeRef:    rangeRef,
+	}, nil
+}
+
+// FetchSheetRowsByRange returns rows in [startRow, endRow].
+func (c *Client) FetchSheetRowsByRange(ctx context.Context, meta *SheetMeta, startRow, endRow int) ([][]string, error) {
+	if meta == nil {
+		return nil, errors.New("feishu: sheet meta is nil")
+	}
+	if startRow <= 0 || endRow <= 0 || endRow < startRow {
+		return nil, fmt.Errorf("feishu: invalid sheet row range %d-%d", startRow, endRow)
+	}
+	rangeRef := meta.RangeRef
+	if strings.TrimSpace(rangeRef) == "" {
+		rangeRef = sheetRangeReferenceFromIDTitle(meta.SheetID, meta.SheetTitle)
+	}
+	rangeStr := fmt.Sprintf("%s!A%d:%s%d", rangeRef, startRow, columnLabel(meta.ColumnCount), endRow)
+	return c.fetchSheetValuesByRange(ctx, meta.Ref, rangeStr)
 }
 
 // WriteSheet creates a new sheet and writes rows into it.
@@ -354,6 +425,79 @@ func (c *Client) fetchSheetValues(ctx context.Context, ref SpreadsheetRef, sheet
 		}
 	}
 
+	return values, nil
+}
+
+func (c *Client) fetchSheetValuesByRange(ctx context.Context, ref SpreadsheetRef, rangeStr string) ([][]string, error) {
+	var raw []byte
+	if c.useHTTP() {
+		path := fmt.Sprintf("/open-apis/sheets/v2/spreadsheets/%s/values/%s", ref.SpreadsheetToken, url.PathEscape(rangeStr))
+		_, body, err := c.doJSONRequest(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return nil, err
+		}
+		raw = body
+	} else {
+		token, err := c.getTenantAccessToken(ctx)
+		if err != nil {
+			return nil, err
+		}
+		req := &larkcore.ApiReq{
+			HttpMethod: http.MethodGet,
+			ApiPath:    "/open-apis/sheets/v2/spreadsheets/:spreadsheet_token/values/:range",
+			PathParams: larkcore.PathParams{
+				"spreadsheet_token": ref.SpreadsheetToken,
+				"range":             rangeStr,
+			},
+			QueryParams:               larkcore.QueryParams{},
+			SupportedAccessTokenTypes: []larkcore.AccessTokenType{larkcore.AccessTokenTypeTenant, larkcore.AccessTokenTypeUser},
+		}
+		resp, err := c.doSDKOpenAPIRequest(ctx, req, c.tenantRequestOptions(token)...)
+		if err != nil {
+			return nil, err
+		}
+		if resp == nil {
+			return nil, errors.New("feishu: empty response when getting sheet values")
+		}
+		if resp.StatusCode >= 400 {
+			return nil, fmt.Errorf("feishu: http %d response: %s", resp.StatusCode, strings.TrimSpace(string(resp.RawBody)))
+		}
+		raw = resp.RawBody
+	}
+
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data struct {
+			ValueRange struct {
+				Range  string  `json:"range"`
+				Values [][]any `json:"values"`
+			} `json:"valueRange"`
+			ValueRanges []struct {
+				Range  string  `json:"range"`
+				Values [][]any `json:"values"`
+			} `json:"valueRanges"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, fmt.Errorf("feishu: decode sheet values: %w", err)
+	}
+	if resp.Code != 0 {
+		return nil, fmt.Errorf("feishu: get sheet values failed code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	rawValues := resp.Data.ValueRange.Values
+	if len(rawValues) == 0 && len(resp.Data.ValueRanges) > 0 {
+		rawValues = resp.Data.ValueRanges[0].Values
+	}
+	if len(rawValues) == 0 {
+		return [][]string{}, nil
+	}
+
+	values := normalizeSheetValues(rawValues)
+	if len(values) == 0 {
+		return [][]string{}, nil
+	}
 	return values, nil
 }
 

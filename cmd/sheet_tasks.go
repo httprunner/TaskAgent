@@ -26,8 +26,10 @@ const (
 	sheetAppKuaishou    = "com.smile.gifmaker"
 	sheetStatusPending  = "pending"
 
-	kuaishouLongLinkToken  = "www.kuaishou.com/short-video"
+	kuaishouLongLinkToken  = "kuaishou.com/short-video"
 	kuaishouShortLinkToken = "v.kuaishou.com"
+
+	sheetRowPageSize = 500
 )
 
 type sheetTaskRow struct {
@@ -40,6 +42,15 @@ type sheetTaskRow struct {
 	GroupID  string
 	DateRaw  string
 	Source   string
+}
+
+type sheetColumnIndex struct {
+	progress int
+	taskID   int
+	bookID   int
+	userID   int
+	url      int
+	platform int
 }
 
 func newSheetTasksCmd() *cobra.Command {
@@ -87,89 +98,86 @@ func newSheetTasksCmd() *cobra.Command {
 					if limit > 0 && len(pending) >= limit {
 						break
 					}
-					sheet, err := client.FetchSheet(ctx, sourceURL)
+					meta, err := client.FetchSheetMeta(ctx, sourceURL)
 					if err != nil {
 						return err
 					}
 
-					headerIndex := make(map[string]int, len(sheet.Header))
-					for i, name := range sheet.Header {
-						headerIndex[strings.TrimSpace(name)] = i
+					cols, err := sheetColumnsFromHeader(meta.Header)
+					if err != nil {
+						return err
 					}
 
-					progressIdx, ok := headerIndex[sheetProgressColumn]
-					if !ok {
-						return fmt.Errorf("source sheet missing column %q", sheetProgressColumn)
-					}
-					taskIDIdx, ok := headerIndex[sheetTaskIDColumn]
-					if !ok {
-						return fmt.Errorf("source sheet missing column %q", sheetTaskIDColumn)
-					}
-					bookIDIdx, ok := headerIndex[sheetBookIDColumn]
-					if !ok {
-						return fmt.Errorf("source sheet missing column %q", sheetBookIDColumn)
-					}
-					userIDIdx, ok := headerIndex[sheetUserIDColumn]
-					if !ok {
-						return fmt.Errorf("source sheet missing column %q", sheetUserIDColumn)
-					}
-					urlIdx, ok := headerIndex[sheetURLColumn]
-					if !ok {
-						return fmt.Errorf("source sheet missing column %q", sheetURLColumn)
-					}
-					platformIdx, ok := headerIndex[sheetPlatformColumn]
-					if !ok {
-						return fmt.Errorf("source sheet missing column %q", sheetPlatformColumn)
-					}
-
-					progressCols[sourceURL] = progressIdx + 1
-					for i, row := range sheet.Rows {
+					progressCols[sourceURL] = cols.progress + 1
+					startRow := 2
+					maxRows := meta.RowCount
+					for {
 						if limit > 0 && len(pending) >= limit {
 							break
 						}
-						rowNum := i + 2
-						progress := cellValue(row, progressIdx)
-						if progress != sheetProgressPending {
-							continue
+						if maxRows > 0 && startRow > maxRows {
+							break
 						}
+						endRow := startRow + sheetRowPageSize - 1
+						if maxRows > 0 && endRow > maxRows {
+							endRow = maxRows
+						}
+						rows, err := client.FetchSheetRowsByRange(ctx, meta, startRow, endRow)
+						if err != nil {
+							return err
+						}
+						log.Debug().Int("fetched", len(rows)).
+							Int("row_start", startRow).
+							Int("row_end", endRow).Str("source", sourceURL).
+							Msg("fetched sheet rows")
+						if len(rows) == 0 {
+							break
+						}
+						for i, row := range rows {
+							if limit > 0 && len(pending) >= limit {
+								break
+							}
+							rowNum := startRow + i
+							progress := cellValue(row, cols.progress)
+							if !isPendingProgress(progress) {
+								continue
+							}
 
-						taskID := cellValue(row, taskIDIdx)
-						if taskID == "" {
-							log.Error().Int("row", rowNum).Str("column", sheetTaskIDColumn).Msg("source sheet missing required value")
-							continue
-						}
-						bookID := cellValue(row, bookIDIdx)
-						if bookID == "" {
-							log.Error().Int("row", rowNum).Str("column", sheetBookIDColumn).Msg("source sheet missing required value")
-							continue
-						}
-						userID := cellValue(row, userIDIdx)
-						if userID == "" {
-							log.Error().Int("row", rowNum).Str("column", sheetUserIDColumn).Msg("source sheet missing required value")
-							continue
-						}
-						url := cellValue(row, urlIdx)
-						if url == "" {
-							log.Error().Int("row", rowNum).Str("column", sheetURLColumn).Msg("source sheet missing required value")
-							continue
-						}
-						platform := cellValue(row, platformIdx)
-						if platform == "" {
-							log.Error().Int("row", rowNum).Str("column", sheetPlatformColumn).Msg("source sheet missing required value")
-							continue
-						}
+							taskID, ok := requiredCell(row, cols.taskID, sheetTaskIDColumn, rowNum)
+							if !ok {
+								continue
+							}
+							bookID, ok := requiredCell(row, cols.bookID, sheetBookIDColumn, rowNum)
+							if !ok {
+								continue
+							}
+							userID, ok := requiredCell(row, cols.userID, sheetUserIDColumn, rowNum)
+							if !ok {
+								continue
+							}
+							url, ok := requiredCell(row, cols.url, sheetURLColumn, rowNum)
+							if !ok {
+								continue
+							}
+							platform := cellValue(row, cols.platform)
+							if platform == "" {
+								log.Warn().Int("row", rowNum).Str("column", sheetPlatformColumn).Msg("source sheet missing required value")
+								platform = "快手"
+							}
 
-						pending = append(pending, sheetTaskRow{
-							Row:      rowNum,
-							TaskID:   taskID,
-							BookID:   bookID,
-							UserID:   userID,
-							URL:      url,
-							Platform: platform,
-							GroupID:  fmt.Sprintf("%s_%s_%s", platform, bookID, userID),
-							DateRaw:  dateRaw,
-							Source:   sourceURL,
-						})
+							pending = append(pending, sheetTaskRow{
+								Row:      rowNum,
+								TaskID:   taskID,
+								BookID:   bookID,
+								UserID:   userID,
+								URL:      url,
+								Platform: platform,
+								GroupID:  fmt.Sprintf("%s_%s_%s", platform, bookID, userID),
+								DateRaw:  dateRaw,
+								Source:   sourceURL,
+							})
+						}
+						startRow = endRow + 1
 					}
 				}
 
@@ -265,6 +273,58 @@ func newSheetTasksCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&flagPoll, "poll-interval", 0, "Polling interval for continuous task creation (0 means run once)")
 
 	return cmd
+}
+
+func sheetColumnsFromHeader(header []string) (sheetColumnIndex, error) {
+	idx := make(map[string]int, len(header))
+	for i, name := range header {
+		idx[strings.TrimSpace(name)] = i
+	}
+	return sheetColumnIndex{
+		progress: mustHeaderIndex(idx, sheetProgressColumn),
+		taskID:   mustHeaderIndex(idx, sheetTaskIDColumn),
+		bookID:   mustHeaderIndex(idx, sheetBookIDColumn),
+		userID:   mustHeaderIndex(idx, sheetUserIDColumn),
+		url:      mustHeaderIndex(idx, sheetURLColumn),
+		platform: mustHeaderIndex(idx, sheetPlatformColumn),
+	}, headerIndexError(idx)
+}
+
+func mustHeaderIndex(index map[string]int, name string) int {
+	if idx, ok := index[name]; ok {
+		return idx
+	}
+	return -1
+}
+
+func headerIndexError(index map[string]int) error {
+	required := []string{
+		sheetProgressColumn,
+		sheetTaskIDColumn,
+		sheetBookIDColumn,
+		sheetUserIDColumn,
+		sheetURLColumn,
+		sheetPlatformColumn,
+	}
+	for _, name := range required {
+		if _, ok := index[name]; !ok {
+			return fmt.Errorf("source sheet missing column %q", name)
+		}
+	}
+	return nil
+}
+
+func requiredCell(row []string, idx int, column string, rowNum int) (string, bool) {
+	val := cellValue(row, idx)
+	if val == "" {
+		log.Error().Int("row", rowNum).Str("column", column).Msg("source sheet missing required value")
+		return "", false
+	}
+	return val, true
+}
+
+func isPendingProgress(value string) bool {
+	return value == sheetProgressPending
 }
 
 func parseSourceURLs(raw string) []string {
