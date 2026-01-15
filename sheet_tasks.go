@@ -98,8 +98,25 @@ func RunSheetTasks(ctx context.Context, opts SheetTaskOptions) error {
 		pending := make([]sheetTaskRow, 0)
 		dateRaw := fmt.Sprintf("%d", time.Now().UnixMilli())
 		progressCols := make(map[string]int)
+		currentGroupID := ""
+		currentGroup := make([]sheetTaskRow, 0)
+		stopAll := false
+		totalSelected := 0
+		flushGroup := func() bool {
+			if len(currentGroup) == 0 {
+				return false
+			}
+			pending = append(pending, currentGroup...)
+			totalSelected += len(currentGroup)
+			currentGroup = currentGroup[:0]
+			currentGroupID = ""
+			if limit > 0 && totalSelected >= limit {
+				return true
+			}
+			return false
+		}
 		for _, sourceURL := range opts.SourceURLs {
-			if limit > 0 && len(pending) >= limit {
+			if stopAll {
 				break
 			}
 			meta, err := client.FetchSheetMeta(ctx, sourceURL)
@@ -116,7 +133,7 @@ func RunSheetTasks(ctx context.Context, opts SheetTaskOptions) error {
 			startRow := 2
 			maxRows := meta.RowCount
 			for {
-				if limit > 0 && len(pending) >= limit {
+				if stopAll {
 					break
 				}
 				if maxRows > 0 && startRow > maxRows {
@@ -138,7 +155,7 @@ func RunSheetTasks(ctx context.Context, opts SheetTaskOptions) error {
 					break
 				}
 				for i, row := range rows {
-					if limit > 0 && len(pending) >= limit {
+					if stopAll {
 						break
 					}
 					rowNum := startRow + i
@@ -169,19 +186,34 @@ func RunSheetTasks(ctx context.Context, opts SheetTaskOptions) error {
 						platform = "快手"
 					}
 
-					pending = append(pending, sheetTaskRow{
+					groupID := fmt.Sprintf("%s_%s_%s", platform, bookID, userID)
+					if currentGroupID != "" && groupID != currentGroupID {
+						if flushGroup() {
+							stopAll = true
+							break
+						}
+					}
+					if currentGroupID == "" {
+						currentGroupID = groupID
+					}
+					currentGroup = append(currentGroup, sheetTaskRow{
 						Row:      rowNum,
 						TaskID:   taskID,
 						BookID:   bookID,
 						UserID:   userID,
 						URL:      url,
 						Platform: platform,
-						GroupID:  fmt.Sprintf("%s_%s_%s", platform, bookID, userID),
+						GroupID:  groupID,
 						DateRaw:  dateRaw,
 						Source:   sourceURL,
 					})
 				}
 				startRow = endRow + 1
+			}
+		}
+		if !stopAll {
+			if flushGroup() {
+				stopAll = true
 			}
 		}
 
@@ -199,6 +231,7 @@ func RunSheetTasks(ctx context.Context, opts SheetTaskOptions) error {
 
 			records := make([]TaskRecordInput, 0, len(batch))
 			updatesBySource := make(map[string][]SheetCellUpdate)
+			groupCounts := make(map[string]int)
 			for _, item := range batch {
 				record := TaskRecordInput{
 					BizTaskID:   item.TaskID,
@@ -223,6 +256,7 @@ func RunSheetTasks(ctx context.Context, opts SheetTaskOptions) error {
 					continue
 				}
 				records = append(records, record)
+				groupCounts[item.GroupID]++
 				updatesBySource[item.Source] = append(updatesBySource[item.Source], SheetCellUpdate{
 					Row:   item.Row,
 					Col:   progressCols[item.Source],
@@ -234,12 +268,15 @@ func RunSheetTasks(ctx context.Context, opts SheetTaskOptions) error {
 				log.Warn().Msg("no valid records to create in this batch")
 				continue
 			}
+			for groupID, count := range groupCounts {
+				log.Info().Str("group_id", groupID).Int("count", count).Msg("creating tasks for group")
+			}
 
 			ids, err := client.CreateTaskRecords(ctx, opts.TaskURL, records, nil)
 			if err != nil {
 				return err
 			}
-			log.Info().Int("created", len(ids)).Msg("task records created")
+			log.Info().Int("created", len(ids)).Msg("task records created in total")
 
 			for sourceURL, updates := range updatesBySource {
 				if err := client.UpdateSheetCells(ctx, sourceURL, updates); err != nil {
