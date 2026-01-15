@@ -18,6 +18,12 @@ type FeishuClient = feishusdk.Client
 // default task status table.
 type TaskRecordInput = feishusdk.TaskRecordInput
 
+// SheetMeta describes spreadsheet metadata and header rows for sheet-based workflows.
+type SheetMeta = feishusdk.SheetMeta
+
+// SheetCellUpdate represents a single-cell update in a spreadsheet.
+type SheetCellUpdate = feishusdk.SheetCellUpdate
+
 // NewFeishuClientFromEnv constructs a FeishuClient using environment
 // variables (FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_TENANT_KEY /
 // FEISHU_BASE_URL). It is a thin wrapper around the internal Feishu SDK.
