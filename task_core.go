@@ -33,6 +33,7 @@ type TaskManager interface {
 }
 
 type TaskFetchFilter struct {
+	FeishuTaskQueryOptions
 	App    string
 	Scene  string
 	Status string

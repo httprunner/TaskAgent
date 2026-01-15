@@ -118,10 +118,12 @@ func (c *FeishuTaskClient) FetchAvailableTasks(ctx context.Context, limit int, f
 		if strings.TrimSpace(c.app) != filterApp {
 			return nil, errors.New("task fetch filter app mismatch")
 		}
-		batch, _, err := FetchFeishuTasks(ctx, c.client, c.bitableURL, fields, FilterOptions{
-			TaskFetchFilter:        filter,
-			FeishuTaskQueryOptions: FeishuTaskQueryOptions{IgnoreView: true, Limit: remaining},
-		})
+		filterQuery := filter
+		filterQuery.FeishuTaskQueryOptions = FeishuTaskQueryOptions{
+			IgnoreView: true,
+			Limit:      remaining,
+		}
+		batch, _, err := FetchFeishuTasks(ctx, c.client, c.bitableURL, fields, filterQuery)
 		if err != nil {
 			log.Warn().Err(err).Str("scene", strings.TrimSpace(filter.Scene)).Msg("fetch feishusdk tasks failed for scene; skipping")
 			continue
@@ -610,11 +612,6 @@ type FeishuFetchPageInfo struct {
 	Pages         int
 }
 
-type FilterOptions struct {
-	TaskFetchFilter
-	FeishuTaskQueryOptions
-}
-
 type bitableMediaUploader interface {
 	UploadBitableMedia(ctx context.Context, appToken string, fileName string, content []byte, asImage bool) (string, error)
 }
@@ -652,7 +649,7 @@ func FetchFeishuTasks(
 	client TargetTableClient,
 	bitableURL string,
 	fields feishusdk.TaskFields,
-	opts FilterOptions,
+	filter TaskFetchFilter,
 ) ([]*FeishuTask, FeishuFetchPageInfo, error) {
 	if client == nil {
 		return nil, FeishuFetchPageInfo{}, errors.New("feishusdk: client is nil")
@@ -660,8 +657,7 @@ func FetchFeishuTasks(
 	if strings.TrimSpace(bitableURL) == "" {
 		return nil, FeishuFetchPageInfo{}, errors.New("feishusdk: bitable url is empty")
 	}
-	filter := opts.TaskFetchFilter
-	queryOpts := opts.FeishuTaskQueryOptions
+	queryOpts := filter.FeishuTaskQueryOptions
 	app := strings.TrimSpace(filter.App)
 	if app == "" {
 		return nil, FeishuFetchPageInfo{}, errors.New("feishusdk: fetch filter missing app")
@@ -678,7 +674,7 @@ func FetchFeishuTasks(
 	if datePreset == "" {
 		datePreset = TaskDateToday
 	}
-	fetchLimit := opts.Limit
+	fetchLimit := queryOpts.Limit
 	if fetchLimit <= 0 {
 		fetchLimit = maxFeishuTasksPerApp
 	}
@@ -709,18 +705,18 @@ func FetchFeishuTasks(
 		return nil, FeishuFetchPageInfo{}, errors.Wrap(err, "fetch task table with options failed")
 	}
 	tasks, pageInfo := decodeFeishuTasksFromTable(table, client, fetchLimit)
-	if opts.Limit > 0 && len(tasks) > opts.Limit {
+	if queryOpts.Limit > 0 && len(tasks) > queryOpts.Limit {
 		log.Info().
-			Int("batch_limit", opts.Limit).
+			Int("batch_limit", queryOpts.Limit).
 			Int("aggregated", len(tasks)).
 			Msg("feishusdk tasks aggregated over limit; trimming to cap")
-		tasks = tasks[:opts.Limit]
+		tasks = tasks[:queryOpts.Limit]
 	}
 	if len(tasks) > 0 {
 		log.Info().
 			Str("app", app).
 			Str("status", status).
-			Int("batch_limit", opts.Limit).
+			Int("batch_limit", queryOpts.Limit).
 			Int("fetch_limit", fetchLimit).
 			Bool("ignore_view", queryOpts.IgnoreView).
 			Str("next_page_token", strings.TrimSpace(pageInfo.NextPageToken)).
