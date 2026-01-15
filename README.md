@@ -75,6 +75,7 @@ Feishu Task Table ──> FeishuTaskClient (task)
     - `webhook-worker`: process webhook result rows using `webhook.NewWebhookResultWorker`.
     - `webhook-creator`: create webhook result rows for external tasks (video screen capture).
     - `singleurl`: single-URL capture helper built on TaskAgent.
+    - `create-tasks`: create task rows from Feishu spreadsheet inputs.
     - `drama-tasks`: generate 综合页搜索 tasks from a drama catalog table.
 
 - **`docs/`**
@@ -172,6 +173,7 @@ Feishu Task Table ──> FeishuTaskClient (task)
   - 支持定向调试：`--group-id "<GroupID>"`、`--date "2025-12-17"`（可组合）。任一参数非空时仅执行单次扫描，并只处理匹配 `GroupID` / 逻辑日期（Date 字段）的结果行。
 - **Webhook creator (video screen capture)**: one-shot `go run ./cmd webhook-creator --task-url "$TASK_BITABLE_URL" --webhook-bitable-url "$WEBHOOK_BITABLE_URL" --app kwai`, or polling with `--poll-interval 30s`
 - **Single URL worker**: `go run ./cmd singleurl --task-url "$TASK_BITABLE_URL" --crawler-base-url "$CRAWLER_SERVICE_BASE_URL"`
+- **Sheet task creator**: `go run ./cmd create-tasks --source-url "$SOURCE_SHEET_URL" --task-url "$TASK_BITABLE_URL" --limit 2000` (add `--poll-interval 2m` for continuous polling)
 - **Drama tasks generator**: `go run ./cmd drama-tasks --date 2025-12-01 --drama-url "$DRAMA_BITABLE_URL" --task-url "$TASK_BITABLE_URL"`
 
   The CLI is focused on infrastructure helpers (webhook retries、单链采集、剧单转任务)，与具体检测/搜索等业务逻辑解耦。更多细节见 [`docs/webhook-worker.md`](docs/webhook-worker.md) 和 [`docs/single-url-capture.md`](docs/single-url-capture.md)。

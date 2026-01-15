@@ -22,6 +22,7 @@ The tables below enumerate every environment variable TaskAgent reads via `os.Ge
 | Variable | Required | Default | Used by | Description |
 | --- | --- | --- | --- | --- |
 | `TASK_BITABLE_URL` | Yes for Feishu-backed schedulers | – | `taskagent.Config`, `cmd`, `examples/create_task_with_http`, `examples/create_task_with_sdk` | Source of pending tasks (个人页搜索 / 综合页搜索等). |
+| `SOURCE_SHEET_URL` | Required for sheet-to-task creation | – | `cmd` | Source Feishu spreadsheet URL(s) that feed task creation. Comma-separated list. |
 | `RESULT_BITABLE_URL` | Yes when uploading captures to Feishu | – | `internal/storage`, `cmd` | Result table receiving capture rows + webhook summaries. |
 | `DRAMA_BITABLE_URL` | Required when fetching drama metadata from Feishu | – | `pkg/webhook`, `cmd` | Drama catalog table for ratio/metadata lookups. |
 | `WEBHOOK_BITABLE_URL` | Optional | empty | `pkg/webhook` | Dedicated webhook result table for group-based flows (aggregates TaskIDs + delivery status). |

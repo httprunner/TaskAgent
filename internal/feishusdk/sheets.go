@@ -34,6 +34,16 @@ type SheetData struct {
 	BaseName         string
 }
 
+// SheetCellUpdate represents a single-cell update in a spreadsheet.
+// Row and Col are 1-based indices.
+type SheetCellUpdate struct {
+	Row   int
+	Col   int
+	Value string
+}
+
+const maxSheetValueRangesPerBatch = 500
+
 var (
 	hostAllowList = []string{"feishu.cn", "feishuapp.com", "larksuite.com", "larkoffice.com"}
 	invalidNameRe = regexp.MustCompile(`[^\p{L}\p{N}._\-]+`)
@@ -168,6 +178,39 @@ func (c *Client) WriteSheet(ctx context.Context, rawURL, desiredTitle string, ro
 	return sheetTitle, nil
 }
 
+// UpdateSheetCells batch updates specific cells in a spreadsheet using values_batch_update.
+func (c *Client) UpdateSheetCells(ctx context.Context, rawURL string, updates []SheetCellUpdate) error {
+	if c == nil {
+		return errors.New("feishu: client is nil")
+	}
+	if len(updates) == 0 {
+		return errors.New("feishu: no sheet updates provided")
+	}
+	ref, err := ParseSpreadsheetURL(rawURL)
+	if err != nil {
+		return err
+	}
+	sheet, err := c.selectSheet(ctx, &ref)
+	if err != nil {
+		return err
+	}
+	rangeRef := sheetRangeReferenceFromIDTitle(sheetID(sheet), sheetTitle(sheet))
+	valueRanges, err := buildSheetValueRanges(rangeRef, updates)
+	if err != nil {
+		return err
+	}
+	for start := 0; start < len(valueRanges); start += maxSheetValueRangesPerBatch {
+		end := start + maxSheetValueRangesPerBatch
+		if end > len(valueRanges) {
+			end = len(valueRanges)
+		}
+		if err := c.updateSheetValueRanges(ctx, ref, valueRanges[start:end]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (c *Client) selectSheet(ctx context.Context, ref *SpreadsheetRef) (*larksheets.Sheet, error) {
 	req := larksheets.NewQuerySpreadsheetSheetReqBuilder().
 		SpreadsheetToken(ref.SpreadsheetToken).
@@ -268,12 +311,12 @@ func (c *Client) fetchSheetValues(ctx context.Context, ref SpreadsheetRef, sheet
 		Msg  string `json:"msg"`
 		Data struct {
 			ValueRange struct {
-				Range  string     `json:"range"`
-				Values [][]string `json:"values"`
+				Range  string  `json:"range"`
+				Values [][]any `json:"values"`
 			} `json:"valueRange"`
 			ValueRanges []struct {
-				Range  string     `json:"range"`
-				Values [][]string `json:"values"`
+				Range  string  `json:"range"`
+				Values [][]any `json:"values"`
 			} `json:"valueRanges"`
 		} `json:"data"`
 	}
@@ -284,12 +327,17 @@ func (c *Client) fetchSheetValues(ctx context.Context, ref SpreadsheetRef, sheet
 		return nil, fmt.Errorf("feishu: get sheet values failed code=%d msg=%s", resp.Code, resp.Msg)
 	}
 
-	values := resp.Data.ValueRange.Values
-	if len(values) == 0 && len(resp.Data.ValueRanges) > 0 {
-		values = resp.Data.ValueRanges[0].Values
+	rawValues := resp.Data.ValueRange.Values
+	if len(rawValues) == 0 && len(resp.Data.ValueRanges) > 0 {
+		rawValues = resp.Data.ValueRanges[0].Values
 	}
+	if len(rawValues) == 0 {
+		return [][]string{}, nil
+	}
+
+	values := normalizeSheetValues(rawValues)
 	if len(values) == 0 {
-		return values, nil
+		return [][]string{}, nil
 	}
 
 	maxCols := len(values[0])
@@ -454,6 +502,131 @@ func (c *Client) writeSheetValues(ctx context.Context, ref SpreadsheetRef, sheet
 	}
 
 	return nil
+}
+
+type sheetValueRange struct {
+	Range  string     `json:"range"`
+	Values [][]string `json:"values"`
+}
+
+func buildSheetValueRanges(rangeRef string, updates []SheetCellUpdate) ([]sheetValueRange, error) {
+	if strings.TrimSpace(rangeRef) == "" {
+		return nil, errors.New("feishu: sheet range reference is empty")
+	}
+	if len(updates) == 0 {
+		return nil, errors.New("feishu: no sheet updates provided")
+	}
+	cols := make(map[int][]SheetCellUpdate)
+	for _, upd := range updates {
+		if upd.Row <= 0 || upd.Col <= 0 {
+			return nil, fmt.Errorf("feishu: invalid sheet update position row=%d col=%d", upd.Row, upd.Col)
+		}
+		cols[upd.Col] = append(cols[upd.Col], upd)
+	}
+
+	valueRanges := make([]sheetValueRange, 0, len(updates))
+	for col, items := range cols {
+		sort.Slice(items, func(i, j int) bool { return items[i].Row < items[j].Row })
+		column := columnLabel(col)
+		startRow := items[0].Row
+		prevRow := items[0].Row
+		values := [][]string{{items[0].Value}}
+		for i := 1; i < len(items); i++ {
+			row := items[i].Row
+			if row == prevRow+1 {
+				values = append(values, []string{items[i].Value})
+			} else {
+				valueRanges = append(valueRanges, sheetValueRange{
+					Range:  fmt.Sprintf("%s!%s%d:%s%d", rangeRef, column, startRow, column, prevRow),
+					Values: values,
+				})
+				startRow = row
+				values = [][]string{{items[i].Value}}
+			}
+			prevRow = row
+		}
+		valueRanges = append(valueRanges, sheetValueRange{
+			Range:  fmt.Sprintf("%s!%s%d:%s%d", rangeRef, column, startRow, column, prevRow),
+			Values: values,
+		})
+	}
+	return valueRanges, nil
+}
+
+func (c *Client) updateSheetValueRanges(ctx context.Context, ref SpreadsheetRef, ranges []sheetValueRange) error {
+	if len(ranges) == 0 {
+		return nil
+	}
+	payload := map[string]any{
+		"valueRanges":      ranges,
+		"valueInputOption": "RAW",
+	}
+
+	var raw []byte
+	if c.useHTTP() {
+		_, body, err := c.doJSONRequest(ctx, http.MethodPost, fmt.Sprintf("/open-apis/sheets/v2/spreadsheets/%s/values_batch_update", ref.SpreadsheetToken), payload)
+		if err != nil {
+			return err
+		}
+		raw = body
+	} else {
+		token, err := c.getTenantAccessToken(ctx)
+		if err != nil {
+			return err
+		}
+		req := &larkcore.ApiReq{
+			HttpMethod: http.MethodPost,
+			ApiPath:    "/open-apis/sheets/v2/spreadsheets/:spreadsheet_token/values_batch_update",
+			Body:       payload,
+			PathParams: larkcore.PathParams{
+				"spreadsheet_token": ref.SpreadsheetToken,
+			},
+			QueryParams:               larkcore.QueryParams{},
+			SupportedAccessTokenTypes: []larkcore.AccessTokenType{larkcore.AccessTokenTypeTenant, larkcore.AccessTokenTypeUser},
+		}
+		resp, err := c.doSDKOpenAPIRequest(ctx, req, c.tenantRequestOptions(token)...)
+		if err != nil {
+			return err
+		}
+		if resp == nil {
+			return errors.New("feishu: empty response when updating sheet values")
+		}
+		if resp.StatusCode >= 400 {
+			return fmt.Errorf("feishu: http %d response: %s", resp.StatusCode, strings.TrimSpace(string(resp.RawBody)))
+		}
+		raw = resp.RawBody
+	}
+
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return fmt.Errorf("feishu: decode values response: %w", err)
+	}
+	if resp.Code != 0 {
+		return fmt.Errorf("feishu: update values failed code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	return nil
+}
+
+func normalizeSheetValues(values [][]any) [][]string {
+	if len(values) == 0 {
+		return [][]string{}
+	}
+	out := make([][]string, 0, len(values))
+	for _, row := range values {
+		if len(row) == 0 {
+			out = append(out, []string{})
+			continue
+		}
+		cells := make([]string, len(row))
+		for i, cell := range row {
+			cells[i] = strings.TrimSpace(toString(cell))
+		}
+		out = append(out, cells)
+	}
+	return out
 }
 
 func stripBOM(s string) string {

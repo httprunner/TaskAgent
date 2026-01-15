@@ -15,6 +15,8 @@ const (
 	EnvTaskBitableURL = "TASK_BITABLE_URL"
 	// EnvResultBitableURL indicates where to push Feishu result rows.
 	EnvResultBitableURL = "RESULT_BITABLE_URL"
+	// EnvSourceSheetURL indicates where to pull raw task rows from Feishu Sheets.
+	EnvSourceSheetURL = "SOURCE_SHEET_URL"
 	// EnvWebhookBitableURL points to the dedicated webhook result table that
 	// aggregates group/task webhook delivery status.
 	EnvWebhookBitableURL = "WEBHOOK_BITABLE_URL"
