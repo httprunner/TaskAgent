@@ -683,7 +683,7 @@ func FetchFeishuTasks(
 	if fetchLimit <= 0 {
 		fetchLimit = maxFeishuTasksPerApp
 	}
-	filterInfo := buildFeishuFilterInfo(fields, app, []string{status}, scene, datePreset)
+	filterInfo := buildFeishuFilterInfo(fields, app, status, scene, datePreset)
 	if filterInfo != nil {
 		filterQuery := feishusdk.TaskQueryOptions{
 			ViewID:     strings.TrimSpace(queryOpts.ViewID),
@@ -827,64 +827,22 @@ func decodeFeishuTasksFromTable(table *feishusdk.TaskTable, client TargetTableCl
 	return tasks, pageInfo
 }
 
-func buildFeishuFilterInfo(fields feishusdk.TaskFields, app string, statuses []string, scene, datePreset string) *feishusdk.FilterInfo {
+func buildFeishuFilterInfo(fields feishusdk.TaskFields, app string, status string, scene, datePreset string) *feishusdk.FilterInfo {
 	baseSpecs := buildFeishuBaseConditionSpecs(fields, app, scene, datePreset)
-	statusChildren := buildFeishuStatusChildren(fields, statuses, baseSpecs)
-	if len(statusChildren) > 0 {
-		filter := feishusdk.NewFilterInfo("or")
-		filter.Children = append(filter.Children, statusChildren...)
-		return filter
-	}
 	baseConds := appendConditionsFromSpecs(nil, baseSpecs)
+	statusField := strings.TrimSpace(fields.Status)
+	trimmedStatus := strings.TrimSpace(status)
+	if statusField != "" && trimmedStatus != "" {
+		baseConds = appendConditionsFromSpecs(baseConds, []*feishuConditionSpec{
+			newFeishuConditionSpec(statusField, "is", trimmedStatus),
+		})
+	}
 	if len(baseConds) == 0 {
 		return nil
 	}
 	filter := feishusdk.NewFilterInfo("and")
 	filter.Conditions = append(filter.Conditions, baseConds...)
 	return filter
-}
-
-func buildFeishuStatusChildren(fields feishusdk.TaskFields, statuses []string, baseSpecs []*feishuConditionSpec) []*feishusdk.ChildrenFilter {
-	statusField := strings.TrimSpace(fields.Status)
-	if statusField == "" || len(statuses) == 0 {
-		return nil
-	}
-	children := make([]*feishusdk.ChildrenFilter, 0, len(statuses))
-	seen := make(map[string]struct{}, len(statuses))
-	for _, status := range statuses {
-		trimmed := strings.TrimSpace(status)
-		if trimmed == "" {
-			children = append(children, newStatusChild(baseSpecs, newFeishuConditionSpec(statusField, "isEmpty")))
-			children = append(children, newStatusChild(baseSpecs, newFeishuConditionSpec(statusField, "is", "")))
-			continue
-		}
-		if _, ok := seen[trimmed]; ok {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-		children = append(children, newStatusChild(baseSpecs, newFeishuConditionSpec(statusField, "is", trimmed)))
-	}
-	result := make([]*feishusdk.ChildrenFilter, 0, len(children))
-	for _, child := range children {
-		if child == nil || len(child.Conditions) == 0 {
-			continue
-		}
-		result = append(result, child)
-	}
-	return result
-}
-
-func newStatusChild(baseSpecs []*feishuConditionSpec, statusSpec *feishuConditionSpec) *feishusdk.ChildrenFilter {
-	if statusSpec == nil {
-		return nil
-	}
-	child := feishusdk.NewChildrenFilter("and")
-	child.Conditions = appendConditionsFromSpecs(child.Conditions, baseSpecs)
-	child.Conditions = appendConditionsFromSpecs(child.Conditions, []*feishuConditionSpec{statusSpec})
-	if len(child.Conditions) == 0 {
-		return nil
-	}
-	return child
 }
 
 type feishuConditionSpec struct {

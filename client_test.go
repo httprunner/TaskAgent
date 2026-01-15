@@ -325,76 +325,36 @@ func (c *appendScreenshotClient) BatchGetBitableRows(ctx context.Context, ref fe
 
 func TestBuildFeishuFilterInfoWithStatusesEmbedsBaseConditions(t *testing.T) {
 	fields := feishusdk.DefaultTaskFields
-	filter := buildFeishuFilterInfo(fields, "com.app", []string{feishusdk.StatusPending, feishusdk.StatusPending}, SceneSingleURLCapture, TaskDateToday)
+	filter := buildFeishuFilterInfo(fields, "com.app", feishusdk.StatusPending, SceneSingleURLCapture, TaskDateToday)
 	if filter == nil {
 		t.Fatalf("expected filter, got nil")
 	}
-	if len(filter.Conditions) != 0 {
-		t.Fatalf("expected no top-level conditions when statuses present, got %d", len(filter.Conditions))
+	if len(filter.Children) != 0 {
+		t.Fatalf("expected no children for single status filter, got %d", len(filter.Children))
 	}
-	if len(filter.Children) != 1 {
-		t.Fatalf("expected single child for deduped statuses, got %d", len(filter.Children))
+	if len(filter.Conditions) != 4 {
+		t.Fatalf("expected four top-level conditions, got %d", len(filter.Conditions))
 	}
-	child := filter.Children[0]
-	assertConditionValue(t, child.Conditions, fields.App, "com.app")
-	assertConditionValue(t, child.Conditions, fields.Scene, SceneSingleURLCapture)
-	assertConditionValue(t, child.Conditions, fields.Date, TaskDateToday)
-	assertConditionValue(t, child.Conditions, fields.Status, feishusdk.StatusPending)
+	assertConditionValue(t, filter.Conditions, fields.App, "com.app")
+	assertConditionValue(t, filter.Conditions, fields.Scene, SceneSingleURLCapture)
+	assertConditionValue(t, filter.Conditions, fields.Date, TaskDateToday)
+	assertConditionValue(t, filter.Conditions, fields.Status, feishusdk.StatusPending)
 }
 
 func TestBuildFeishuFilterInfoTaskDateAnySkipsDatetime(t *testing.T) {
 	fields := feishusdk.DefaultTaskFields
-	filter := buildFeishuFilterInfo(fields, "com.app", []string{feishusdk.StatusPending}, SceneSingleURLCapture, TaskDateAny)
+	filter := buildFeishuFilterInfo(fields, "com.app", feishusdk.StatusPending, SceneSingleURLCapture, TaskDateAny)
 	if filter == nil {
 		t.Fatalf("expected filter, got nil")
 	}
-	if len(filter.Children) == 0 {
-		t.Fatalf("expected status children, got none")
-	}
-	for _, child := range filter.Children {
-		if len(findConditions(child.Conditions, fields.Date)) != 0 {
-			t.Fatalf("expected no datetime condition when TaskDateAny is used")
-		}
+	if len(findConditions(filter.Conditions, fields.Date)) != 0 {
+		t.Fatalf("expected no datetime condition when TaskDateAny is used")
 	}
 }
 
-func TestBuildFeishuFilterInfoBlankStatusAddsVariants(t *testing.T) {
+func TestBuildFeishuFilterInfoWithoutStatusUsesBaseConditions(t *testing.T) {
 	fields := feishusdk.DefaultTaskFields
-	filter := buildFeishuFilterInfo(fields, "", []string{""}, SceneSingleURLCapture, TaskDateToday)
-	if filter == nil {
-		t.Fatalf("expected filter, got nil")
-	}
-	if len(filter.Children) != 2 {
-		t.Fatalf("expected two children for blank status variants, got %d", len(filter.Children))
-	}
-	opSeen := map[string]struct{}{}
-	for _, child := range filter.Children {
-		conds := findConditions(child.Conditions, fields.Status)
-		if len(conds) != 1 {
-			t.Fatalf("expected single status condition per child, got %d", len(conds))
-		}
-		if cond := conds[0]; cond.Operator == nil {
-			t.Fatalf("status condition missing operator")
-		} else {
-			opSeen[strings.ToLower(strings.TrimSpace(*cond.Operator))] = struct{}{}
-		}
-		assertConditionValue(t, child.Conditions, fields.Scene, SceneSingleURLCapture)
-		assertConditionValue(t, child.Conditions, fields.Date, TaskDateToday)
-	}
-	if len(opSeen) != 2 {
-		t.Fatalf("expected both isEmpty and is operators, got %v", opSeen)
-	}
-	if _, ok := opSeen["isempty"]; !ok {
-		t.Fatalf("missing isEmpty operator")
-	}
-	if _, ok := opSeen["is"]; !ok {
-		t.Fatalf("missing is operator")
-	}
-}
-
-func TestBuildFeishuFilterInfoWithoutStatusesUsesBaseConditions(t *testing.T) {
-	fields := feishusdk.DefaultTaskFields
-	filter := buildFeishuFilterInfo(fields, "com.app", nil, SceneSingleURLCapture, TaskDateToday)
+	filter := buildFeishuFilterInfo(fields, "com.app", "", SceneSingleURLCapture, TaskDateToday)
 	if filter == nil {
 		t.Fatalf("expected filter, got nil")
 	}
