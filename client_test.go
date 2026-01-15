@@ -90,7 +90,7 @@ type stubTargetClient struct {
 	index  int
 }
 
-func (s *stubTargetClient) FetchTaskTableWithOptions(ctx context.Context, rawURL string, override *feishusdk.TaskFields, opts *feishusdk.TaskQueryOptions) (*feishusdk.TaskTable, error) {
+func (s *stubTargetClient) FetchTaskTableWithOptions(ctx context.Context, rawURL string, override *feishusdk.TaskFields, opts *feishusdk.QueryOptions) (*feishusdk.TaskTable, error) {
 	if s.index >= len(s.tables) {
 		return &feishusdk.TaskTable{}, nil
 	}
@@ -171,7 +171,7 @@ type sceneStatusTargetClient struct {
 	rows map[string][]feishusdk.TaskRow
 }
 
-func (c *sceneStatusTargetClient) FetchTaskTableWithOptions(ctx context.Context, rawURL string, override *feishusdk.TaskFields, opts *feishusdk.TaskQueryOptions) (*feishusdk.TaskTable, error) {
+func (c *sceneStatusTargetClient) FetchTaskTableWithOptions(ctx context.Context, rawURL string, override *feishusdk.TaskFields, opts *feishusdk.QueryOptions) (*feishusdk.TaskTable, error) {
 	scene := extractConditionValue(opts.Filter, feishusdk.DefaultTaskFields.Scene)
 	status := extractConditionValue(opts.Filter, feishusdk.DefaultTaskFields.Status)
 	dt := "without"
@@ -273,7 +273,7 @@ type recordingTargetClient struct {
 	}
 }
 
-func (r *recordingTargetClient) FetchTaskTableWithOptions(ctx context.Context, rawURL string, override *feishusdk.TaskFields, opts *feishusdk.TaskQueryOptions) (*feishusdk.TaskTable, error) {
+func (r *recordingTargetClient) FetchTaskTableWithOptions(ctx context.Context, rawURL string, override *feishusdk.TaskFields, opts *feishusdk.QueryOptions) (*feishusdk.TaskTable, error) {
 	return nil, nil
 }
 

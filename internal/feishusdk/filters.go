@@ -21,7 +21,7 @@ type FilterInfo struct {
 
 	// QueryOptions is not part of Feishu filter JSON. It is used by TaskAgent as
 	// a convenient way to carry query knobs alongside the filter itself.
-	QueryOptions *TaskQueryOptions `json:"-"`
+	QueryOptions *QueryOptions `json:"-"`
 }
 
 func newStringPtr(val string) *string {
@@ -88,7 +88,7 @@ func CloneFilter(filter *FilterInfo) *FilterInfo {
 		cloned.Conjunction = newStringPtr(strings.ToLower(strings.TrimSpace(*filter.Conjunction)))
 	}
 	if filter.QueryOptions != nil {
-		cloned.QueryOptions = &TaskQueryOptions{
+		cloned.QueryOptions = &QueryOptions{
 			ViewID:     strings.TrimSpace(filter.QueryOptions.ViewID),
 			IgnoreView: filter.QueryOptions.IgnoreView,
 			PageToken:  strings.TrimSpace(filter.QueryOptions.PageToken),
@@ -175,7 +175,7 @@ func appendFilterAND(base, extra *FilterInfo) *FilterInfo {
 		ex.Conjunction = newStringPtr("and")
 	}
 	if out.QueryOptions == nil && ex.QueryOptions != nil {
-		out.QueryOptions = &TaskQueryOptions{
+		out.QueryOptions = &QueryOptions{
 			ViewID:     strings.TrimSpace(ex.QueryOptions.ViewID),
 			IgnoreView: ex.QueryOptions.IgnoreView,
 			PageToken:  strings.TrimSpace(ex.QueryOptions.PageToken),

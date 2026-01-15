@@ -39,7 +39,7 @@ type FeishuCondition = feishusdk.Condition
 type FeishuChildrenFilter = feishusdk.ChildrenFilter
 
 // FeishuTaskQueryOptions aliases the query options used for bitable searches.
-type FeishuTaskQueryOptions = feishusdk.TaskQueryOptions
+type FeishuTaskQueryOptions = feishusdk.QueryOptions
 
 // FeishuTaskFields aliases the task-table field mapping.
 type FeishuTaskFields = feishusdk.TaskFields

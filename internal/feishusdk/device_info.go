@@ -225,7 +225,7 @@ func (c *Client) lookupDeviceRecordID(ctx context.Context, ref BitableRef, field
 		return "", fmt.Errorf("feishu: device serial field not configured")
 	}
 	filter.Conditions = append(filter.Conditions, condition)
-	opts := &TaskQueryOptions{Limit: 1, Filter: filter}
+	opts := &QueryOptions{Limit: 1, Filter: filter}
 	refs := []BitableRef{ref}
 	if strings.TrimSpace(ref.ViewID) != "" {
 		refNoView := ref

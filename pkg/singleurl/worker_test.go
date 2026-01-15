@@ -19,7 +19,7 @@ func TestSingleURLWorkerAutoLimitPreservesZero(t *testing.T) {
 		Client:        &singleURLTestClient{},
 		CrawlerClient: &stubCrawlerClient{createTaskID: "noop"},
 		BitableURL:    "https://bitable.example",
-		AppFilter: "kuaishou",
+		AppFilter:     "kuaishou",
 		Limit:         0,
 	})
 	if err != nil {
@@ -52,7 +52,7 @@ func TestSingleURLWorkerQueuesTaskAfterCreatingCrawlerJob(t *testing.T) {
 		Client:        client,
 		CrawlerClient: crawler,
 		BitableURL:    "https://bitable.example",
-		AppFilter: "kuaishou",
+		AppFilter:     "kuaishou",
 		Limit:         5,
 		PollInterval:  time.Second,
 		Clock:         func() time.Time { return time.Unix(100, 0) },
@@ -115,7 +115,7 @@ func TestSingleURLWorkerForwardsCDNURLFromExtra(t *testing.T) {
 		Client:        client,
 		CrawlerClient: crawler,
 		BitableURL:    "https://bitable.example",
-		AppFilter: "kuaishou",
+		AppFilter:     "kuaishou",
 		Limit:         5,
 		PollInterval:  time.Second,
 	})
@@ -157,7 +157,7 @@ func TestSingleURLReadyWorkerDispatchesWithoutCDNURL(t *testing.T) {
 		Client:        client,
 		CrawlerClient: crawler,
 		BitableURL:    "https://bitable.example",
-		AppFilter: "kuaishou",
+		AppFilter:     "kuaishou",
 		Limit:         5,
 		PollInterval:  time.Second,
 	})
@@ -211,7 +211,7 @@ func TestSingleURLWorkerPollsSuccessAndWritesVid(t *testing.T) {
 		Client:        client,
 		CrawlerClient: crawler,
 		BitableURL:    "https://bitable.example",
-		AppFilter: "kuaishou",
+		AppFilter:     "kuaishou",
 		Limit:         5,
 		PollInterval:  time.Second,
 		Clock:         func() time.Time { return time.Unix(200, 0) },
@@ -262,7 +262,7 @@ func TestSingleURLWorkerDoesNotMarkSuccessWhenVidMissing(t *testing.T) {
 		Client:        client,
 		CrawlerClient: crawler,
 		BitableURL:    "https://bitable.example",
-		AppFilter: "kuaishou",
+		AppFilter:     "kuaishou",
 		Limit:         5,
 		PollInterval:  time.Second,
 		Clock:         func() time.Time { return time.Unix(300, 0) },
@@ -309,7 +309,7 @@ func TestSingleURLWorkerMarksCrawlerFailure(t *testing.T) {
 		Client:        client,
 		CrawlerClient: crawler,
 		BitableURL:    "https://bitable.example",
-		AppFilter: "kuaishou",
+		AppFilter:     "kuaishou",
 		Limit:         5,
 		PollInterval:  time.Second,
 	})
@@ -356,7 +356,7 @@ func TestSingleURLWorkerMovesDownloaderFailedToDeviceStage(t *testing.T) {
 		Client:        client,
 		CrawlerClient: crawler,
 		BitableURL:    "https://bitable.example",
-		AppFilter: "kuaishou",
+		AppFilter:     "kuaishou",
 		Limit:         5,
 		PollInterval:  time.Second,
 	})
@@ -428,7 +428,7 @@ func TestSingleURLWorkerSendsGroupSummaryWhenAllSuccess(t *testing.T) {
 		Client:        client,
 		CrawlerClient: crawler,
 		BitableURL:    "https://bitable.example",
-		AppFilter: "kuaishou",
+		AppFilter:     "kuaishou",
 		Limit:         5,
 		PollInterval:  time.Second,
 		Clock:         func() time.Time { return time.Unix(900, 0) },
@@ -476,7 +476,7 @@ func TestSingleURLWorkerSkipsGroupSummaryWhenNotAllSuccess(t *testing.T) {
 		Client:        client,
 		CrawlerClient: crawler,
 		BitableURL:    "https://bitable.example",
-		AppFilter: "kuaishou",
+		AppFilter:     "kuaishou",
 		Limit:         5,
 		PollInterval:  time.Second,
 	})
@@ -515,7 +515,7 @@ func TestSingleURLWorkerReconcilesFailedTaskWithExistingTaskID(t *testing.T) {
 		Client:        client,
 		CrawlerClient: crawler,
 		BitableURL:    "https://bitable.example",
-		AppFilter: "kuaishou",
+		AppFilter:     "kuaishou",
 		Limit:         5,
 		PollInterval:  time.Second,
 		Clock:         func() time.Time { return time.Unix(500, 0) },
@@ -571,7 +571,7 @@ func TestSingleURLWorkerReconcilesFailedTaskDespiteAttempts(t *testing.T) {
 		Client:        client,
 		CrawlerClient: crawler,
 		BitableURL:    "https://bitable.example",
-		AppFilter: "kuaishou",
+		AppFilter:     "kuaishou",
 		Limit:         5,
 		PollInterval:  time.Second,
 		Clock:         func() time.Time { return time.Unix(600, 0) },
@@ -615,7 +615,7 @@ func TestSingleURLReadyWorkerFetchesYesterdayTasks(t *testing.T) {
 		Client:        client,
 		CrawlerClient: crawler,
 		BitableURL:    "https://bitable.example",
-		AppFilter: "kuaishou",
+		AppFilter:     "kuaishou",
 		Limit:         5,
 		PollInterval:  time.Second,
 	})
@@ -661,7 +661,7 @@ func TestSingleURLReadyWorkerCreatesNewTaskWhenLogsHasCrawlerTaskID(t *testing.T
 		Client:        client,
 		CrawlerClient: crawler,
 		BitableURL:    "https://bitable.example",
-		AppFilter: "kuaishou",
+		AppFilter:     "kuaishou",
 		Limit:         5,
 		PollInterval:  time.Second,
 		Clock:         func() time.Time { return time.Unix(100, 0) },
@@ -732,7 +732,7 @@ func TestSingleURLWorkerConcurrencySerialFeishuUpdates(t *testing.T) {
 		Client:        client,
 		CrawlerClient: crawler,
 		BitableURL:    "https://bitable.example",
-		AppFilter: "kuaishou",
+		AppFilter:     "kuaishou",
 		Limit:         8,
 		PollInterval:  time.Second,
 		Concurrency:   4,
@@ -783,7 +783,7 @@ func TestSingleURLWorkerPollsProcessingTasksBeforeQueued(t *testing.T) {
 		Client:        client,
 		CrawlerClient: crawler,
 		BitableURL:    "https://bitable.example",
-		AppFilter: "kuaishou",
+		AppFilter:     "kuaishou",
 		Limit:         5,
 		PollInterval:  time.Second,
 	})
@@ -826,7 +826,7 @@ func TestSingleURLWorkerPollsActiveTasksBeforeDispatchingNewTasks(t *testing.T) 
 		Client:        client,
 		CrawlerClient: crawler,
 		BitableURL:    "https://bitable.example",
-		AppFilter: "kuaishou",
+		AppFilter:     "kuaishou",
 		Limit:         5,
 		PollInterval:  time.Second,
 	})
@@ -861,7 +861,7 @@ func TestSingleURLWorkerPollsActiveTasksWithoutDatetimeFilter(t *testing.T) {
 		Client:        client,
 		CrawlerClient: crawler,
 		BitableURL:    "https://bitable.example",
-		AppFilter: "kuaishou",
+		AppFilter:     "kuaishou",
 		Limit:         5,
 		PollInterval:  time.Second,
 	})
@@ -912,7 +912,7 @@ func TestSingleURLWorkerRotatesActivePagesAcrossStatuses(t *testing.T) {
 		Client:        client,
 		CrawlerClient: crawler,
 		BitableURL:    "https://bitable.example",
-		AppFilter: "kuaishou",
+		AppFilter:     "kuaishou",
 		Limit:         10,
 		PollInterval:  time.Second,
 	})
@@ -989,7 +989,7 @@ func TestSingleURLWorkerActiveFetchScansMultiplePagesPerPass(t *testing.T) {
 		Client:        client,
 		CrawlerClient: alwaysWaitingCrawlerClient{},
 		BitableURL:    "https://bitable.example",
-		AppFilter: "kuaishou",
+		AppFilter:     "kuaishou",
 		Limit:         100,
 		PollInterval:  time.Second,
 	})
@@ -1024,7 +1024,7 @@ type singleURLUpdateCall struct {
 	fields map[string]any
 }
 
-func (c *singleURLTestClient) FetchTaskTableWithOptions(_ context.Context, _ string, _ *feishusdk.TaskFields, opts *feishusdk.TaskQueryOptions) (*feishusdk.TaskTable, error) {
+func (c *singleURLTestClient) FetchTaskTableWithOptions(_ context.Context, _ string, _ *feishusdk.TaskFields, opts *feishusdk.QueryOptions) (*feishusdk.TaskTable, error) {
 	groupID := suExtractConditionValue(opts.Filter, feishusdk.DefaultTaskFields.GroupID)
 	if strings.TrimSpace(groupID) != "" {
 		rows := cloneTaskRows(c.groupRows[groupID])
@@ -1186,7 +1186,7 @@ func (c *pagedSingleURLClient) pageTokens(status string) []string {
 	return out
 }
 
-func (c *pagedSingleURLClient) FetchTaskTableWithOptions(_ context.Context, _ string, _ *feishusdk.TaskFields, opts *feishusdk.TaskQueryOptions) (*feishusdk.TaskTable, error) {
+func (c *pagedSingleURLClient) FetchTaskTableWithOptions(_ context.Context, _ string, _ *feishusdk.TaskFields, opts *feishusdk.QueryOptions) (*feishusdk.TaskTable, error) {
 	status := suExtractConditionValue(opts.Filter, feishusdk.DefaultTaskFields.Status)
 	scene := suExtractConditionValue(opts.Filter, feishusdk.DefaultTaskFields.Scene)
 	if scene != SceneSingleURLCapture {
@@ -1270,7 +1270,7 @@ type singleURLConcurrencyClient struct {
 	maxConcurrentUpdate atomic.Int32
 }
 
-func (c *singleURLConcurrencyClient) FetchTaskTableWithOptions(ctx context.Context, rawURL string, override *feishusdk.TaskFields, opts *feishusdk.TaskQueryOptions) (*feishusdk.TaskTable, error) {
+func (c *singleURLConcurrencyClient) FetchTaskTableWithOptions(ctx context.Context, rawURL string, override *feishusdk.TaskFields, opts *feishusdk.QueryOptions) (*feishusdk.TaskTable, error) {
 	return c.base.FetchTaskTableWithOptions(ctx, rawURL, override, opts)
 }
 

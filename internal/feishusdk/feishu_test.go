@@ -859,7 +859,7 @@ func TestListBitableRecordsFilterConversion(t *testing.T) {
 			NewCondition(DefaultTaskFields.Status, "is", "done"),
 			NewCondition(DefaultTaskFields.App, "is", "qqmusic"),
 		)
-		opts := &TaskQueryOptions{Filter: filter}
+		opts := &QueryOptions{Filter: filter}
 
 		var (
 			capturedFilterSDK  *larkbitable.FilterInfo
@@ -1616,7 +1616,7 @@ func TestFetchTaskTableWithOptionsRespectsPagingCursor(t *testing.T) {
 			client = newHTTPTestClient(doJSON)
 		}
 
-		table, err := client.FetchTaskTableWithOptions(ctx, liveReadableBitableURL, nil, &TaskQueryOptions{
+		table, err := client.FetchTaskTableWithOptions(ctx, liveReadableBitableURL, nil, &QueryOptions{
 			Limit:    2000,
 			MaxPages: 1,
 		})
@@ -1642,7 +1642,7 @@ func TestFetchTaskTableWithOptionsRespectsPagingCursor(t *testing.T) {
 			t.Fatalf("expected Pages=1, got %d", table.Pages)
 		}
 
-		table, err = client.FetchTaskTableWithOptions(ctx, liveReadableBitableURL, nil, &TaskQueryOptions{
+		table, err = client.FetchTaskTableWithOptions(ctx, liveReadableBitableURL, nil, &QueryOptions{
 			Limit:     2000,
 			MaxPages:  1,
 			PageToken: "p2",
@@ -1709,7 +1709,7 @@ func TestFetchTaskTableWithOptionsLive(t *testing.T) {
 	}
 	f := NewFilterInfo("and")
 	f.Conditions = append(f.Conditions, NewCondition(DefaultTaskFields.App, "is", liveTargetApp))
-	opts := &TaskQueryOptions{Filter: f, Limit: 5}
+	opts := &QueryOptions{Filter: f, Limit: 5}
 	table, err := client.FetchTaskTableWithOptions(ctx, liveReadableBitableURL, nil, opts)
 	if err != nil {
 		t.Fatalf("FetchTaskTableWithOptions live call failed: %v", err)

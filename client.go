@@ -600,7 +600,7 @@ type feishuTaskSource struct {
 }
 
 type TargetTableClient interface {
-	FetchTaskTableWithOptions(ctx context.Context, rawURL string, override *feishusdk.TaskFields, opts *feishusdk.TaskQueryOptions) (*feishusdk.TaskTable, error)
+	FetchTaskTableWithOptions(ctx context.Context, rawURL string, override *feishusdk.TaskFields, opts *feishusdk.QueryOptions) (*feishusdk.TaskTable, error)
 	UpdateTaskStatus(ctx context.Context, table *feishusdk.TaskTable, taskID int64, newStatus string) error
 	UpdateTaskFields(ctx context.Context, table *feishusdk.TaskTable, taskID int64, fields map[string]any) error
 }
@@ -680,7 +680,7 @@ func FetchFeishuTasks(
 	}
 	filterInfo := buildFeishuFilterInfo(fields, app, status, scene, datePreset)
 	if filterInfo != nil {
-		filterQuery := feishusdk.TaskQueryOptions{
+		filterQuery := feishusdk.QueryOptions{
 			ViewID:     strings.TrimSpace(queryOpts.ViewID),
 			IgnoreView: queryOpts.IgnoreView,
 			PageToken:  strings.TrimSpace(queryOpts.PageToken),
@@ -693,11 +693,11 @@ func FetchFeishuTasks(
 		Str("app", app).
 		Str("status", status).
 		Str("scene", scene).
+		Str("date", datePreset).
 		Int("fetch_limit", fetchLimit).
 		Bool("ignore_view", queryOpts.IgnoreView).
 		Str("page_token", strings.TrimSpace(queryOpts.PageToken)).
 		Int("max_pages", queryOpts.MaxPages).
-		Str("filter", formatFilterForLog(filterInfo)).
 		Msg("fetching feishusdk tasks from bitable")
 
 	table, err := client.FetchTaskTableWithOptions(ctx, bitableURL, nil, buildQueryOptions(filterInfo))
@@ -729,12 +729,12 @@ func FetchFeishuTasks(
 	return tasks, pageInfo, nil
 }
 
-func buildQueryOptions(filter *feishusdk.FilterInfo) *feishusdk.TaskQueryOptions {
+func buildQueryOptions(filter *feishusdk.FilterInfo) *feishusdk.QueryOptions {
 	limit := 0
 	if filter != nil && filter.QueryOptions != nil {
 		limit = filter.QueryOptions.Limit
 	}
-	opts := &feishusdk.TaskQueryOptions{
+	opts := &feishusdk.QueryOptions{
 		Filter: filter,
 		Limit:  limit,
 	}
@@ -905,17 +905,6 @@ func buildFeishuBaseConditionSpecs(fields feishusdk.TaskFields, app, scene, date
 		}
 	}
 	return specs
-}
-
-func formatFilterForLog(filter *feishusdk.FilterInfo) string {
-	if filter == nil {
-		return ""
-	}
-	raw, err := json.Marshal(filter)
-	if err != nil {
-		return ""
-	}
-	return string(raw)
 }
 
 func summarizeFeishuTasks(tasks []*FeishuTask) []map[string]any {

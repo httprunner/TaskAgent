@@ -262,7 +262,7 @@ func (c *Client) FetchCookieRows(ctx context.Context, rawURL string, override *C
 			f.Conditions = append(f.Conditions, cond)
 		}
 	}
-	opts := &TaskQueryOptions{Filter: f}
+	opts := &QueryOptions{Filter: f}
 	records, _, err := c.listBitableRecords(ctx, ref, defaultBitablePageSize, opts)
 	if err != nil {
 		return nil, err
@@ -358,15 +358,15 @@ type TaskTable struct {
 
 	// HasMore and NextPageToken describe whether the underlying record search has
 	// more pages. They are populated when FetchTaskTableWithOptions is called with
-	// TaskQueryOptions.MaxPages > 0 so callers can continue scanning on the next
+	// QueryOptions.MaxPages > 0 so callers can continue scanning on the next
 	// tick without refetching the first page.
 	HasMore       bool
 	NextPageToken string
 	Pages         int
 }
 
-// TaskQueryOptions allows configuring additional filters when fetching task tables.
-type TaskQueryOptions struct {
+// QueryOptions allows configuring additional filters when fetching task tables.
+type QueryOptions struct {
 	ViewID     string
 	Filter     *FilterInfo
 	Limit      int
@@ -590,7 +590,7 @@ func (c *Client) FetchTaskTable(ctx context.Context, rawURL string, override *Ta
 }
 
 // FetchTaskTableWithOptions downloads rows using the provided query options.
-func (c *Client) FetchTaskTableWithOptions(ctx context.Context, rawURL string, override *TaskFields, opts *TaskQueryOptions) (*TaskTable, error) {
+func (c *Client) FetchTaskTableWithOptions(ctx context.Context, rawURL string, override *TaskFields, opts *QueryOptions) (*TaskTable, error) {
 	if c == nil {
 		return nil, errors.New("feishu: client is nil")
 	}
@@ -728,7 +728,7 @@ func (c *Client) storeAppTokenCache(wikiToken, appToken string) {
 }
 
 // FetchBitableRows downloads raw records from a Feishu bitable so callers can read any column.
-func (c *Client) FetchBitableRows(ctx context.Context, rawURL string, opts *TaskQueryOptions) (rows []BitableRow, err error) {
+func (c *Client) FetchBitableRows(ctx context.Context, rawURL string, opts *QueryOptions) (rows []BitableRow, err error) {
 	optionsPayload := ""
 	if opts != nil {
 		if payload, err := json.Marshal(opts); err == nil {
@@ -1634,14 +1634,14 @@ func (c *Client) BatchGetBitableRows(ctx context.Context, ref BitableRef, record
 	return rows, nil
 }
 
-func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSize int, opts *TaskQueryOptions) ([]*larkbitable.AppTableRecord, bitablePageInfo, error) {
+func (c *Client) listBitableRecords(ctx context.Context, ref BitableRef, pageSize int, opts *QueryOptions) ([]*larkbitable.AppTableRecord, bitablePageInfo, error) {
 	if c.useHTTP() {
 		return c.listBitableRecordsHTTP(ctx, ref, pageSize, opts)
 	}
 	return c.listBitableRecordsSDK(ctx, ref, pageSize, opts)
 }
 
-func (c *Client) listBitableRecordsHTTP(ctx context.Context, ref BitableRef, pageSize int, opts *TaskQueryOptions) ([]*larkbitable.AppTableRecord, bitablePageInfo, error) {
+func (c *Client) listBitableRecordsHTTP(ctx context.Context, ref BitableRef, pageSize int, opts *QueryOptions) ([]*larkbitable.AppTableRecord, bitablePageInfo, error) {
 	if err := requireBitableAppTable(ref); err != nil {
 		return nil, bitablePageInfo{}, err
 	}
@@ -1668,7 +1668,7 @@ func (c *Client) listBitableRecordsHTTP(ctx context.Context, ref BitableRef, pag
 		filterInfo = CloneFilter(opts.Filter)
 	}
 
-	filterQuery := (*TaskQueryOptions)(nil)
+	filterQuery := (*QueryOptions)(nil)
 	if filterInfo != nil && filterInfo.QueryOptions != nil {
 		filterQuery = filterInfo.QueryOptions
 	}
@@ -1803,7 +1803,7 @@ func (c *Client) listBitableRecordsHTTP(ctx context.Context, ref BitableRef, pag
 	return all, pageInfo, nil
 }
 
-func (c *Client) listBitableRecordsSDK(ctx context.Context, ref BitableRef, pageSize int, opts *TaskQueryOptions) ([]*larkbitable.AppTableRecord, bitablePageInfo, error) {
+func (c *Client) listBitableRecordsSDK(ctx context.Context, ref BitableRef, pageSize int, opts *QueryOptions) ([]*larkbitable.AppTableRecord, bitablePageInfo, error) {
 	if err := requireBitableAppTable(ref); err != nil {
 		return nil, bitablePageInfo{}, err
 	}
@@ -1830,7 +1830,7 @@ func (c *Client) listBitableRecordsSDK(ctx context.Context, ref BitableRef, page
 		filterInfo = CloneFilter(opts.Filter)
 	}
 
-	filterQuery := (*TaskQueryOptions)(nil)
+	filterQuery := (*QueryOptions)(nil)
 	if filterInfo != nil && filterInfo.QueryOptions != nil {
 		filterQuery = filterInfo.QueryOptions
 	}
