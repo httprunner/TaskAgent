@@ -1040,8 +1040,7 @@ func (w *SingleURLWorker) fetchSingleURLTasksWithDatePresets(ctx context.Context
 						Status: status,
 						Date:   preset,
 					},
-					Limit: remaining,
-					Query: taskagent.FeishuTaskQueryOptions{IgnoreView: true},
+					Query: taskagent.FeishuTaskQueryOptions{IgnoreView: true, Limit: remaining},
 				})
 			if err != nil {
 				log.Warn().Err(err).
@@ -1137,8 +1136,7 @@ func (w *SingleURLWorker) fetchSingleURLActiveTasksRotating(ctx context.Context,
 						Status: status,
 						Date:   taskagent.TaskDateAny,
 					},
-					Limit: pageLimit,
-					Query: taskagent.FeishuTaskQueryOptions{IgnoreView: true, PageToken: pageToken, MaxPages: 1},
+					Query: taskagent.FeishuTaskQueryOptions{IgnoreView: true, PageToken: pageToken, MaxPages: 1, Limit: pageLimit},
 				},
 			)
 			if err != nil {

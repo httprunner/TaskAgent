@@ -36,7 +36,7 @@ func TestFetchFeishuTasksFiltersInvalidTasks(t *testing.T) {
 		ctx, client, "https://example.com/bitable/abc", feishusdk.DefaultTaskFields,
 		FilterOptions{
 			Filter: TaskFetchFilter{App: "com.app", Scene: SceneGeneralSearch, Status: StatusPending, Date: TaskDateToday},
-			Limit:  5,
+			Query:  FeishuTaskQueryOptions{Limit: 5},
 		},
 	)
 	if err != nil {
@@ -147,7 +147,7 @@ func TestFetchTodayPendingFeishuTasksSceneStatusPriorityStopsAfterLimit(t *testi
 			ctx, client, "https://example.com/bitable/foo", feishusdk.DefaultTaskFields,
 			FilterOptions{
 				Filter: filter,
-				Limit:  remaining,
+				Query:  FeishuTaskQueryOptions{Limit: remaining},
 			},
 		)
 		if err != nil {
