@@ -3,6 +3,7 @@ package taskagent
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -222,6 +223,7 @@ func RunSheetTasks(ctx context.Context, opts SheetTaskOptions) error {
 			return nil
 		}
 
+		createdCounts := make(map[string]int)
 		for start := 0; start < len(pending); start += batchSize {
 			end := start + batchSize
 			if end > len(pending) {
@@ -268,21 +270,32 @@ func RunSheetTasks(ctx context.Context, opts SheetTaskOptions) error {
 				log.Warn().Msg("no valid records to create in this batch")
 				continue
 			}
-			for groupID, count := range groupCounts {
-				log.Info().Str("group_id", groupID).Int("count", count).Msg("creating tasks for group")
-			}
 
 			ids, err := client.CreateTaskRecords(ctx, opts.TaskURL, records, nil)
 			if err != nil {
 				return err
 			}
 			log.Info().Int("created", len(ids)).Msg("task records created in total")
+			for groupID, count := range groupCounts {
+				createdCounts[groupID] += count
+			}
 
 			for sourceURL, updates := range updatesBySource {
 				if err := client.UpdateSheetCells(ctx, sourceURL, updates); err != nil {
 					return err
 				}
 				log.Info().Int("updated", len(updates)).Str("source", sourceURL).Msg("source sheet status updated")
+			}
+		}
+
+		if len(createdCounts) > 0 {
+			groupIDs := make([]string, 0, len(createdCounts))
+			for groupID := range createdCounts {
+				groupIDs = append(groupIDs, groupID)
+			}
+			sort.Strings(groupIDs)
+			for _, groupID := range groupIDs {
+				log.Info().Str("group_id", groupID).Int("count", createdCounts[groupID]).Msg("created tasks for group")
 			}
 		}
 
