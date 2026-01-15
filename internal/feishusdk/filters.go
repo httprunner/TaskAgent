@@ -1,6 +1,7 @@
 package feishusdk
 
 import (
+	"encoding/json"
 	"strings"
 
 	bitablev1 "github.com/larksuite/oapi-sdk-go/v3/service/bitable/v1"
@@ -22,6 +23,14 @@ type FilterInfo struct {
 	// QueryOptions is not part of Feishu filter JSON. It is used by TaskAgent as
 	// a convenient way to carry query knobs alongside the filter itself.
 	QueryOptions *QueryOptions `json:"-"`
+}
+
+func (filterInfo *FilterInfo) JSONString() string {
+	payload, err := json.Marshal(filterInfo)
+	if err != nil {
+		return err.Error()
+	}
+	return string(payload)
 }
 
 func newStringPtr(val string) *string {

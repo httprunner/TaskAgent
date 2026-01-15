@@ -660,17 +660,6 @@ func FetchFeishuTasks(
 		}
 		filterInfo.QueryOptions = &filterQuery
 	}
-	log.Debug().
-		Str("app", app).
-		Str("status", status).
-		Str("scene", scene).
-		Str("date", datePreset).
-		Int("fetch_limit", fetchLimit).
-		Bool("ignore_view", queryOpts.IgnoreView).
-		Str("page_token", strings.TrimSpace(queryOpts.PageToken)).
-		Int("max_pages", queryOpts.MaxPages).
-		Msg("fetching feishusdk tasks from bitable")
-
 	table, err := client.FetchTaskTableWithOptions(ctx, bitableURL, nil, buildQueryOptions(filterInfo))
 	if err != nil {
 		return nil, FeishuFetchPageInfo{}, errors.Wrap(err, "fetch task table with options failed")

@@ -1714,13 +1714,6 @@ func (c *Client) listBitableRecordsHTTP(ctx context.Context, ref BitableRef, pag
 
 	start := time.Now()
 	page := 0
-	log.Debug().
-		Str("table_id", ref.TableID).
-		Str("view_id", viewID).
-		Bool("has_filter", filterInfo != nil).
-		Int("page_size", pageSize).
-		Int("limit", limit).
-		Msg("start listing bitable records")
 
 	for {
 		if pageToken != "" {
@@ -1794,11 +1787,15 @@ func (c *Client) listBitableRecordsHTTP(ctx context.Context, ref BitableRef, pag
 
 	log.Debug().
 		Str("table_id", ref.TableID).
+		Str("view_id", viewID).
+		Str("filter", filterInfo.JSONString()).
 		Int("pages", page).
 		Int("count", len(all)).
 		Bool("truncated", truncated).
+		Int("page_size", pageSize).
+		Int("limit", limit).
 		Dur("elapsed", time.Since(start)).
-		Msg("fetched bitable records")
+		Msg("bitable records fetched (http)")
 
 	return all, pageInfo, nil
 }
@@ -1880,24 +1877,7 @@ func (c *Client) listBitableRecordsSDK(ctx context.Context, ref BitableRef, page
 
 	start := time.Now()
 	page := 0
-	log.Debug().
-		Str("table_id", ref.TableID).
-		Str("view_id", viewID).
-		Bool("has_filter", filterInfo != nil).
-		Int("page_size", pageSize).
-		Int("limit", limit).
-		Msg("start listing bitable records (sdk)")
-
-	filterJSON := ""
-	if filterInfo != nil {
-		if b, err := json.Marshal(filterInfo); err == nil {
-			filterJSON = string(b)
-			const maxLen = 2048
-			if len(filterJSON) > maxLen {
-				filterJSON = filterJSON[:maxLen] + "...(truncated)"
-			}
-		}
-	}
+	filterJSON := filterInfo.JSONString()
 
 	for {
 		resp, err := api.Search(ctx, ref.AppToken, ref.TableID, pageSize, pageToken, body, opt)
@@ -1958,11 +1938,15 @@ func (c *Client) listBitableRecordsSDK(ctx context.Context, ref BitableRef, page
 
 	log.Debug().
 		Str("table_id", ref.TableID).
+		Str("view_id", viewID).
+		Str("filter", filterJSON).
 		Int("pages", page).
 		Int("count", len(all)).
 		Bool("truncated", truncated).
+		Int("page_size", pageSize).
+		Int("limit", limit).
 		Dur("elapsed", time.Since(start)).
-		Msg("fetched bitable records (sdk)")
+		Msg("bitable records fetched (sdk)")
 
 	return all, pageInfo, nil
 }
