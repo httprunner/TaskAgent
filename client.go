@@ -137,34 +137,28 @@ func (c *FeishuTaskClient) FetchAvailableTasks(ctx context.Context, limit int, f
 		now := time.Now()
 		ready := make([]*FeishuTask, 0, len(feishuTasks))
 		toError := make([]*FeishuTask, 0)
-		toErrorWithEndAt := make([]*FeishuTask, 0)
 
 		for _, t := range feishuTasks {
 			if t == nil {
 				continue
 			}
 			status := strings.TrimSpace(t.Status)
-			if isBackoffRetrySceneName(t.Scene) {
-				switch status {
-				case feishusdk.StatusFailed:
-					if t.RetryCount >= failedRetryLimit {
-						toErrorWithEndAt = append(toErrorWithEndAt, t)
-						continue
-					}
-					if !backoffRetryReady(t, now, feishusdk.StatusFailed) {
-						continue
-					}
-				case feishusdk.StatusError:
-					if t.RetryCount >= errorRetryLimit {
-						continue
-					}
-					if !backoffRetryReady(t, now, feishusdk.StatusError) {
-						continue
-					}
+			switch status {
+			case feishusdk.StatusFailed:
+				if t.RetryCount > maxFailedRetryCount {
+					toError = append(toError, t)
+					continue
 				}
-			} else if status == feishusdk.StatusFailed && t.RetryCount >= failedRetryLimit {
-				toError = append(toError, t)
-				continue
+				if !backoffRetryReady(t, now, feishusdk.StatusFailed) {
+					continue
+				}
+			case feishusdk.StatusError:
+				if t.RetryCount > maxErrorRetryCount {
+					continue
+				}
+				if !backoffRetryReady(t, now, feishusdk.StatusError) {
+					continue
+				}
 			}
 			ready = append(ready, t)
 		}
@@ -185,32 +179,7 @@ func (c *FeishuTaskClient) FetchAvailableTasks(ctx context.Context, limit int, f
 				log.Info().
 					Int("task_count", len(ids)).
 					Interface("task_ids", ids).
-					Int("max_retries", failedRetryLimit).
-					Msg("feishusdk: tasks exceeded retry limit and were marked error")
-			}
-		}
-		if len(toErrorWithEndAt) > 0 {
-			completed := now
-			if completed.IsZero() {
-				completed = time.Now()
-			}
-			if err := UpdateFeishuTaskStatuses(ctx, toErrorWithEndAt, feishusdk.StatusError, "",
-				&TaskStatusMeta{CompletedAt: &completed}); err != nil {
-				log.Error().
-					Err(err).
-					Int("task_count", len(toErrorWithEndAt)).
-					Msg("feishusdk: mark tasks as error due to retry limit failed")
-			} else {
-				ids := make([]int64, 0, len(toErrorWithEndAt))
-				for _, t := range toErrorWithEndAt {
-					if t != nil && t.TaskID > 0 {
-						ids = append(ids, t.TaskID)
-					}
-				}
-				log.Info().
-					Int("task_count", len(ids)).
-					Interface("task_ids", ids).
-					Int("max_failed_retries", failedRetryLimit).
+					Int("max_retries", maxFailedRetryCount).
 					Msg("feishusdk: tasks exceeded retry limit and were marked error")
 			}
 		}
@@ -337,13 +306,13 @@ func (c *FeishuTaskClient) OnTaskStarted(ctx context.Context, deviceSerial strin
 		}
 	}
 
-	// For failed tasks, increment RetryCount when they start running again.
+	// For failed/error tasks, increment RetryCount when they start running again.
 	for _, ft := range feishuTasks {
 		if ft == nil {
 			continue
 		}
 		original := strings.TrimSpace(ft.OriginalStatus)
-		if original != feishusdk.StatusFailed && !(original == feishusdk.StatusError && isBackoffRetrySceneName(ft.Scene)) {
+		if original != feishusdk.StatusFailed && original != feishusdk.StatusError {
 			continue
 		}
 		next := ft.RetryCount + 1
@@ -629,20 +598,22 @@ const (
 	SceneVideoScreenCapture = "视频录屏采集"
 	SceneSingleURLCapture   = "单个链接采集"
 
-	// failedRetryLimit controls how many failed→running transitions are allowed
-	// before a failed task is permanently marked as error.
-	//
-	// "At most retry twice" means:
-	// - first run: pending -> running -> failed (RetryCount=0)
-	// - retry #1: failed -> running (RetryCount=1) -> failed
-	// - retry #2: failed -> running (RetryCount=2) -> failed
-	// - next cycle: failed tasks with RetryCount>=2 will be marked error
-	failedRetryLimit        = 2
-	errorRetryLimit         = 3
-	backoffFirstRetryDelay  = 5 * time.Minute
-	backoffSecondRetryDelay = 10 * time.Minute
-	backoffErrorRetryDelay  = 30 * time.Minute
+	// Retry policies for failed/error tasks.
+	// Failed retries: allow RetryCount 0/1, with 5m/10m backoff. RetryCount >=2 -> error.
+	// Error retries: allow RetryCount 2/3, with 5m backoff. RetryCount >=4 -> skip.
+	maxFailedRetryCount = 1
+	maxErrorRetryCount  = 3
 )
+
+var failedRetryBackoff = map[int64]time.Duration{
+	0: 5 * time.Minute,
+	1: 10 * time.Minute,
+}
+
+var errorRetryBackoff = map[int64]time.Duration{
+	2: 5 * time.Minute,
+	3: 5 * time.Minute,
+}
 
 func FetchFeishuTasks(
 	ctx context.Context,
@@ -1390,35 +1361,11 @@ func elapsedSecondsForTask(task *FeishuTask, completedAt time.Time) (int64, bool
 	return secs, true
 }
 
-func isBackoffRetrySceneName(scene string) bool {
-	// NOTE: Backoff/error retry is enabled only for single-url now.
-	// Other scenes can be enabled by uncommenting the cases below when ready.
-	switch strings.TrimSpace(scene) {
-	case SceneSingleURLCapture:
-		return true
-	// case SceneGeneralSearch:
-	// 	return true
-	// case SceneProfileSearch:
-	// 	return true
-	// case SceneCollection:
-	// 	return true
-	// case SceneAnchorCapture:
-	// 	return true
-	default:
-		return false
-	}
-}
-
 func backoffRetryReady(task *FeishuTask, now time.Time, status string) bool {
 	if task == nil {
 		return false
 	}
-	var delay time.Duration
-	if strings.TrimSpace(status) == feishusdk.StatusError {
-		delay = backoffErrorRetryDelay
-	} else {
-		delay = backoffRetryDelayForCount(task.RetryCount)
-	}
+	delay := retryBackoffDelay(strings.TrimSpace(status), task.RetryCount)
 	if delay <= 0 {
 		return true
 	}
@@ -1429,12 +1376,12 @@ func backoffRetryReady(task *FeishuTask, now time.Time, status string) bool {
 	return now.Sub(endAt) >= delay
 }
 
-func backoffRetryDelayForCount(retryCount int64) time.Duration {
-	switch retryCount {
-	case 0:
-		return backoffFirstRetryDelay
-	case 1:
-		return backoffSecondRetryDelay
+func retryBackoffDelay(status string, retryCount int64) time.Duration {
+	switch strings.TrimSpace(status) {
+	case feishusdk.StatusFailed:
+		return failedRetryBackoff[retryCount]
+	case feishusdk.StatusError:
+		return errorRetryBackoff[retryCount]
 	default:
 		return 0
 	}
