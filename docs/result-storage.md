@@ -63,7 +63,7 @@ UPDATE capture_results SET reported = 0 WHERE reported = -1;
 ## Webhook Helpers & Downstream Workflows
 
 - 下游业务（例如 fox search agent）可以基于本仓库提供的结果表 / SQLite 数据实现各类检测与统计工作流。
-- `pkg/webhook/source_sqlite.go` / `source_feishu.go` 复用相同的数据源构造 summary webhook payload。
+- webhook worker 统一从任务表/结果表聚合 payload，并交由上层流程触发回调。
 - 剧单元数据仍然来自 Feishu（并可通过 `storage.MirrorDramaRowsIfNeeded` 镜像到本地 SQLite），以保证比值统计和 webhook payload 一致性。
 
 ## Configuration Summary
@@ -84,4 +84,4 @@ UPDATE capture_results SET reported = 0 WHERE reported = -1;
 2. 扩容时同步调整 `RESULT_REPORT_*` 与 `FEISHU_REPORT_RPS`，否则 reporter 可能在速率限制器前排队。
 3. 当 result 表暂不可用时，可仅依赖 SQLite（不要设置 `RESULT_STORAGE_ENABLE_FEISHU`），稍后再批量重投。
 4. Piracy 工作流（Group/Webhook）优先查询 SQLite，因此保持 `TRACKING_STORAGE_DB_PATH` 持久化，必要时用 `sqlite3` 导出 CSV 供调试。
-5. Tests: `go test ./internal/storage` 验证 pipeline；Webhooks 相关逻辑由 `go test ./pkg/webhook` 覆盖（Feishu Live 测试需要 `FEISHU_LIVE_TEST=1`）。
+5. Tests: `go test ./internal/storage` 验证 pipeline；Webhook 相关逻辑可通过 `go test ./pkg/webhook` 做基础覆盖。

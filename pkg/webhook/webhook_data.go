@@ -122,6 +122,14 @@ func normalizeSQLiteValue(v any) any {
 	}
 }
 
+func quoteIdentifier(name string) string {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return `""`
+	}
+	return `"` + strings.ReplaceAll(trimmed, `"`, `""`) + `"`
+}
+
 func fetchFeishuCaptureRecordsByTaskIDs(ctx context.Context, taskIDs []int64) ([]CaptureRecordPayload, error) {
 	rawURL := strings.TrimSpace(taskagent.EnvString(taskagent.EnvResultBitableURL, ""))
 	if rawURL == "" {

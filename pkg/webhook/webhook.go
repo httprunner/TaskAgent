@@ -18,55 +18,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Source enumerates the supported data sources for summary lookups.
-type Source string
-
-const (
-	// SourceFeishu queries Feishu Bitables for both drama metadata and capture records.
-	SourceFeishu Source = "feishu"
-	// SourceSQLite queries the local tracking SQLite database.
-	SourceSQLite Source = "sqlite"
-
-	defaultRecordLimit = 200
-)
-
-// Options configures how summary data should be queried and delivered.
-type Options struct {
-	App        string
-	Params     string
-	UserID     string
-	UserName   string
-	Scene      string
-	GroupID    string
-	WebhookURL string
-
-	// SkipDramaLookup bypasses drama table queries (e.g. for video capture tasks whose Params are JSON payloads).
-	SkipDramaLookup bool
-
-	// ItemID narrows capture record queries when Params 不匹配存储值，SkipDramaLookup 为 true 时必填。
-	ItemID string
-
-	// PreferLatest forces the data source to return the newest capture record only.
-	PreferLatest bool
-
-	// Source controls where drama and record data are retrieved from.
-	Source Source
-
-	// RecordLimit caps the number of capture records returned in the payload.
-	RecordLimit int
-
-	// ResultFilter is an optional Feishu FilterInfo appended to the auto-generated filters.
-	ResultFilter *taskagent.FeishuFilterInfo
-
-	// Optional overrides per source.
-	DramaTableURL  string
-	ResultTableURL string
-	SQLitePath     string
-
-	// Custom HTTP client; nil falls back to a short-lived default client.
-	HTTPClient *http.Client
-}
-
 // CaptureRecordPayload wraps a record ID and its field map so callers can access raw capture data.
 type CaptureRecordPayload struct {
 	RecordID string
@@ -75,102 +26,6 @@ type CaptureRecordPayload struct {
 
 // ErrNoCaptureRecords indicates that the capture result query returned zero rows.
 var ErrNoCaptureRecords = errors.New("no capture records found")
-
-// SendSummaryWebhook aggregates drama metadata plus capture records and posts the payload to the provided webhook.
-// The returned map mirrors all columns defined by feishusdk.DramaFields plus an extra `records` field that contains
-// a list of capture records shaped by Feishu result fields.
-func SendSummaryWebhook(ctx context.Context, opts Options) (map[string]any, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	webhookURL := strings.TrimSpace(opts.WebhookURL)
-	if webhookURL == "" {
-		return nil, errors.New("webhook url is required")
-	}
-	params := strings.TrimSpace(opts.Params)
-	if params == "" {
-		return nil, errors.New("params is required")
-	}
-
-	fields := loadSummaryFieldConfig()
-	source := opts.Source
-	if source == "" {
-		source = SourceFeishu
-	}
-
-	limit := opts.RecordLimit
-	if limit <= 0 {
-		limit = defaultRecordLimit
-	}
-
-	ds, err := newSummaryDataSource(source, fields, opts)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if cerr := ds.Close(); cerr != nil {
-			log.Warn().Err(cerr).Msg("summary datasource close failed")
-		}
-	}()
-
-	var drama *dramaInfo
-	if opts.SkipDramaLookup {
-		log.Debug().
-			Str("params", params).
-			Str("app", strings.TrimSpace(opts.App)).
-			Str("group_id", strings.TrimSpace(opts.GroupID)).
-			Msg("skip drama lookup for summary webhook")
-		drama = fallbackDramaInfoFromParams(params, fields)
-	} else {
-		var derr error
-		drama, derr = ds.FetchDrama(ctx, params)
-		if derr != nil {
-			return nil, fmt.Errorf("fetch drama info failed: %w", derr)
-		}
-	}
-
-	itemID := strings.TrimSpace(opts.ItemID)
-	queryParams := params
-	if opts.SkipDramaLookup {
-		if itemID == "" {
-			return nil, errors.New("item id hint required when skipping drama lookup")
-		}
-		queryParams = ""
-	}
-	records, err := ds.FetchRecords(ctx, recordQuery{
-		App:          strings.TrimSpace(opts.App),
-		Scene:        strings.TrimSpace(opts.Scene),
-		Params:       queryParams,
-		UserID:       strings.TrimSpace(opts.UserID),
-		UserName:     strings.TrimSpace(opts.UserName),
-		ItemID:       itemID,
-		Limit:        limit,
-		PreferLatest: opts.PreferLatest,
-		ExtraFilter:  opts.ResultFilter,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("fetch capture records failed: %w", err)
-	}
-	if len(records) == 0 {
-		return nil, ErrNoCaptureRecords
-	}
-
-	flattenedRecords, itemIDs := FlattenRecordsAndCollectItemIDs(records, fields.Result)
-	payload := buildWebhookPayload(drama, flattenedRecords, fields)
-	log.Info().
-		Str("params", params).
-		Str("app", strings.TrimSpace(opts.App)).
-		Str("user_id", strings.TrimSpace(opts.UserID)).
-		Str("user_name", strings.TrimSpace(opts.UserName)).
-		Str("group_id", strings.TrimSpace(opts.GroupID)).
-		Int("record_count", len(flattenedRecords)).
-		Strs("item_ids", itemIDs).
-		Msg("sending summary webhook")
-	if err := PostWebhook(ctx, webhookURL, payload, opts.HTTPClient); err != nil {
-		return nil, err
-	}
-	return payload, nil
-}
 
 // PostWebhook sends the summary payload to the given URL and logs response metadata.
 func PostWebhook(ctx context.Context, url string, payload map[string]any, client *http.Client) error {
@@ -232,21 +87,6 @@ func PostWebhook(ctx context.Context, url string, payload map[string]any, client
 	return nil
 }
 
-func buildWebhookPayload(drama *dramaInfo, records []map[string]any, fields summaryFieldConfig) map[string]any {
-	var raw map[string]any
-	var dramaName string
-	if drama != nil {
-		raw = drama.RawFields
-		dramaName = drama.Name
-	}
-	payload := flattenDramaFields(raw, fields.Drama)
-	// Ensure drama name is always populated even if the raw field is empty.
-	if val, ok := payload["DramaName"]; !ok || strings.TrimSpace(fmt.Sprint(val)) == "" {
-		payload["DramaName"] = dramaName
-	}
-	payload["records"] = records
-	return payload
-}
 
 func flattenDramaFields(raw map[string]any, schema taskagent.FeishuDramaFields) map[string]any {
 	fieldMap := taskagent.StructFieldMap(schema)
@@ -311,20 +151,6 @@ func FlattenRecordsAndCollectItemIDs(records []CaptureRecordPayload, schema task
 	return result, itemIDs
 }
 
-func fallbackDramaInfoFromParams(params string, fields summaryFieldConfig) *dramaInfo {
-	trimmed := strings.TrimSpace(params)
-	if trimmed == "" {
-		return nil
-	}
-	raw := map[string]any{}
-	if key := strings.TrimSpace(fields.Drama.DramaName); key != "" {
-		raw[key] = trimmed
-	}
-	return &dramaInfo{
-		Name:      trimmed,
-		RawFields: raw,
-	}
-}
 
 const vedemSignatureExpiration = 1800
 
@@ -352,65 +178,6 @@ func sha256HMAC(key []byte, data []byte) []byte {
 	return []byte(fmt.Sprintf("%x", mac.Sum(nil)))
 }
 
-func loadSummaryFieldConfig() summaryFieldConfig {
-	// DefaultDramaFields / DefaultResultFields already honor DRAMA_FIELD_* / RESULT_FIELD_* env
-	// overrides via RefreshFieldMappings, so we only need to reuse those mappings here.
-	dramaFields := taskagent.DefaultDramaFields()
-	resultFields := taskagent.DefaultResultFields()
-	return summaryFieldConfig{
-		Drama:  dramaFields,
-		Result: resultFields,
-	}
-}
-
-// summaryFieldConfig centralizes the column/field names needed by both data sources.
-type summaryFieldConfig struct {
-	Drama  taskagent.FeishuDramaFields
-	Result taskagent.FeishuResultFields
-}
-
-// dramaInfo holds normalized metadata for a single drama row.
-type dramaInfo struct {
-	ID             string
-	Name           string
-	Priority       string
-	RightsScenario string
-	RawFields      map[string]any
-}
-
-// Row represents a raw Feishu bitable record used by summary sources.
-type Row = taskagent.BitableRow
-
-// recordQuery represents the generic filters used across data sources.
-type recordQuery struct {
-	App          string
-	Params       string
-	UserID       string
-	UserName     string
-	ItemID       string
-	Scene        string
-	Limit        int
-	PreferLatest bool
-	ExtraFilter  *taskagent.FeishuFilterInfo
-}
-
-// summaryDataSource fetches drama metadata and capture records from a backend.
-type summaryDataSource interface {
-	FetchDrama(ctx context.Context, params string) (*dramaInfo, error)
-	FetchRecords(ctx context.Context, query recordQuery) ([]CaptureRecordPayload, error)
-	Close() error
-}
-
-func newSummaryDataSource(source Source, fields summaryFieldConfig, opts Options) (summaryDataSource, error) {
-	switch source {
-	case SourceSQLite:
-		return newSQLiteSummarySource(fields, opts)
-	case SourceFeishu:
-		fallthrough
-	default:
-		return newFeishuSummarySource(fields, opts)
-	}
-}
 
 // getString reads a field value from a Feishu bitable row fields map as string.
 func getString(fields map[string]any, name string) string {

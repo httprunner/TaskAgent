@@ -5,7 +5,7 @@ TaskAgent is a Go module that:
 - Polls Feishu Bitable task tables
 - Schedules Android capture devices
 - Persists capture results to SQLite + Feishu
-- Provides summary webhook helpers
+- Provides webhook result workers
 
 It is designed as a Feishu Bitable–based task scheduler you can embed into your own agents: you implement device/job execution, TaskAgent handles task fetching, device pooling and result storage.
 
@@ -64,10 +64,9 @@ Feishu Task Table ──> FeishuTaskClient (task)
   - Illustrates how to implement a dedicated JobRunner around the scheduling core.
 
 - **`pkg/webhook`**
-  - Summary webhook module used by multiple scenarios:
-    - `webhook.go`: builds and sends summary webhooks by aggregating drama metadata + capture records from Feishu or SQLite.
-    - `source_feishu.go` / `source_sqlite.go`: Feishu/SQLite data sources for summary payloads.
-    - `webhook_worker.go`: processes webhook result rows (WEBHOOK_BITABLE_URL) and delivers summary payloads.
+  - Webhook result handling used by multiple scenarios:
+    - `webhook.go`: webhook HTTP helper utilities (e.g. `PostWebhook`, record flattening).
+    - `webhook_worker.go`: processes webhook result rows (WEBHOOK_BITABLE_URL) and delivers payloads.
     - `webhook_create.go`: creates webhook result rows (group creation + external-task backfill).
 
 - **`cmd`**
