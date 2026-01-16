@@ -34,6 +34,7 @@ The tables below enumerate every environment variable TaskAgent reads via `os.Ge
 | Variable | Required | Default | Used by | Description |
 | --- | --- | --- | --- | --- |
 | `DEVICE_ALLOWLIST` | Optional | empty | `taskagent.DevicePoolAgent` | Restrict scheduling to a subset of locally connected device serials. Must be a comma-separated list (e.g. `device-A,device-B`). When empty, all connected devices are eligible. |
+| `DEVICE_JOB_TIMEOUT` | Optional | `30m` | `taskagent.DevicePoolAgent` | Per-device job timeout. When exceeded, the job is canceled and pending tasks fall back to completion handling. Set to `0` to disable the timeout. |
 
 ## Task scheduling
 

@@ -35,6 +35,10 @@ const (
 	// EnvTaskGroupPriorityFocusGroups caps how many top-ranked groups can be selected per fetch.
 	// When >0, TaskAgent prefers tasks from the remaining-minimum K groups, then fills from the rest.
 	EnvTaskGroupPriorityFocusGroups = "TASK_GROUP_PRIORITY_FOCUS_GROUPS"
+
+	// EnvDeviceJobTimeout controls the per-device job timeout.
+	// Use duration strings like "30m" or "1h". Set to "0" to disable.
+	EnvDeviceJobTimeout = "DEVICE_JOB_TIMEOUT"
 )
 
 // Shared status values for Feishu task rows and related resources.

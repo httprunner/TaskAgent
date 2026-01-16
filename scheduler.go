@@ -25,6 +25,7 @@ type Config struct {
 	MaxFetchPerPoll int
 	MaxJobRetries   int
 	JobRetryBackoff time.Duration
+	JobTimeout      time.Duration
 	OSType          string
 	App             string
 	// DeviceSerialAllowlist optionally restricts scheduling to these device serials.
@@ -97,6 +98,18 @@ func NewDevicePoolAgent(cfg Config, runner JobRunner) (*DevicePoolAgent, error) 
 	}
 	if cfg.JobRetryBackoff <= 0 {
 		cfg.JobRetryBackoff = 5 * time.Second
+	}
+	if cfg.JobTimeout == 0 {
+		raw := strings.TrimSpace(EnvString(EnvDeviceJobTimeout, ""))
+		if raw != "" {
+			cfg.JobTimeout = EnvDuration(EnvDeviceJobTimeout, 0)
+		}
+	}
+	if cfg.JobTimeout < 0 {
+		cfg.JobTimeout = 0
+	}
+	if cfg.JobTimeout == 0 {
+		cfg.JobTimeout = 30 * time.Minute
 	}
 
 	if len(cfg.DeviceSerialAllowlist) == 0 {
@@ -660,7 +673,13 @@ func (a *DevicePoolAgent) snapshotJobTasks(serial string) (string, []string) {
 }
 
 func (a *DevicePoolAgent) startDeviceJob(ctx context.Context, serial string, tasks []*Task) {
-	jobCtx, cancel := context.WithCancel(ctx)
+	jobCtx := ctx
+	var cancel context.CancelFunc
+	if a.cfg.JobTimeout > 0 {
+		jobCtx, cancel = context.WithTimeout(ctx, a.cfg.JobTimeout)
+	} else {
+		jobCtx, cancel = context.WithCancel(ctx)
+	}
 	job := &deviceJob{
 		deviceSerial: serial,
 		tasks:        tasks,
@@ -730,6 +749,19 @@ func (n taskNotifier) OnTaskResult(ctx context.Context, deviceSerial string, tas
 	return nil
 }
 
+func (a *DevicePoolAgent) runJobWithContext(ctx context.Context, req JobRequest) error {
+	done := make(chan error, 1)
+	go func() {
+		done <- a.jobRunner.RunJob(ctx, req)
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (a *DevicePoolAgent) runDeviceJob(ctx context.Context, serial string, job *deviceJob) {
 	defer a.backgroundGroup.Done()
 	defer job.cancel()
@@ -751,7 +783,7 @@ func (a *DevicePoolAgent) runDeviceJob(ctx context.Context, serial string, job *
 
 	var err error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		err = a.jobRunner.RunJob(ctx, JobRequest{
+		err = a.runJobWithContext(ctx, JobRequest{
 			DeviceSerial: job.deviceSerial,
 			Tasks:        job.tasks,
 			Notifier:     job.notifier,
@@ -763,6 +795,15 @@ func (a *DevicePoolAgent) runDeviceJob(ctx context.Context, serial string, job *
 					Int("attempts", attempt).
 					Msg("device job recovered after retry")
 			}
+			break
+		}
+
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			log.Error().
+				Err(err).
+				Str("serial", job.deviceSerial).
+				Dur("timeout", a.cfg.JobTimeout).
+				Msg("device job canceled or timed out")
 			break
 		}
 
