@@ -30,7 +30,6 @@ var webhookPlanScenesByBizType = map[string][]string{
 type WebhookResultWorkerConfig struct {
 	TaskBitableURL    string
 	WebhookBitableURL string
-	SummaryWebhookURL string
 	PollInterval      time.Duration
 	BatchLimit        int
 	GroupCooldown     time.Duration
@@ -86,6 +85,7 @@ type WebhookResultWorker struct {
 }
 
 const maxWebhookResultRetries = 3
+const crawlerWebhookPath = "/drama/webhook/grab-finished"
 
 func NewWebhookResultWorker(cfg WebhookResultWorkerConfig) (*WebhookResultWorker, error) {
 	taskURL := strings.TrimSpace(firstNonEmpty(cfg.TaskBitableURL,
@@ -93,10 +93,11 @@ func NewWebhookResultWorker(cfg WebhookResultWorkerConfig) (*WebhookResultWorker
 	if taskURL == "" {
 		return nil, errors.New("task bitable url is required")
 	}
-	webhookURL := strings.TrimSpace(cfg.SummaryWebhookURL)
-	if webhookURL == "" {
-		return nil, errors.New("summary webhook url is required")
+	baseURL := strings.TrimSpace(env.String("CRAWLER_SERVICE_BASE_URL", ""))
+	if baseURL == "" {
+		return nil, errors.New("CRAWLER_SERVICE_BASE_URL is required")
 	}
+	webhookURL := strings.TrimRight(baseURL, "/") + crawlerWebhookPath
 	store, err := newWebhookResultStore(firstNonEmpty(cfg.WebhookBitableURL,
 		taskagent.EnvString(taskagent.EnvWebhookBitableURL, "")))
 	if err != nil {
@@ -606,8 +607,10 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 		return err
 	}
 
-	if err := PostWebhook(ctx, w.webhookURL, payload, nil); err != nil {
-		return w.markFailed(ctx, row, err)
+	if bizType != WebhookBizTypeSingleURLCapture {
+		if err := PostWebhook(ctx, w.webhookURL, payload, nil); err != nil {
+			return w.markFailed(ctx, row, err)
+		}
 	}
 
 	end := time.Now().UTC().UnixMilli()

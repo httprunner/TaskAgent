@@ -16,7 +16,6 @@ func newWebhookWorkerCmd() *cobra.Command {
 	var (
 		flagTaskURL          string
 		flagWebhookBitable   string
-		flagSummaryWebhook   string
 		flagPollInterval     time.Duration
 		flagBatchLimit       int
 		flagGroupCooldownDur time.Duration
@@ -36,15 +35,14 @@ func newWebhookWorkerCmd() *cobra.Command {
 			if strings.TrimSpace(webhookBitable) == "" {
 				return fmt.Errorf("--webhook-bitable-url or %s must be provided", feishusdk.EnvWebhookBitableURL)
 			}
-			webhookURL := firstNonEmpty(flagSummaryWebhook, env.String("SUMMARY_WEBHOOK_URL", ""))
-			if strings.TrimSpace(webhookURL) == "" {
-				return fmt.Errorf("--webhook-url or SUMMARY_WEBHOOK_URL must be provided")
+			baseURL := strings.TrimSpace(env.String("CRAWLER_SERVICE_BASE_URL", ""))
+			if baseURL == "" {
+				return fmt.Errorf("CRAWLER_SERVICE_BASE_URL must be provided")
 			}
 
 			worker, err := webhook.NewWebhookResultWorker(webhook.WebhookResultWorkerConfig{
 				TaskBitableURL:    strings.TrimSpace(taskURL),
 				WebhookBitableURL: strings.TrimSpace(webhookBitable),
-				SummaryWebhookURL: strings.TrimSpace(webhookURL),
 				PollInterval:      flagPollInterval,
 				BatchLimit:        flagBatchLimit,
 				GroupCooldown:     flagGroupCooldownDur,
@@ -57,7 +55,7 @@ func newWebhookWorkerCmd() *cobra.Command {
 			log.Info().
 				Str("task_bitable", strings.TrimSpace(taskURL)).
 				Str("webhook_bitable", strings.TrimSpace(webhookBitable)).
-				Str("webhook_url", strings.TrimSpace(webhookURL)).
+				Str("crawler_service_base_url", baseURL).
 				Str("filter_group_id", strings.TrimSpace(flagFilterGroupID)).
 				Str("filter_date", strings.TrimSpace(flagFilterDate)).
 				Msg("starting webhook result worker")
@@ -67,7 +65,6 @@ func newWebhookWorkerCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&flagTaskURL, "task-url", "", "Feishu task bitable URL (default from TASK_BITABLE_URL)")
 	cmd.Flags().StringVar(&flagWebhookBitable, "webhook-bitable-url", "", "Webhook result bitable URL (default from WEBHOOK_BITABLE_URL)")
-	cmd.Flags().StringVar(&flagSummaryWebhook, "webhook-url", "", "Summary webhook URL (default from SUMMARY_WEBHOOK_URL)")
 	cmd.Flags().DurationVar(&flagPollInterval, "poll-interval", 30*time.Second, "Interval between scans")
 	cmd.Flags().IntVar(&flagBatchLimit, "batch-limit", 20, "Maximum number of webhook result rows processed per scan")
 	cmd.Flags().DurationVar(&flagGroupCooldownDur, "group-cooldown", 2*time.Minute, "Cooldown duration before rechecking an incomplete row")

@@ -169,7 +169,7 @@ Feishu Task Table ──> FeishuTaskClient (task)
 - **Create a `pending` task via pure HTTP**: `go run ./examples/create_task_with_http -bid <bid> -uid <uid> -eid <eid>` (see `examples/create_task_with_http/README.md`)
 
 ### Infra CLI (`cmd`)
-- **Webhook worker**: `go run ./cmd webhook-worker --task-url "$TASK_BITABLE_URL" --webhook-bitable-url "$WEBHOOK_BITABLE_URL" --webhook-url "$SUMMARY_WEBHOOK_URL"`
+- **Webhook worker**: `go run ./cmd webhook-worker --task-url "$TASK_BITABLE_URL" --webhook-bitable-url "$WEBHOOK_BITABLE_URL"` (requires `CRAWLER_SERVICE_BASE_URL`)
   - 支持定向调试：`--group-id "<GroupID>"`、`--date "2025-12-17"`（可组合）。任一参数非空时仅执行单次扫描，并只处理匹配 `GroupID` / 逻辑日期（Date 字段）的结果行。
 - **Webhook creator (video screen capture)**: one-shot `go run ./cmd webhook-creator --task-url "$TASK_BITABLE_URL" --webhook-bitable-url "$WEBHOOK_BITABLE_URL" --app kwai`, or polling with `--poll-interval 30s`
 - **Single URL worker**: `go run ./cmd singleurl --task-url "$TASK_BITABLE_URL" --crawler-base-url "$CRAWLER_SERVICE_BASE_URL"`

@@ -56,10 +56,10 @@
 | `COMPLETED` | `success` | 写入 `vid` 到 `Logs`（JSON 数组 attempt 中包含 `task_id/vid`），并把 `EndAt`/`ElapsedSeconds` 补齐。 |
 | `FAILED` / 404 | `dl-failed` | 将失败原因附加到 `Logs`，同时保留 `task_id` 方便排查；随后回退为 `failed` 交给设备侧重试。 |
 
-这样即可形成 `pending → queued → running → success/failed` 的闭环，无需人工介入。单链任务完成后的汇总推送与 `Webhook` 字段更新不再由 `SingleURLWorker` 直接触发，而是统一交给 `pkg/webhook` 中的 `WebhookResultCreator/Worker` 通过「推送结果表」驱动：
+这样即可形成 `pending → queued → running → success/failed` 的闭环，无需人工介入。单链任务完成后的分组汇总与 `Webhook` 字段更新不再由 `SingleURLWorker` 直接触发，而是统一交给 `pkg/webhook` 中的 `WebhookResultCreator/Worker` 通过「推送结果表」驱动：
 
 - 对于 `BizType=single_url_capture` 的记录，`WebhookResultWorker` 会在同一 GroupID（同一 `(App, BookID, UserID)` 组合）下所有任务进入终态后：
-  - 基于任务表构造分组级别的 webhook payload，并推送到 `SUMMARY_WEBHOOK_URL`；
+  - 基于任务表构造分组级别的 webhook payload 并回写到结果表（单链不触发 webhook 回调）；
   - 若配置了 `CRAWLER_SERVICE_BASE_URL`，同时调用下载服务的 `POST /download/tasks/finish` 接口（`status/total/done/unique_combinations/unique_count/task_name/email`），其中 `task_name` 默认基于 GroupID + 时间戳生成，用于下游任务维度统计。
 
 ## foxagent 入口

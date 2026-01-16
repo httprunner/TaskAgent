@@ -142,7 +142,7 @@ worker 定时轮询 webhook 结果表：
 
 TaskAgent CLI（可选）：
 
-- `go run ./cmd webhook-worker --task-url "$TASK_BITABLE_URL" --webhook-bitable-url "$WEBHOOK_BITABLE_URL" --webhook-url "$SUMMARY_WEBHOOK_URL"`：默认轮询 `WEBHOOK_BITABLE_URL` 中 `Status in (pending, failed)` 的结果行。
+- `go run ./cmd webhook-worker --task-url "$TASK_BITABLE_URL" --webhook-bitable-url "$WEBHOOK_BITABLE_URL"`：默认轮询 `WEBHOOK_BITABLE_URL` 中 `Status in (pending, failed)` 的结果行（需配置 `CRAWLER_SERVICE_BASE_URL`）。
   - 支持定向调试：
     - `--group-id "<GroupID>"`：仅处理指定 `GroupID` 的结果行；
     - `--date "2025-12-17"`：仅处理逻辑日期为 `2025-12-17` 的结果行（对应结果表的 `Date` 字段，按本地时区格式化为 `YYYY-MM-DD`）。
