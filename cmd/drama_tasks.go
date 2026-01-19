@@ -26,41 +26,37 @@ func newDramaTasksCmd() *cobra.Command {
 		Use:   "drama-tasks",
 		Short: "Create 综合页搜索 tasks from drama catalog aliases",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := DramaTaskConfig{
-				Date:            flagDate,
-				App:             firstNonEmpty(rootApp, ""),
-				Scene:           "",
-				TaskTableURL:    firstNonEmpty(rootTaskURL, ""),
-				DramaTableURL:   flagDramaURL,
-				AliasSeparators: flagAliasSeps,
-				BatchSize:       flagBatchSize,
+			cfg := TaskConfig{
+				Date:              flagDate,
+				App:               firstNonEmpty(rootApp, defaultTaskApp),
+				Scene:             taskagent.SceneGeneralSearch,
+				TaskTableURL:      firstNonEmpty(rootTaskURL, ""),
+				SourceTableURL:    taskagent.EnvString(taskagent.EnvDramaBitableURL, flagDramaURL),
+				KeywordSeparators: flagAliasSeps,
+				BatchSize:         flagBatchSize,
 			}
-			if cfg.App == "" {
-				cfg.App = defaultDramaTaskApp
-			}
-
-			res, err := CreateDramaSearchTasks(cmd.Context(), cfg)
+			res, err := CreateSearchTasks(cmd.Context(), cfg)
 			if err != nil {
 				return err
 			}
 			log.Info().
 				Str("date", res.Date).
-				Int("dramas", res.DramaCount).
-				Int("params", res.ParamCount).
+				Int("dramas", res.SourceCount).
+				Int("params", res.TotalParams).
 				Int("created", res.CreatedCount).
 				Msg("drama tasks created")
 			for _, detail := range res.Details {
 				log.Debug().
 					Str("drama", detail.DramaName).
 					Str("book_id", detail.BookID).
-					Int("params", detail.ParamCount).
+					Int("params", detail.ExpandedParams).
 					Msg("drama params expanded")
 			}
 			return nil
 		},
 	}
 
-	cmd.Flags().StringVar(&flagDate, "date", "", "采集日期 (YYYY-MM-DD)")
+	cmd.Flags().StringVar(&flagDate, "date", "", "登记日期 (YYYY-MM-DD)")
 	cmd.Flags().StringVar(&flagDramaURL, "drama-url", "", "覆盖 $DRAMA_BITABLE_URL 的剧单表 URL")
 	cmd.Flags().StringSliceVar(&flagAliasSeps, "alias-sep", []string{"|", "｜"}, "搜索别名分隔符列表（默认支持 | 和 ｜）")
 	cmd.Flags().IntVar(&flagBatchSize, "batch-size", 500, "写入任务时的批大小 (<=500)")
@@ -69,11 +65,63 @@ func newDramaTasksCmd() *cobra.Command {
 	return cmd
 }
 
+func newAccountTasksCmd() *cobra.Command {
+	var (
+		flagDate        string
+		flagAccountURL  string
+		flagKeywordSeps []string
+		flagBatchSize   int
+	)
+
+	cmd := &cobra.Command{
+		Use:   "account-tasks",
+		Short: "Create 个人页搜索 tasks from account registry",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg := TaskConfig{
+				Date:              flagDate,
+				App:               firstNonEmpty(rootApp, defaultTaskApp),
+				Scene:             taskagent.SceneProfileSearch,
+				TaskTableURL:      firstNonEmpty(rootTaskURL, ""),
+				SourceTableURL:    taskagent.EnvString(taskagent.EnvAccountBitableURL, flagAccountURL),
+				KeywordSeparators: flagKeywordSeps,
+				BatchSize:         flagBatchSize,
+			}
+			res, err := CreateSearchTasks(cmd.Context(), cfg)
+			if err != nil {
+				return err
+			}
+			log.Info().
+				Str("date", res.Date).
+				Int("accounts", res.SourceCount).
+				Int("params", res.TotalParams).
+				Int("created", res.CreatedCount).
+				Msg("profile search tasks created")
+			for _, detail := range res.Details {
+				log.Debug().
+					Str("task_id", detail.TaskID).
+					Str("account_id", detail.AccountID).
+					Str("book_id", detail.BookID).
+					Int("params", detail.ExpandedParams).
+					Msg("profile search params expanded")
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&flagDate, "date", "", "采集日期 (YYYY-MM-DD)")
+	cmd.Flags().StringVar(&flagAccountURL, "account-url", "", "覆盖 $ACCOUNT_BITABLE_URL 的账号登记表 URL")
+	cmd.Flags().StringSliceVar(&flagKeywordSeps, "keyword-sep", []string{"|", "｜"}, "搜索词分隔符列表（默认支持 | 和 ｜）")
+	cmd.Flags().IntVar(&flagBatchSize, "batch-size", 500, "写入任务时的批大小 (<=500)")
+	_ = cmd.MarkFlagRequired("date")
+
+	return cmd
+}
+
 const (
-	defaultDramaTaskApp       = "com.smile.gifmaker"
-	defaultAliasSeparator     = "|"
-	defaultDramaTaskBatchSize = 500
-	dateLayoutYYYYMMDD        = "2006-01-02"
+	defaultTaskApp        = "com.smile.gifmaker"
+	defaultAliasSeparator = "|"
+	defaultTaskBatchSize  = 500
+	dateLayoutYYYYMMDD    = "2006-01-02"
 )
 
 var defaultAliasSeparators = []string{defaultAliasSeparator, "｜"}
@@ -83,44 +131,46 @@ type dramaTaskFeishuClient interface {
 	CreateTaskRecords(ctx context.Context, rawURL string, records []taskagent.TaskRecordInput, override *taskagent.FeishuTaskFields) ([]string, error)
 }
 
-// DramaTaskConfig controls how drama catalog rows are converted into tasks.
-type DramaTaskConfig struct {
-	Date            string
-	App             string
-	Scene           string
-	TaskTableURL    string
-	DramaTableURL   string
-	Status          string
-	AliasSeparators []string
-	BatchSize       int
+// TaskConfig controls how drama catalog rows are converted into tasks.
+type TaskConfig struct {
+	SourceTableURL    string // 剧单登记表、账号登记表
+	Date              string
+	App               string
+	Scene             string
+	TaskTableURL      string
+	Status            string
+	KeywordSeparators []string
+	BatchSize         int
 
 	client dramaTaskFeishuClient
 }
 
-// DramaTaskResult reports how many dramas and Params were converted into tasks.
-type DramaTaskResult struct {
+// TaskResult reports how many dramas and Params were converted into tasks.
+type TaskResult struct {
 	Date         string
-	DramaCount   int
-	ParamCount   int
+	SourceCount  int
+	TotalParams  int
 	CreatedCount int
-	Details      []DramaTaskDetail
+	Details      []TaskDetail
 }
 
-// DramaTaskDetail summarizes per-drama fan-out.
-type DramaTaskDetail struct {
-	DramaName  string
-	BookID     string
-	ParamCount int
+// TaskDetail summarizes per-drama fan-out.
+type TaskDetail struct {
+	TaskID         string
+	DramaName      string
+	BookID         string
+	AccountID      string
+	ExpandedParams int
 }
 
-// CreateDramaSearchTasks loads drama metadata filtered by capture date and writes
-// pending 综合页搜索 tasks (one per drama name + alias) into the task table.
-func CreateDramaSearchTasks(ctx context.Context, cfg DramaTaskConfig) (*DramaTaskResult, error) {
+// CreateSearchTasks loads source rows filtered by date and writes pending search tasks into the task table.
+// When AccountID is present, it creates 个人页搜索 tasks; otherwise it creates 综合页搜索 tasks.
+func CreateSearchTasks(ctx context.Context, cfg TaskConfig) (*TaskResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	cfg.applyDefaults()
-	result := &DramaTaskResult{Date: cfg.Date}
+	result := &TaskResult{Date: cfg.Date}
 
 	if strings.TrimSpace(cfg.Date) == "" {
 		return result, errors.New("date is required (YYYY-MM-DD)")
@@ -129,8 +179,8 @@ func CreateDramaSearchTasks(ctx context.Context, cfg DramaTaskConfig) (*DramaTas
 	if err != nil {
 		return result, fmt.Errorf("invalid date %q: %w", cfg.Date, err)
 	}
-	if strings.TrimSpace(cfg.DramaTableURL) == "" {
-		return result, errors.New("drama table url is required (set DRAMA_BITABLE_URL or --drama-url)")
+	if strings.TrimSpace(cfg.SourceTableURL) == "" {
+		return result, errors.New("source table url is required")
 	}
 	if strings.TrimSpace(cfg.TaskTableURL) == "" {
 		return result, errors.New("task table url is required (set TASK_BITABLE_URL or --task-url)")
@@ -145,91 +195,142 @@ func CreateDramaSearchTasks(ctx context.Context, cfg DramaTaskConfig) (*DramaTas
 		client = feishuClient
 	}
 
-	fields := taskagent.DefaultDramaFields()
-	if strings.TrimSpace(fields.CaptureDate) == "" {
-		return result, errors.New("drama capture date field is not configured (set DRAMA_FIELD_CAPTURE_DATE)")
-	}
+	sourceFields := taskagent.DefaultSourceFields()
 
 	opts := &taskagent.FeishuTaskQueryOptions{}
-	rows, err := client.FetchBitableRows(ctx, cfg.DramaTableURL, opts)
+	rows, err := client.FetchBitableRows(ctx, cfg.SourceTableURL, opts)
 	if err != nil {
-		return result, fmt.Errorf("fetch drama table rows failed: %w", err)
+		return result, fmt.Errorf("fetch source table rows failed: %w", err)
 	}
 
-	aliasSeps := normalizeAliasSeparators(cfg.AliasSeparators)
+	keywordsSeps := normalizeKeywordsSeparators(cfg.KeywordSeparators)
 	batchSize := cfg.BatchSize
 	if batchSize <= 0 {
-		batchSize = defaultDramaTaskBatchSize
+		batchSize = defaultTaskBatchSize
 	}
 
 	type recordKey struct {
-		bookID string
-		param  string
+		taskID    string
+		bookID    string
+		accountID string
+		param     string
+		app       string
+		date      string
 	}
 	seen := make(map[recordKey]struct{})
 	records := make([]taskagent.TaskRecordInput, 0)
-	details := make([]DramaTaskDetail, 0)
+	details := make([]TaskDetail, 0)
 
 	for _, row := range rows {
 		if row.Fields == nil {
 			continue
 		}
-		captureRaw := getString(row.Fields, fields.CaptureDate)
+
+		accountID := strings.TrimSpace(getString(row.Fields, sourceFields.AccountID))
+		captureRaw := getString(row.Fields, sourceFields.CaptureDate)
 		captureTime, ok := matchCaptureDate(captureRaw, targetDate)
 		if !ok {
 			continue
 		}
 		captureRaw = strings.TrimSpace(captureRaw)
+		if captureRaw == "" && captureTime != nil {
+			captureRaw = captureTime.Format(dateLayoutYYYYMMDD)
+		}
 
-		name := strings.TrimSpace(getString(row.Fields, fields.DramaName))
-		bookID := strings.TrimSpace(getString(row.Fields, fields.DramaID))
-		if name == "" || bookID == "" {
+		bookID := strings.TrimSpace(getString(row.Fields, sourceFields.DramaID))
+		if bookID == "" {
 			continue
 		}
 
-		aliasField := ""
-		if strings.TrimSpace(fields.SearchAlias) != "" {
-			aliasField = getString(row.Fields, fields.SearchAlias)
+		app := cfg.App
+		if platform := strings.TrimSpace(getString(row.Fields, sourceFields.Platform)); platform != "" {
+			app = normalizeAppPackage(platform, cfg.App)
 		}
-		params := buildAliasParams(name, aliasField, aliasSeps)
+		if strings.TrimSpace(app) == "" {
+			continue
+		}
+
+		groupID := ""
+		taskID := ""
+		params := []string(nil)
+		name := ""
+		searchRaw := ""
+		if accountID != "" {
+			name = strings.TrimSpace(getString(row.Fields, sourceFields.DramaName))
+			taskID = strings.TrimSpace(getString(row.Fields, sourceFields.BizTaskID))
+			searchRaw = strings.TrimSpace(getString(row.Fields, sourceFields.SearchKeywords))
+			if searchRaw == "" {
+				continue
+			}
+			groupApp := taskagent.MapAppValue(app)
+			if strings.TrimSpace(groupApp) == "" {
+				groupApp = app
+			}
+			groupID = fmt.Sprintf("%s_%s_%s", groupApp, bookID, accountID)
+		} else {
+			name = strings.TrimSpace(getString(row.Fields, sourceFields.DramaName))
+			if name == "" {
+				continue
+			}
+			searchRaw = strings.TrimSpace(getString(row.Fields, sourceFields.SearchKeywords))
+		}
+		params = buildKeywordsParams(name, searchRaw, keywordsSeps)
 		if len(params) == 0 {
 			continue
 		}
 
 		added := 0
 		for _, param := range params {
-			key := recordKey{bookID: bookID, param: param}
+			key := recordKey{
+				taskID:    taskID,
+				bookID:    bookID,
+				accountID: accountID,
+				param:     param,
+				app:       app,
+				date:      captureRaw,
+			}
 			if _, exists := seen[key]; exists {
 				continue
 			}
 			seen[key] = struct{}{}
-			records = append(records, taskagent.TaskRecordInput{
-				App:         cfg.App,
+			record := taskagent.TaskRecordInput{
+				App:         app,
 				Scene:       cfg.Scene,
 				Params:      param,
 				BookID:      bookID,
 				Status:      cfg.Status,
 				Datetime:    captureTime,
 				DatetimeRaw: captureRaw,
-			})
+			}
+			if accountID != "" {
+				record.BizTaskID = taskID
+				record.UserID = accountID
+				record.GroupID = groupID
+			}
+			records = append(records, record)
 			added++
 		}
 		if added > 0 {
-			details = append(details, DramaTaskDetail{DramaName: name, BookID: bookID, ParamCount: added})
+			details = append(details, TaskDetail{
+				TaskID:         taskID,
+				DramaName:      name,
+				BookID:         bookID,
+				AccountID:      accountID,
+				ExpandedParams: added,
+			})
 		}
 	}
 
 	result.Details = details
-	result.DramaCount = len(details)
-	result.ParamCount = len(records)
+	result.SourceCount = len(details)
+	result.TotalParams = len(records)
 
 	if len(records) == 0 {
 		log.Info().
 			Str("date", cfg.Date).
-			Msg("no drama rows matched capture date, nothing to create")
+			Msg("no search rows matched date, nothing to create")
 		return result, nil
 	}
-
 	created := 0
 	for start := 0; start < len(records); start += batchSize {
 		end := start + batchSize
@@ -245,19 +346,15 @@ func CreateDramaSearchTasks(ctx context.Context, cfg DramaTaskConfig) (*DramaTas
 		log.Info().
 			Int("chunk", len(ids)).
 			Int("offset", start).
-			Msg("drama tasks chunk written")
+			Msg("search tasks chunk written")
 	}
-
 	result.CreatedCount = created
 	return result, nil
 }
 
-func (cfg *DramaTaskConfig) applyDefaults() {
+func (cfg *TaskConfig) applyDefaults() {
 	if cfg.App == "" {
-		cfg.App = defaultDramaTaskApp
-	}
-	if cfg.Scene == "" {
-		cfg.Scene = taskagent.SceneGeneralSearch
+		cfg.App = defaultTaskApp
 	}
 	if cfg.Status == "" {
 		cfg.Status = taskagent.StatusPending
@@ -265,12 +362,9 @@ func (cfg *DramaTaskConfig) applyDefaults() {
 	if cfg.TaskTableURL == "" {
 		cfg.TaskTableURL = taskagent.EnvString(taskagent.EnvTaskBitableURL, "")
 	}
-	if cfg.DramaTableURL == "" {
-		cfg.DramaTableURL = taskagent.EnvString("DRAMA_BITABLE_URL", "")
-	}
-	cfg.AliasSeparators = normalizeAliasSeparators(cfg.AliasSeparators)
+	cfg.KeywordSeparators = normalizeKeywordsSeparators(cfg.KeywordSeparators)
 	if cfg.BatchSize <= 0 {
-		cfg.BatchSize = defaultDramaTaskBatchSize
+		cfg.BatchSize = defaultTaskBatchSize
 	}
 }
 
@@ -333,7 +427,7 @@ func timestampToTime(ts int64) time.Time {
 	}
 }
 
-func normalizeAliasSeparators(seps []string) []string {
+func normalizeKeywordsSeparators(seps []string) []string {
 	seen := make(map[string]struct{})
 	cleaned := make([]string, 0, len(seps))
 	for _, sep := range seps {
@@ -353,7 +447,7 @@ func normalizeAliasSeparators(seps []string) []string {
 	return cleaned
 }
 
-func buildAliasParams(primary, aliasRaw string, seps []string) []string {
+func buildKeywordsParams(primary, aliasRaw string, seps []string) []string {
 	add := func(order *[]string, seen map[string]struct{}, value string) {
 		trimmed := strings.TrimSpace(value)
 		if trimmed == "" {
@@ -373,7 +467,7 @@ func buildAliasParams(primary, aliasRaw string, seps []string) []string {
 	if strings.TrimSpace(aliasRaw) == "" {
 		return params
 	}
-	normalizedSeps := normalizeAliasSeparators(seps)
+	normalizedSeps := normalizeKeywordsSeparators(seps)
 	primarySep := normalizedSeps[0]
 	replacePairs := make([]string, 0, 2*len(normalizedSeps))
 	for _, sep := range normalizedSeps[1:] {
@@ -391,6 +485,19 @@ func buildAliasParams(primary, aliasRaw string, seps []string) []string {
 	return params
 }
 
+func normalizeAppPackage(platform, fallback string) string {
+	trimmed := strings.TrimSpace(platform)
+	if trimmed == "" {
+		return strings.TrimSpace(fallback)
+	}
+	switch trimmed {
+	case "快手":
+		return defaultTaskApp
+	default:
+		return trimmed
+	}
+}
+
 // getString reads a field value from a Feishu bitable row fields map as string.
 func getString(fields map[string]any, name string) string {
 	if fields == nil || strings.TrimSpace(name) == "" {
@@ -404,8 +511,12 @@ func getString(fields map[string]any, name string) string {
 			return strings.TrimSpace(string(v))
 		case json.Number:
 			return strings.TrimSpace(v.String())
+		case map[string]any:
+			if text := extractTextFromAny(v); text != "" {
+				return text
+			}
 		case []interface{}:
-			if text := extractTextArray(v); text != "" {
+			if text := extractTextFromAny(v); text != "" {
 				return text
 			}
 		default:
@@ -413,6 +524,34 @@ func getString(fields map[string]any, name string) string {
 				return strings.TrimSpace(string(b))
 			}
 			return ""
+		}
+	}
+	return ""
+}
+
+// extractTextFromAny tries to normalize Feishu rich-text values into a plain string.
+func extractTextFromAny(val any) string {
+	switch v := val.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(v)
+	case []byte:
+		return strings.TrimSpace(string(v))
+	case []interface{}:
+		return extractTextArray(v)
+	case map[string]any:
+		if text, ok := v["text"].(string); ok {
+			return strings.TrimSpace(text)
+		}
+		if nested, ok := v["value"]; ok {
+			return extractTextFromAny(nested)
+		}
+		if nested, ok := v["elements"]; ok {
+			return extractTextFromAny(nested)
+		}
+		if nested, ok := v["content"]; ok {
+			return extractTextFromAny(nested)
 		}
 	}
 	return ""

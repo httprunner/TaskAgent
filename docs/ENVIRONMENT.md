@@ -25,6 +25,7 @@ The tables below enumerate every environment variable TaskAgent reads via `os.Ge
 | `SOURCE_SHEET_URL` | Required for sheet-to-task creation | – | `cmd` | Source Feishu spreadsheet URL(s) that feed task creation. Comma-separated list. |
 | `RESULT_BITABLE_URL` | Yes when uploading captures to Feishu | – | `internal/storage`, `cmd` | Result table receiving capture rows + webhook summaries. |
 | `DRAMA_BITABLE_URL` | Required when fetching drama metadata from Feishu | – | `pkg/webhook`, `cmd` | Drama catalog table for ratio/metadata lookups. |
+| `ACCOUNT_BITABLE_URL` | Required when creating profile search tasks from account registry | – | `cmd` | Account registration table (used by `account-tasks`). |
 | `WEBHOOK_BITABLE_URL` | Optional | empty | `pkg/webhook` | Dedicated webhook result table for group-based flows (aggregates TaskIDs + delivery status). |
 | `DEVICE_BITABLE_URL` | Optional | empty | `internal/devrecorder` | Device heartbeat table; leave blank to disable recorder writes. |
 | `DEVICE_TASK_BITABLE_URL` | Optional | empty | `internal/devrecorder`, `internal/storage` | Device-dispatch history table (one row per job). |
@@ -132,15 +133,20 @@ TaskAgent exposes per-table override knobs so you can align with custom schemas 
 | `RESULT_FIELD_COLLECTION` / `RESULT_FIELD_EPISODE` | `Collection` / `Episode` | Aggregation metadata. |
 | `RESULT_FIELD_PUBLISHTIME` | `PublishTime` | Publish timestamp. |
 
-### Drama table (`DRAMA_FIELD_*`)
+### Source tables (`SOURCE_FIELD_*`)
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `DRAMA_FIELD_ID` | `短剧 ID` | Unique drama identifier. |
-| `DRAMA_FIELD_NAME` | `短剧名称` | Name used for Params matching. |
-| `DRAMA_FIELD_DURATION` | `全剧时长（秒）` | Total duration (seconds). |
-| `DRAMA_FIELD_EPISODE_COUNT` | `全剧集数` | Episode count in the template schema. |
-| `DRAMA_FIELD_PRIORITY` | `优先级` | Internal priority. |
-| `DRAMA_FIELD_RIGHTS_SCENARIO` | `维权场景` | Rights-protection scenario label. |
+| `SOURCE_FIELD_DRAMA_ID` | `短剧 ID` | Unique drama identifier. |
+| `SOURCE_FIELD_DRAMA_NAME` | `短剧名称` | Name used for Params matching. |
+| `SOURCE_FIELD_TOTAL_DURATION` | `全剧时长（秒）` | Total duration (seconds). |
+| `SOURCE_FIELD_EPISODE_COUNT` | `全剧集数` | Episode count in the template schema. |
+| `SOURCE_FIELD_PRIORITY` | `优先级` | Internal priority. |
+| `SOURCE_FIELD_RIGHTS_SCENARIO` | `维权场景` | Rights-protection scenario label. |
+| `SOURCE_FIELD_SEARCH_KEYWORDS` | `搜索词` | Search term list (split by separator). |
+| `SOURCE_FIELD_BIZ_TASK_ID` | `任务 ID` | Business task identifier. |
+| `SOURCE_FIELD_ACCOUNT_ID` | `账号 ID` | Account identifier used for profile search. |
+| `SOURCE_FIELD_PLATFORM` | `平台名称` | Optional platform/app value. |
+| `SOURCE_FIELD_CAPTURE_DATE` | `采集日期` | Capture/register date for filtering (`YYYY-MM-DD` / timestamp). |
 
 ### Device tables (`DEVICE_FIELD_*` and `DEVICE_TASK_FIELD_*`)
 | Variable | Default | Purpose |

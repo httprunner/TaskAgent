@@ -211,18 +211,21 @@ type ResultRecordInput struct {
 	PublishTime         string
 }
 
-// DramaFields defines the schema for the short-drama catalog table referenced
-// by DRAMA_BITABLE_URL. Each field stores the column name as it appears in the
+// SourceFields defines the schema shared by the source tables (drama catalog
+// and account registry). Each field stores the column name as it appears in the
 // bitable.
-type DramaFields struct {
+type SourceFields struct {
 	DramaID                  string
 	DramaName                string
 	TotalDuration            string
 	EpisodeCount             string
 	Priority                 string
 	RightsProtectionScenario string
-	SearchAlias              string
+	SearchKeywords           string
 	CaptureDate              string
+	BizTaskID                string
+	AccountID                string
+	Platform                 string
 }
 
 // TaskStatusUpdate links a TaskID to the status value it should adopt.

@@ -31,7 +31,7 @@ Feishu Task Table ──> FeishuTaskClient (task)
     - Device pool: `NewDevicePoolAgent`, `Config`.
     - Task source: `NewFeishuTaskClient`, `FeishuTaskClientOptions`.
     - Result storage: `ResultStorageConfig`, `ResultStorageManager`, `NewResultStorageManager`, `EnsureResultReporter`, `OpenCaptureResultsDB`, `ResolveResultDBPath`.
-    - Feishu SDK aliases: `FeishuClient`, `TaskRecordInput`, `BitableRow`, field mappings (`DefaultTaskFields`, `DefaultResultFields`, `DefaultDramaFields`), filter helpers (`FeishuFilterInfo`, `NewFeishuFilterInfo`, `NewFeishuCondition`, etc.).
+    - Feishu SDK aliases: `FeishuClient`, `TaskRecordInput`, `BitableRow`, field mappings (`DefaultTaskFields`, `DefaultResultFields`, `DefaultSourceFields`), filter helpers (`FeishuFilterInfo`, `NewFeishuFilterInfo`, `NewFeishuCondition`, etc.).
     - Env + constants: `EnvString` and env/status constants (`EnvTaskBitableURL`, `EnvResultBitableURL`, `EnvDeviceBitableURL`, `EnvCookieBitableURL`, `StatusPending/Success/...`).
   - Multi-scenario helpers (optional):
     - `DispatchPlanner` hooks: `Config.DispatchPlanner`.
@@ -186,7 +186,7 @@ Feishu Task Table ──> FeishuTaskClient (task)
 ## Configuration quick reference
 - Credentials & Feishu endpoints: `FEISHU_APP_ID`, `FEISHU_APP_SECRET`, `FEISHU_TENANT_KEY`, `FEISHU_BASE_URL`.
 - Task/result/device tables: `TASK_BITABLE_URL`, `RESULT_BITABLE_URL`, `DEVICE_BITABLE_URL`, `DEVICE_TASK_BITABLE_URL`.
-- Field overrides: `TASK_FIELD_*`, `RESULT_FIELD_*`, `DRAMA_FIELD_*`, `DEVICE_FIELD_*`, `DEVICE_TASK_FIELD_*`.
+- Field overrides: `TASK_FIELD_*`, `RESULT_FIELD_*`, `SOURCE_FIELD_*`, `DEVICE_FIELD_*`, `DEVICE_TASK_FIELD_*`.
 - Storage knobs: `TRACKING_STORAGE_DISABLE_JSONL`, `TRACKING_STORAGE_DB_PATH`, `RESULT_STORAGE_ENABLE_FEISHU`, `RESULT_SQLITE_TABLE`, `DRAMA_SQLITE_TABLE`.
 - Reporter throttles: `RESULT_REPORT_POLL_INTERVAL`, `RESULT_REPORT_BATCH`, `RESULT_REPORT_HTTP_TIMEOUT`, `FEISHU_REPORT_RPS`.
 - App binding: `Config.App` and `NewFeishuTaskClient` require a non-empty app value.

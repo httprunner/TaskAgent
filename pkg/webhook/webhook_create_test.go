@@ -11,13 +11,13 @@ import (
 
 func TestNormalizeDramaInfoForStorage(t *testing.T) {
 	t.Cleanup(feishusdk.RefreshFieldMappings)
-	t.Setenv("DRAMA_FIELD_ID", "短剧 ID")
-	t.Setenv("DRAMA_FIELD_NAME", "短剧名称")
-	t.Setenv("DRAMA_FIELD_DURATION", "全剧时长（秒）")
-	t.Setenv("DRAMA_FIELD_EPISODE_COUNT", "全剧集数")
-	t.Setenv("DRAMA_FIELD_PRIORITY", "优先级")
-	t.Setenv("DRAMA_FIELD_RIGHTS_SCENARIO", "维权场景")
-	t.Setenv("DRAMA_FIELD_CAPTURE_DATE", "采集日期")
+	t.Setenv("SOURCE_FIELD_DRAMA_ID", "短剧 ID")
+	t.Setenv("SOURCE_FIELD_DRAMA_NAME", "短剧名称")
+	t.Setenv("SOURCE_FIELD_TOTAL_DURATION", "全剧时长（秒）")
+	t.Setenv("SOURCE_FIELD_EPISODE_COUNT", "全剧集数")
+	t.Setenv("SOURCE_FIELD_PRIORITY", "优先级")
+	t.Setenv("SOURCE_FIELD_RIGHTS_SCENARIO", "维权场景")
+	t.Setenv("SOURCE_FIELD_CAPTURE_DATE", "采集日期")
 	feishusdk.RefreshFieldMappings()
 
 	raw := map[string]any{

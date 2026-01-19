@@ -631,7 +631,7 @@ func buildWebhookResultPayload(dramaRaw map[string]any, records []CaptureRecordP
 	if dramaRaw == nil {
 		dramaRaw = map[string]any{}
 	}
-	payload := flattenDramaFields(dramaRaw, taskagent.DefaultDramaFields())
+	payload := flattenDramaFields(dramaRaw, taskagent.DefaultSourceFields())
 	for key, val := range dramaRaw {
 		trimmed := strings.TrimSpace(key)
 		if trimmed == "" {

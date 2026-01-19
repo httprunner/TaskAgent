@@ -33,48 +33,48 @@ func (f *fakeDramaTaskClient) CreateTaskRecords(ctx context.Context, rawURL stri
 	return ids, nil
 }
 
-func TestCreateDramaSearchTasksCreatesRecords(t *testing.T) {
+func TestCreateSearchTasksDramaCreatesRecords(t *testing.T) {
 	ts := time.Date(2025, time.December, 5, 0, 0, 0, 0, time.Local).Unix()
 	client := &fakeDramaTaskClient{
 		rows: []taskagent.BitableRow{
 			{Fields: map[string]any{
-				taskagent.DefaultDramaFields().DramaName:   "DramaA",
-				taskagent.DefaultDramaFields().DramaID:     "B1",
-				taskagent.DefaultDramaFields().SearchAlias: "AliasA|AliasB|DramaA",
-				taskagent.DefaultDramaFields().CaptureDate: "2025-12-05",
+				taskagent.DefaultSourceFields().DramaName:      "DramaA",
+				taskagent.DefaultSourceFields().DramaID:        "B1",
+				taskagent.DefaultSourceFields().SearchKeywords: "AliasA|AliasB|DramaA",
+				taskagent.DefaultSourceFields().CaptureDate:    "2025-12-05",
 			}},
 			{Fields: map[string]any{
-				taskagent.DefaultDramaFields().DramaName:   "DramaB",
-				taskagent.DefaultDramaFields().DramaID:     "B2",
-				taskagent.DefaultDramaFields().SearchAlias: "AliasC",
-				taskagent.DefaultDramaFields().CaptureDate: fmt.Sprintf("%d", ts),
+				taskagent.DefaultSourceFields().DramaName:      "DramaB",
+				taskagent.DefaultSourceFields().DramaID:        "B2",
+				taskagent.DefaultSourceFields().SearchKeywords: "AliasC",
+				taskagent.DefaultSourceFields().CaptureDate:    fmt.Sprintf("%d", ts),
 			}},
 			{Fields: map[string]any{
-				taskagent.DefaultDramaFields().DramaName:   "DramaSkip",
-				taskagent.DefaultDramaFields().DramaID:     "B3",
-				taskagent.DefaultDramaFields().SearchAlias: "Other",
-				taskagent.DefaultDramaFields().CaptureDate: "2025-12-04",
+				taskagent.DefaultSourceFields().DramaName:      "DramaSkip",
+				taskagent.DefaultSourceFields().DramaID:        "B3",
+				taskagent.DefaultSourceFields().SearchKeywords: "Other",
+				taskagent.DefaultSourceFields().CaptureDate:    "2025-12-04",
 			}},
 		},
 	}
 
-	cfg := DramaTaskConfig{
-		Date:          "2025-12-05",
-		TaskTableURL:  "task",
-		DramaTableURL: "drama",
-		BatchSize:     2,
-		client:        client,
+	cfg := TaskConfig{
+		Date:           "2025-12-05",
+		TaskTableURL:   "task",
+		SourceTableURL: "drama",
+		BatchSize:      2,
+		client:         client,
 	}
 
-	res, err := CreateDramaSearchTasks(context.Background(), cfg)
+	res, err := CreateSearchTasks(context.Background(), cfg)
 	if err != nil {
-		t.Fatalf("CreateDramaSearchTasks returned error: %v", err)
+		t.Fatalf("CreateSearchTasks returned error: %v", err)
 	}
 	if res.CreatedCount != 5 {
 		t.Fatalf("expected 5 tasks created, got %d", res.CreatedCount)
 	}
-	if res.ParamCount != 5 {
-		t.Fatalf("expected param count 5, got %d", res.ParamCount)
+	if res.TotalParams != 5 {
+		t.Fatalf("expected param count 5, got %d", res.TotalParams)
 	}
 	if len(res.Details) != 2 {
 		t.Fatalf("expected 2 drama details, got %d", len(res.Details))
@@ -91,37 +91,131 @@ func TestCreateDramaSearchTasksCreatesRecords(t *testing.T) {
 	}
 }
 
-func TestCreateDramaSearchTasksErrors(t *testing.T) {
-	cfg := DramaTaskConfig{}
-	if _, err := CreateDramaSearchTasks(context.Background(), cfg); err == nil {
+func TestCreateSearchTasksProfileCreatesRecords(t *testing.T) {
+	client := &fakeDramaTaskClient{
+		rows: []taskagent.BitableRow{
+			{Fields: map[string]any{
+				taskagent.DefaultSourceFields().BizTaskID:      "TASK-1",
+				taskagent.DefaultSourceFields().DramaID:        "B1",
+				taskagent.DefaultSourceFields().AccountID:      "U1",
+				taskagent.DefaultSourceFields().SearchKeywords: "Alice|Bob|Alice",
+				taskagent.DefaultSourceFields().Platform:       "快手",
+				taskagent.DefaultSourceFields().CaptureDate:    "2025-12-05",
+			}},
+			{Fields: map[string]any{
+				taskagent.DefaultSourceFields().BizTaskID:      "TASK-2",
+				taskagent.DefaultSourceFields().DramaID:        "B2",
+				taskagent.DefaultSourceFields().AccountID:      "U2",
+				taskagent.DefaultSourceFields().SearchKeywords: "SkipMe",
+				taskagent.DefaultSourceFields().Platform:       "快手",
+				taskagent.DefaultSourceFields().CaptureDate:    "2025-12-04",
+			}},
+		},
+	}
+
+	cfg := TaskConfig{
+		Date:           "2025-12-05",
+		TaskTableURL:   "task",
+		SourceTableURL: "account",
+		BatchSize:      2,
+		client:         client,
+	}
+
+	res, err := CreateSearchTasks(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("CreateSearchTasks returned error: %v", err)
+	}
+	if res.CreatedCount != 2 {
+		t.Fatalf("expected 2 tasks created, got %d", res.CreatedCount)
+	}
+	if res.TotalParams != 2 {
+		t.Fatalf("expected param count 2, got %d", res.TotalParams)
+	}
+	if len(res.Details) != 1 {
+		t.Fatalf("expected 1 account detail, got %d", len(res.Details))
+	}
+	if len(client.createCalls) != 1 {
+		t.Fatalf("expected 1 batch call, got %d", len(client.createCalls))
+	}
+	firstBatch := client.createCalls[0]
+	if len(firstBatch) != 2 {
+		t.Fatalf("unexpected batch size: %#v", firstBatch)
+	}
+	if firstBatch[0].Params != "Alice" || firstBatch[1].Params != "Bob" {
+		t.Fatalf("unexpected params: %#v", firstBatch)
+	}
+	if firstBatch[0].BizTaskID != "TASK-1" || firstBatch[0].UserID != "U1" || firstBatch[0].BookID != "B1" {
+		t.Fatalf("unexpected task metadata: %#v", firstBatch[0])
+	}
+	if firstBatch[0].App != "com.smile.gifmaker" || firstBatch[0].Scene != taskagent.SceneProfileSearch {
+		t.Fatalf("unexpected app/scene: %#v", firstBatch[0])
+	}
+	if firstBatch[0].GroupID != "快手_B1_U1" {
+		t.Fatalf("unexpected group id: %#v", firstBatch[0].GroupID)
+	}
+}
+
+func TestCreateSearchTasksProfileErrors(t *testing.T) {
+	cfg := TaskConfig{}
+	if _, err := CreateSearchTasks(context.Background(), cfg); err == nil {
 		t.Fatal("expected error for missing date")
 	}
 
 	client := &fakeDramaTaskClient{}
-	cfg = DramaTaskConfig{
-		Date:          "2025-12-05",
-		TaskTableURL:  "task",
-		DramaTableURL: "drama",
-		client:        client,
+	cfg = TaskConfig{
+		Date:           "2025-12-05",
+		TaskTableURL:   "task",
+		SourceTableURL: "account",
+		client:         client,
 	}
 	client.createErr = errors.New("boom")
 	cfg.BatchSize = 1
 	cfg.client = client
 	client.rows = []taskagent.BitableRow{
 		{Fields: map[string]any{
-			taskagent.DefaultDramaFields().DramaName:   "DramaA",
-			taskagent.DefaultDramaFields().DramaID:     "B1",
-			taskagent.DefaultDramaFields().SearchAlias: "AliasA",
-			taskagent.DefaultDramaFields().CaptureDate: "2025-12-05",
+			taskagent.DefaultSourceFields().BizTaskID:      "TASK-1",
+			taskagent.DefaultSourceFields().DramaID:        "B1",
+			taskagent.DefaultSourceFields().AccountID:      "U1",
+			taskagent.DefaultSourceFields().SearchKeywords: "Alice",
+			taskagent.DefaultSourceFields().CaptureDate:    "2025-12-05",
 		}},
 	}
-	if _, err := CreateDramaSearchTasks(context.Background(), cfg); err == nil {
+	if _, err := CreateSearchTasks(context.Background(), cfg); err == nil {
+		t.Fatal("expected error when CreateTaskRecords fails")
+	}
+}
+
+func TestCreateSearchTasksDramaErrors(t *testing.T) {
+	cfg := TaskConfig{}
+	if _, err := CreateSearchTasks(context.Background(), cfg); err == nil {
+		t.Fatal("expected error for missing date")
+	}
+
+	client := &fakeDramaTaskClient{}
+	cfg = TaskConfig{
+		Date:           "2025-12-05",
+		TaskTableURL:   "task",
+		SourceTableURL: "drama",
+		client:         client,
+	}
+	client.createErr = errors.New("boom")
+	cfg.BatchSize = 1
+	cfg.client = client
+	client.rows = []taskagent.BitableRow{
+		{Fields: map[string]any{
+			taskagent.DefaultSourceFields().DramaName:      "DramaA",
+			taskagent.DefaultSourceFields().DramaID:        "B1",
+			taskagent.DefaultSourceFields().SearchKeywords: "AliasA",
+			taskagent.DefaultSourceFields().CaptureDate:    "2025-12-05",
+		}},
+	}
+	if _, err := CreateSearchTasks(context.Background(), cfg); err == nil {
 		t.Fatal("expected error when CreateTaskRecords fails")
 	}
 }
 
 func TestBuildAliasParamsDeduplicates(t *testing.T) {
-	got := buildAliasParams("Primary", "AliasA|AliasB|AliasA|Primary", []string{"|"})
+	got := buildKeywordsParams("Primary", "AliasA|AliasB|AliasA|Primary", []string{"|"})
 	want := []string{"Primary", "AliasA", "AliasB"}
 	if len(got) != len(want) {
 		t.Fatalf("unexpected param count: got %d want %d", len(got), len(want))
@@ -162,7 +256,7 @@ func TestBuildAliasParamsSupportsFullWidthSeparator(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := buildAliasParams("Primary", tc.aliasRaw, tc.seps)
+			got := buildKeywordsParams("Primary", tc.aliasRaw, tc.seps)
 			if len(got) != len(tc.want) {
 				t.Fatalf("unexpected param count: got %d want %d", len(got), len(tc.want))
 			}

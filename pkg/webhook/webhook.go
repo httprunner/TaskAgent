@@ -87,8 +87,7 @@ func PostWebhook(ctx context.Context, url string, payload map[string]any, client
 	return nil
 }
 
-
-func flattenDramaFields(raw map[string]any, schema taskagent.FeishuDramaFields) map[string]any {
+func flattenDramaFields(raw map[string]any, schema taskagent.FeishuSourceFields) map[string]any {
 	fieldMap := taskagent.StructFieldMap(schema)
 	payload := make(map[string]any, len(fieldMap))
 	for engName, rawKey := range fieldMap {
@@ -151,7 +150,6 @@ func FlattenRecordsAndCollectItemIDs(records []CaptureRecordPayload, schema task
 	return result, itemIDs
 }
 
-
 const vedemSignatureExpiration = 1800
 
 // buildVedemAgwTokenSigned signs the actual request payload.
@@ -177,7 +175,6 @@ func sha256HMAC(key []byte, data []byte) []byte {
 	mac.Write(data)
 	return []byte(fmt.Sprintf("%x", mac.Sum(nil)))
 }
-
 
 // getString reads a field value from a Feishu bitable row fields map as string.
 func getString(fields map[string]any, name string) string {

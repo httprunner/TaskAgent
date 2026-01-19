@@ -169,5 +169,5 @@ TaskAgent CLI（可选）：
 ## 字段约定
 
 - 任务表的 `BookID` 字段由 `TASK_FIELD_BOOKID` 覆盖（默认列名 `BookID`）。
-- 剧单表的「短剧 ID」字段由 `DRAMA_FIELD_ID` 覆盖（默认列名 `短剧 ID`）。
+- 源表的「短剧 ID」字段由 `SOURCE_FIELD_DRAMA_ID` 覆盖（默认列名 `短剧 ID`）。
 - Group webhook 的 drama 关联规则为：`task.BookID == drama.短剧 ID`。

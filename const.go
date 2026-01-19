@@ -20,6 +20,9 @@ const (
 	EnvDeviceBitableURL = feishusdk.EnvDeviceBitableURL
 	// EnvCookieBitableURL points to the dedicated cookies table for SingleURLWorker.
 	EnvCookieBitableURL = feishusdk.EnvCookieBitableURL
+	// EnvAccountBitableURL indicates where to pull account registration rows.
+	EnvAccountBitableURL = feishusdk.EnvAccountBitableURL
+	EnvDramaBitableURL   = feishusdk.EnvDramaBitableURL
 
 	// EnvTaskGroupPriorityEnable enables group-aware task prioritization in the default
 	// DevicePoolAgent wiring (when enabled, tasks are re-ordered by remaining group size).

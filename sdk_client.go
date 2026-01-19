@@ -53,8 +53,8 @@ type FeishuTaskFields = feishusdk.TaskFields
 // FeishuResultFields aliases the result-table field mapping.
 type FeishuResultFields = feishusdk.ResultFields
 
-// FeishuDramaFields aliases the drama-table field mapping.
-type FeishuDramaFields = feishusdk.DramaFields
+// FeishuSourceFields aliases the source-table field mapping.
+type FeishuSourceFields = feishusdk.SourceFields
 
 // FeishuTaskTable aliases the decoded task-table payload.
 type FeishuTaskTable = feishusdk.TaskTable
@@ -72,9 +72,9 @@ func DefaultResultFields() FeishuResultFields {
 	return feishusdk.DefaultResultFields
 }
 
-// DefaultDramaFields returns the current default drama field mapping.
-func DefaultDramaFields() FeishuDramaFields {
-	return feishusdk.DefaultDramaFields
+// DefaultSourceFields returns the current default drama field mapping.
+func DefaultSourceFields() FeishuSourceFields {
+	return feishusdk.DefaultSourceFields
 }
 
 // NewFeishuFilterInfo constructs a new filter with the given conjunction

@@ -39,7 +39,7 @@ func MirrorDramaRowsIfNeeded(tableURL string, rows []feishusdk.BitableRow) {
 }
 
 func isDramaCatalogURL(raw string) bool {
-	envURL := env.String("DRAMA_BITABLE_URL", "")
+	envURL := env.String(feishusdk.EnvDramaBitableURL, "")
 	if envURL == "" || strings.TrimSpace(raw) == "" {
 		return false
 	}
@@ -65,7 +65,7 @@ type dramaDetailStore struct {
 	db      *sql.DB
 	stmt    *sql.Stmt
 	table   string
-	fields  feishusdk.DramaFields
+	fields  feishusdk.SourceFields
 	columns []string
 }
 
@@ -101,7 +101,7 @@ func newDramaDetailStore() (*dramaDetailStore, error) {
 	return &dramaDetailStore{db: db, stmt: stmt, table: table, fields: fields, columns: columns}, nil
 }
 
-func buildDramaColumnOrder(fields feishusdk.DramaFields) []string {
+func buildDramaColumnOrder(fields feishusdk.SourceFields) []string {
 	cols := []string{fields.DramaName}
 	if trimmed := strings.TrimSpace(fields.DramaID); trimmed != "" {
 		cols = append(cols, trimmed)
@@ -121,7 +121,7 @@ func buildDramaColumnOrder(fields feishusdk.DramaFields) []string {
 	return cols
 }
 
-func ensureDramaSchema(db *sql.DB, table string, fields feishusdk.DramaFields, columns []string) error {
+func ensureDramaSchema(db *sql.DB, table string, fields feishusdk.SourceFields, columns []string) error {
 	defs := make([]string, 0, len(columns)+1)
 	defs = append(defs, fmt.Sprintf("%s TEXT PRIMARY KEY", quoteIdent(fields.DramaName)))
 	for _, col := range columns[1:] {
@@ -144,7 +144,7 @@ func ensureDramaSchema(db *sql.DB, table string, fields feishusdk.DramaFields, c
 	return nil
 }
 
-func pickDramaColumnType(name string, fields feishusdk.DramaFields) string {
+func pickDramaColumnType(name string, fields feishusdk.SourceFields) string {
 	switch name {
 	case fields.TotalDuration, fields.EpisodeCount:
 		return "REAL"
@@ -153,7 +153,7 @@ func pickDramaColumnType(name string, fields feishusdk.DramaFields) string {
 	}
 }
 
-func prepareDramaUpsert(db *sql.DB, table string, fields feishusdk.DramaFields, columns []string) (*sql.Stmt, error) {
+func prepareDramaUpsert(db *sql.DB, table string, fields feishusdk.SourceFields, columns []string) (*sql.Stmt, error) {
 	quoted := make([]string, len(columns))
 	placeholders := make([]string, len(columns))
 	for i, col := range columns {
@@ -309,8 +309,8 @@ func getFieldFloat(fields map[string]any, name string) (float64, bool) {
 	return 0, false
 }
 
-func resolveDramaFields() feishusdk.DramaFields {
-	return feishusdk.DefaultDramaFields
+func resolveDramaFields() feishusdk.SourceFields {
+	return feishusdk.DefaultSourceFields
 }
 
 // Exposed only for tests to reset cached state.

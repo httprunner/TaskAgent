@@ -10,6 +10,8 @@ import (
 // Shared constants for Feishu bitable integrations. Keep these in TaskAgent so
 // downstream agents can reference a single source of truth when wiring Feishu task workflows.
 const (
+	// EnvDramaBitableURL indicates where to pull drama catalog rows.
+	EnvDramaBitableURL = "DRAMA_BITABLE_URL"
 	// EnvTaskBitableURL indicates where to pull Feishu target tasks from
 	// when running against a bitable-backed queue.
 	EnvTaskBitableURL = "TASK_BITABLE_URL"
@@ -26,6 +28,8 @@ const (
 	EnvDeviceBitableURL = "DEVICE_BITABLE_URL"
 	// EnvCookieBitableURL points to the dedicated cookies table for SingleURLWorker.
 	EnvCookieBitableURL = "COOKIE_BITABLE_URL"
+	// EnvAccountBitableURL indicates where to pull account registration rows.
+	EnvAccountBitableURL = "ACCOUNT_BITABLE_URL"
 
 	// StatusPending marks a task row as pending execution.
 	StatusPending = "pending"
@@ -59,20 +63,23 @@ const (
 	WebhookError = "error"
 )
 
-// DefaultDramaFields matches the default schema used by the built-in drama
-// catalog template.
+// DefaultSourceFields matches the default schema used by the source tables
+// (drama catalog and account registry).
 var (
-	baseDramaFields = DramaFields{
+	baseSourceFields = SourceFields{
 		DramaID:                  "短剧 ID",
 		DramaName:                "短剧名称",
 		TotalDuration:            "全剧时长（秒）",
 		EpisodeCount:             "全剧集数",
 		Priority:                 "优先级",
 		RightsProtectionScenario: "维权场景",
-		SearchAlias:              "搜索别名",
+		SearchKeywords:           "搜索词",
 		CaptureDate:              "采集日期",
+		BizTaskID:                "任务 ID",
+		AccountID:                "账号 ID",
+		Platform:                 "平台名称",
 	}
-	DefaultDramaFields = baseDramaFields
+	DefaultSourceFields = baseSourceFields
 )
 
 // DefaultTaskFields matches the schema provided in the requirements.
@@ -162,11 +169,11 @@ func init() {
 func RefreshFieldMappings() {
 	DefaultTaskFields = baseTaskFields
 	DefaultResultFields = baseResultFields
-	DefaultDramaFields = baseDramaFields
+	DefaultSourceFields = baseSourceFields
 	DefaultCookieFields = baseCookieFields
 	applyTaskFieldEnvOverrides(&DefaultTaskFields)
 	applyResultFieldEnvOverrides(&DefaultResultFields)
-	applyDramaFieldEnvOverrides(&DefaultDramaFields)
+	applySourceFieldEnvOverrides(&DefaultSourceFields)
 	applyCookieFieldEnvOverrides(&DefaultCookieFields)
 }
 
@@ -236,18 +243,21 @@ func applyResultFieldEnvOverrides(fields *ResultFields) {
 	overrideFieldFromEnv("RESULT_FIELD_PUBLISHTIME", &fields.PublishTime)
 }
 
-func applyDramaFieldEnvOverrides(fields *DramaFields) {
+func applySourceFieldEnvOverrides(fields *SourceFields) {
 	if fields == nil {
 		return
 	}
-	overrideFieldFromEnv("DRAMA_FIELD_ID", &fields.DramaID)
-	overrideFieldFromEnv("DRAMA_FIELD_NAME", &fields.DramaName)
-	overrideFieldFromEnv("DRAMA_FIELD_DURATION", &fields.TotalDuration)
-	overrideFieldFromEnv("DRAMA_FIELD_EPISODE_COUNT", &fields.EpisodeCount)
-	overrideFieldFromEnv("DRAMA_FIELD_PRIORITY", &fields.Priority)
-	overrideFieldFromEnv("DRAMA_FIELD_RIGHTS_SCENARIO", &fields.RightsProtectionScenario)
-	overrideFieldFromEnv("DRAMA_FIELD_SEARCH_ALIAS", &fields.SearchAlias)
-	overrideFieldFromEnv("DRAMA_FIELD_CAPTURE_DATE", &fields.CaptureDate)
+	overrideFieldFromEnv("SOURCE_FIELD_DRAMA_ID", &fields.DramaID)
+	overrideFieldFromEnv("SOURCE_FIELD_DRAMA_NAME", &fields.DramaName)
+	overrideFieldFromEnv("SOURCE_FIELD_TOTAL_DURATION", &fields.TotalDuration)
+	overrideFieldFromEnv("SOURCE_FIELD_EPISODE_COUNT", &fields.EpisodeCount)
+	overrideFieldFromEnv("SOURCE_FIELD_PRIORITY", &fields.Priority)
+	overrideFieldFromEnv("SOURCE_FIELD_RIGHTS_SCENARIO", &fields.RightsProtectionScenario)
+	overrideFieldFromEnv("SOURCE_FIELD_BIZ_TASK_ID", &fields.BizTaskID)
+	overrideFieldFromEnv("SOURCE_FIELD_ACCOUNT_ID", &fields.AccountID)
+	overrideFieldFromEnv("SOURCE_FIELD_SEARCH_KEYWORDS", &fields.SearchKeywords)
+	overrideFieldFromEnv("SOURCE_FIELD_PLATFORM", &fields.Platform)
+	overrideFieldFromEnv("SOURCE_FIELD_CAPTURE_DATE", &fields.CaptureDate)
 }
 
 func applyCookieFieldEnvOverrides(fields *CookieFields) {

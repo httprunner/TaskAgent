@@ -73,7 +73,7 @@ func CreateWebhookResultsForGroups(ctx context.Context, opts WebhookResultCreate
 	}
 
 	dramaInfoJSON, _ := fetchDramaInfoJSONByBookID(ctx, client,
-		firstNonEmpty(opts.DramaBitableURL, taskagent.EnvString("DRAMA_BITABLE_URL", "")), bookID)
+		firstNonEmpty(opts.DramaBitableURL, taskagent.EnvString(feishusdk.EnvDramaBitableURL, "")), bookID)
 	baseDramaInfo, err := decodeDramaInfo(dramaInfoJSON)
 	if err != nil {
 		log.Warn().Err(err).Msg("webhook result: decode base DramaInfo failed; continue with empty drama info")
@@ -213,7 +213,7 @@ func fetchDramaInfoJSONByBookID(ctx context.Context, client *taskagent.FeishuCli
 	if rawURL == "" {
 		return "", nil
 	}
-	field := strings.TrimSpace(taskagent.DefaultDramaFields().DramaID)
+	field := strings.TrimSpace(taskagent.DefaultSourceFields().DramaID)
 	if field == "" {
 		return "", errors.New("drama id field mapping is empty")
 	}
@@ -235,7 +235,7 @@ func fetchDramaInfoJSONByBookID(ctx context.Context, client *taskagent.FeishuCli
 }
 
 func normalizeDramaInfoForStorage(raw map[string]any) map[string]any {
-	flat := flattenDramaFields(raw, taskagent.DefaultDramaFields())
+	flat := flattenDramaFields(raw, taskagent.DefaultSourceFields())
 	out := make(map[string]any, len(flat))
 	for key, val := range flat {
 		str, _ := val.(string)
@@ -902,7 +902,8 @@ func (c *WebhookResultCreator) createSingleURLCaptureWebhookResults(ctx context.
 
 		dramaInfo := "{}"
 		if strings.TrimSpace(cand.BookID) != "" {
-			if raw, err := fetchDramaInfoJSONByBookID(ctx, c.taskClient, taskagent.EnvString("DRAMA_BITABLE_URL", ""), cand.BookID); err == nil {
+			if raw, err := fetchDramaInfoJSONByBookID(ctx, c.taskClient,
+				taskagent.EnvString(feishusdk.EnvDramaBitableURL, ""), cand.BookID); err == nil {
 				if strings.TrimSpace(raw) != "" {
 					dramaInfo = raw
 				}
@@ -1246,7 +1247,8 @@ func EnsureWebhookPlansForTasks(ctx context.Context, cfg WebhookPlanEnsureConfig
 		return 0, 0, nil
 	}
 
-	dramaURL := strings.TrimSpace(firstNonEmpty(cfg.DramaBitableURL, env.String("DRAMA_BITABLE_URL", "")))
+	dramaURL := strings.TrimSpace(firstNonEmpty(cfg.DramaBitableURL,
+		env.String(feishusdk.EnvDramaBitableURL, "")))
 
 	keys := make([]string, 0, len(candidates))
 	for key := range candidates {
