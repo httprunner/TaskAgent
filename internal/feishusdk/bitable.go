@@ -215,6 +215,7 @@ type ResultRecordInput struct {
 // and account registry). Each field stores the column name as it appears in the
 // bitable.
 type SourceFields struct {
+	TaskID                   string
 	DramaID                  string
 	DramaName                string
 	TotalDuration            string

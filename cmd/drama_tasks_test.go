@@ -155,6 +155,40 @@ func TestCreateSearchTasksProfileCreatesRecords(t *testing.T) {
 	}
 }
 
+func TestCreateSearchTasksSkipExisting(t *testing.T) {
+	client := &fakeDramaTaskClient{
+		rows: []taskagent.BitableRow{
+			{Fields: map[string]any{
+				taskagent.DefaultSourceFields().TaskID:         "EXIST-1",
+				taskagent.DefaultSourceFields().DramaID:        "B1",
+				taskagent.DefaultSourceFields().AccountID:      "U1",
+				taskagent.DefaultSourceFields().SearchKeywords: "Alice",
+				taskagent.DefaultSourceFields().CaptureDate:    "2025-12-05",
+			}},
+		},
+	}
+
+	cfg := TaskConfig{
+		Date:           "2025-12-05",
+		TaskTableURL:   "task",
+		SourceTableURL: "account",
+		BatchSize:      2,
+		SkipExisting:   true,
+		client:         client,
+	}
+
+	res, err := CreateSearchTasks(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("CreateSearchTasks returned error: %v", err)
+	}
+	if res.CreatedCount != 0 {
+		t.Fatalf("expected 0 tasks created, got %d", res.CreatedCount)
+	}
+	if len(client.createCalls) != 0 {
+		t.Fatalf("expected no create calls, got %d", len(client.createCalls))
+	}
+}
+
 func TestCreateSearchTasksProfileErrors(t *testing.T) {
 	cfg := TaskConfig{}
 	if _, err := CreateSearchTasks(context.Background(), cfg); err == nil {

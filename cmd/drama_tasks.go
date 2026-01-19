@@ -20,6 +20,7 @@ func newDramaTasksCmd() *cobra.Command {
 		flagDramaURL  string
 		flagAliasSeps []string
 		flagBatchSize int
+		flagSkip      bool
 	)
 
 	cmd := &cobra.Command{
@@ -34,6 +35,7 @@ func newDramaTasksCmd() *cobra.Command {
 				SourceTableURL:    taskagent.EnvString(taskagent.EnvDramaBitableURL, flagDramaURL),
 				KeywordSeparators: flagAliasSeps,
 				BatchSize:         flagBatchSize,
+				SkipExisting:      flagSkip,
 			}
 			res, err := CreateSearchTasks(cmd.Context(), cfg)
 			if err != nil {
@@ -60,6 +62,7 @@ func newDramaTasksCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flagDramaURL, "drama-url", "", "覆盖 $DRAMA_BITABLE_URL 的剧单表 URL")
 	cmd.Flags().StringSliceVar(&flagAliasSeps, "alias-sep", []string{"|", "｜"}, "搜索别名分隔符列表（默认支持 | 和 ｜）")
 	cmd.Flags().IntVar(&flagBatchSize, "batch-size", 500, "写入任务时的批大小 (<=500)")
+	cmd.Flags().BoolVar(&flagSkip, "skip-existing", false, "若源表中 TaskID 非空则跳过创建")
 	_ = cmd.MarkFlagRequired("date")
 
 	return cmd
@@ -71,6 +74,7 @@ func newAccountTasksCmd() *cobra.Command {
 		flagAccountURL  string
 		flagKeywordSeps []string
 		flagBatchSize   int
+		flagSkip        bool
 	)
 
 	cmd := &cobra.Command{
@@ -85,6 +89,7 @@ func newAccountTasksCmd() *cobra.Command {
 				SourceTableURL:    taskagent.EnvString(taskagent.EnvAccountBitableURL, flagAccountURL),
 				KeywordSeparators: flagKeywordSeps,
 				BatchSize:         flagBatchSize,
+				SkipExisting:      flagSkip,
 			}
 			res, err := CreateSearchTasks(cmd.Context(), cfg)
 			if err != nil {
@@ -98,7 +103,7 @@ func newAccountTasksCmd() *cobra.Command {
 				Msg("profile search tasks created")
 			for _, detail := range res.Details {
 				log.Debug().
-					Str("task_id", detail.TaskID).
+					Str("biz_task_id", detail.BizTaskID).
 					Str("account_id", detail.AccountID).
 					Str("book_id", detail.BookID).
 					Int("params", detail.ExpandedParams).
@@ -112,6 +117,7 @@ func newAccountTasksCmd() *cobra.Command {
 	cmd.Flags().StringVar(&flagAccountURL, "account-url", "", "覆盖 $ACCOUNT_BITABLE_URL 的账号登记表 URL")
 	cmd.Flags().StringSliceVar(&flagKeywordSeps, "keyword-sep", []string{"|", "｜"}, "搜索词分隔符列表（默认支持 | 和 ｜）")
 	cmd.Flags().IntVar(&flagBatchSize, "batch-size", 500, "写入任务时的批大小 (<=500)")
+	cmd.Flags().BoolVar(&flagSkip, "skip-existing", false, "若源表中 TaskID 非空则跳过创建")
 	_ = cmd.MarkFlagRequired("date")
 
 	return cmd
@@ -141,6 +147,7 @@ type TaskConfig struct {
 	Status            string
 	KeywordSeparators []string
 	BatchSize         int
+	SkipExisting      bool
 
 	client dramaTaskFeishuClient
 }
@@ -156,7 +163,7 @@ type TaskResult struct {
 
 // TaskDetail summarizes per-drama fan-out.
 type TaskDetail struct {
-	TaskID         string
+	BizTaskID      string
 	DramaName      string
 	BookID         string
 	AccountID      string
@@ -210,7 +217,7 @@ func CreateSearchTasks(ctx context.Context, cfg TaskConfig) (*TaskResult, error)
 	}
 
 	type recordKey struct {
-		taskID    string
+		bizTaskID string
 		bookID    string
 		accountID string
 		param     string
@@ -222,11 +229,17 @@ func CreateSearchTasks(ctx context.Context, cfg TaskConfig) (*TaskResult, error)
 	details := make([]TaskDetail, 0)
 
 	for _, row := range rows {
+		log.Debug().Any("row", row).Msg("processing source row")
 		if row.Fields == nil {
 			continue
 		}
 
 		accountID := strings.TrimSpace(getString(row.Fields, sourceFields.AccountID))
+		rowTaskID := strings.TrimSpace(getString(row.Fields, sourceFields.TaskID))
+		if cfg.SkipExisting && rowTaskID != "" {
+			log.Warn().Any("row", row).Msg("skip existing task")
+			continue
+		}
 		captureRaw := getString(row.Fields, sourceFields.CaptureDate)
 		captureTime, ok := matchCaptureDate(captureRaw, targetDate)
 		if !ok {
@@ -251,13 +264,13 @@ func CreateSearchTasks(ctx context.Context, cfg TaskConfig) (*TaskResult, error)
 		}
 
 		groupID := ""
-		taskID := ""
+		bizTaskID := ""
 		params := []string(nil)
 		name := ""
 		searchRaw := ""
 		if accountID != "" {
 			name = strings.TrimSpace(getString(row.Fields, sourceFields.DramaName))
-			taskID = strings.TrimSpace(getString(row.Fields, sourceFields.BizTaskID))
+			bizTaskID = strings.TrimSpace(getString(row.Fields, sourceFields.BizTaskID))
 			searchRaw = strings.TrimSpace(getString(row.Fields, sourceFields.SearchKeywords))
 			if searchRaw == "" {
 				continue
@@ -282,7 +295,7 @@ func CreateSearchTasks(ctx context.Context, cfg TaskConfig) (*TaskResult, error)
 		added := 0
 		for _, param := range params {
 			key := recordKey{
-				taskID:    taskID,
+				bizTaskID: bizTaskID,
 				bookID:    bookID,
 				accountID: accountID,
 				param:     param,
@@ -303,7 +316,7 @@ func CreateSearchTasks(ctx context.Context, cfg TaskConfig) (*TaskResult, error)
 				DatetimeRaw: captureRaw,
 			}
 			if accountID != "" {
-				record.BizTaskID = taskID
+				record.BizTaskID = bizTaskID
 				record.UserID = accountID
 				record.GroupID = groupID
 			}
@@ -312,7 +325,7 @@ func CreateSearchTasks(ctx context.Context, cfg TaskConfig) (*TaskResult, error)
 		}
 		if added > 0 {
 			details = append(details, TaskDetail{
-				TaskID:         taskID,
+				BizTaskID:      bizTaskID,
 				DramaName:      name,
 				BookID:         bookID,
 				AccountID:      accountID,
@@ -564,12 +577,26 @@ func extractTextArray(arr []interface{}) string {
 	}
 	parts := make([]string, 0, len(arr))
 	for _, item := range arr {
-		if m, ok := item.(map[string]any); ok {
-			if txt, ok := m["text"].(string); ok {
+		switch v := item.(type) {
+		case map[string]any:
+			if txt, ok := v["text"].(string); ok {
 				trimmed := strings.TrimSpace(txt)
 				if trimmed != "" {
 					parts = append(parts, trimmed)
 				}
+			} else if nested, ok := v["value"]; ok {
+				if nestedText := extractTextFromAny(nested); nestedText != "" {
+					parts = append(parts, nestedText)
+				}
+			}
+		case string:
+			trimmed := strings.TrimSpace(v)
+			if trimmed != "" {
+				parts = append(parts, trimmed)
+			}
+		case []interface{}:
+			if nested := extractTextArray(v); nested != "" {
+				parts = append(parts, nested)
 			}
 		}
 	}

@@ -67,6 +67,7 @@ const (
 // (drama catalog and account registry).
 var (
 	baseSourceFields = SourceFields{
+		TaskID:                   "TaskID",
 		DramaID:                  "短剧 ID",
 		DramaName:                "短剧名称",
 		TotalDuration:            "全剧时长（秒）",
@@ -247,6 +248,7 @@ func applySourceFieldEnvOverrides(fields *SourceFields) {
 	if fields == nil {
 		return
 	}
+	overrideFieldFromEnv("SOURCE_FIELD_TASK_ID", &fields.TaskID)
 	overrideFieldFromEnv("SOURCE_FIELD_DRAMA_ID", &fields.DramaID)
 	overrideFieldFromEnv("SOURCE_FIELD_DRAMA_NAME", &fields.DramaName)
 	overrideFieldFromEnv("SOURCE_FIELD_TOTAL_DURATION", &fields.TotalDuration)
