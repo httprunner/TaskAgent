@@ -146,6 +146,7 @@ TaskAgent exposes per-table override knobs so you can align with custom schemas 
 | `SOURCE_FIELD_TASK_ID` | `TaskID` | Automation task identifier. |
 | `SOURCE_FIELD_BIZ_TASK_ID` | `任务 ID` | Business task identifier. |
 | `SOURCE_FIELD_ACCOUNT_ID` | `账号 ID` | Account identifier used for profile search. |
+| `SOURCE_FIELD_ACCOUNT_NAME` | `账号名称` | Account display name for profile search. |
 | `SOURCE_FIELD_PLATFORM` | `平台名称` | Optional platform/app value. |
 | `SOURCE_FIELD_CAPTURE_DATE` | `采集日期` | Capture/register date for filtering (`YYYY-MM-DD` / timestamp). |
 

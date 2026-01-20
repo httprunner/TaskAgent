@@ -98,6 +98,7 @@ func TestCreateSearchTasksProfileCreatesRecords(t *testing.T) {
 				taskagent.DefaultSourceFields().BizTaskID:      "TASK-1",
 				taskagent.DefaultSourceFields().DramaID:        "B1",
 				taskagent.DefaultSourceFields().AccountID:      "U1",
+				taskagent.DefaultSourceFields().AccountName:    "AliceAccount",
 				taskagent.DefaultSourceFields().SearchKeywords: "Alice|Bob|Alice",
 				taskagent.DefaultSourceFields().Platform:       "快手",
 				taskagent.DefaultSourceFields().CaptureDate:    "2025-12-05",
@@ -115,6 +116,7 @@ func TestCreateSearchTasksProfileCreatesRecords(t *testing.T) {
 
 	cfg := TaskConfig{
 		Date:           "2025-12-05",
+		Scene:          taskagent.SceneProfileSearch,
 		TaskTableURL:   "task",
 		SourceTableURL: "account",
 		BatchSize:      2,
@@ -144,7 +146,7 @@ func TestCreateSearchTasksProfileCreatesRecords(t *testing.T) {
 	if firstBatch[0].Params != "Alice" || firstBatch[1].Params != "Bob" {
 		t.Fatalf("unexpected params: %#v", firstBatch)
 	}
-	if firstBatch[0].BizTaskID != "TASK-1" || firstBatch[0].UserID != "U1" || firstBatch[0].BookID != "B1" {
+	if firstBatch[0].BizTaskID != "TASK-1" || firstBatch[0].UserID != "U1" || firstBatch[0].UserName != "AliceAccount" || firstBatch[0].BookID != "B1" {
 		t.Fatalf("unexpected task metadata: %#v", firstBatch[0])
 	}
 	if firstBatch[0].App != "com.smile.gifmaker" || firstBatch[0].Scene != taskagent.SceneProfileSearch {

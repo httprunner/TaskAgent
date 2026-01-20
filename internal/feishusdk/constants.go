@@ -78,6 +78,7 @@ var (
 		CaptureDate:              "采集日期",
 		BizTaskID:                "任务 ID",
 		AccountID:                "账号 ID",
+		AccountName:              "账号名称",
 		Platform:                 "平台名称",
 	}
 	DefaultSourceFields = baseSourceFields
@@ -257,6 +258,7 @@ func applySourceFieldEnvOverrides(fields *SourceFields) {
 	overrideFieldFromEnv("SOURCE_FIELD_RIGHTS_SCENARIO", &fields.RightsProtectionScenario)
 	overrideFieldFromEnv("SOURCE_FIELD_BIZ_TASK_ID", &fields.BizTaskID)
 	overrideFieldFromEnv("SOURCE_FIELD_ACCOUNT_ID", &fields.AccountID)
+	overrideFieldFromEnv("SOURCE_FIELD_ACCOUNT_NAME", &fields.AccountName)
 	overrideFieldFromEnv("SOURCE_FIELD_SEARCH_KEYWORDS", &fields.SearchKeywords)
 	overrideFieldFromEnv("SOURCE_FIELD_PLATFORM", &fields.Platform)
 	overrideFieldFromEnv("SOURCE_FIELD_CAPTURE_DATE", &fields.CaptureDate)

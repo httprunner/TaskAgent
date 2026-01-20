@@ -226,6 +226,7 @@ type SourceFields struct {
 	CaptureDate              string
 	BizTaskID                string
 	AccountID                string
+	AccountName              string
 	Platform                 string
 }
 

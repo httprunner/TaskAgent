@@ -235,6 +235,7 @@ func CreateSearchTasks(ctx context.Context, cfg TaskConfig) (*TaskResult, error)
 		}
 
 		accountID := strings.TrimSpace(getString(row.Fields, sourceFields.AccountID))
+		accountName := strings.TrimSpace(getString(row.Fields, sourceFields.AccountName))
 		rowTaskID := strings.TrimSpace(getString(row.Fields, sourceFields.TaskID))
 		if cfg.SkipExisting && rowTaskID != "" {
 			log.Warn().Any("row", row).Msg("skip existing task")
@@ -318,6 +319,7 @@ func CreateSearchTasks(ctx context.Context, cfg TaskConfig) (*TaskResult, error)
 			if accountID != "" {
 				record.BizTaskID = bizTaskID
 				record.UserID = accountID
+				record.UserName = accountName
 				record.GroupID = groupID
 			}
 			records = append(records, record)
