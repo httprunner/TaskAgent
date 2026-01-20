@@ -29,9 +29,7 @@ func init() {
 		newWebhookWorkerCmd(),
 		newWebhookCreatorCmd(),
 		newSingleURLCmd(),
-		newDramaTasksCmd(),
-		newAccountTasksCmd(),
-		newSheetTasksCmd(),
+		newCreateTasksCmd(),
 	)
 	_ = env.Ensure()
 }

@@ -1,4 +1,4 @@
-package main
+package taskagent
 
 import (
 	"context"
@@ -6,25 +6,23 @@ import (
 	"fmt"
 	"testing"
 	"time"
-
-	taskagent "github.com/httprunner/TaskAgent"
 )
 
 type fakeDramaTaskClient struct {
-	rows        []taskagent.BitableRow
-	createCalls [][]taskagent.TaskRecordInput
+	rows        []BitableRow
+	createCalls [][]TaskRecordInput
 	createErr   error
 }
 
-func (f *fakeDramaTaskClient) FetchBitableRows(ctx context.Context, rawURL string, opts *taskagent.FeishuTaskQueryOptions) ([]taskagent.BitableRow, error) {
+func (f *fakeDramaTaskClient) FetchBitableRows(ctx context.Context, rawURL string, opts *FeishuTaskQueryOptions) ([]BitableRow, error) {
 	return f.rows, nil
 }
 
-func (f *fakeDramaTaskClient) CreateTaskRecords(ctx context.Context, rawURL string, records []taskagent.TaskRecordInput, override *taskagent.FeishuTaskFields) ([]string, error) {
+func (f *fakeDramaTaskClient) CreateTaskRecords(ctx context.Context, rawURL string, records []TaskRecordInput, override *FeishuTaskFields) ([]string, error) {
 	if f.createErr != nil {
 		return nil, f.createErr
 	}
-	copyChunk := append([]taskagent.TaskRecordInput(nil), records...)
+	copyChunk := append([]TaskRecordInput(nil), records...)
 	f.createCalls = append(f.createCalls, copyChunk)
 	ids := make([]string, len(records))
 	for i := range ids {
@@ -36,34 +34,34 @@ func (f *fakeDramaTaskClient) CreateTaskRecords(ctx context.Context, rawURL stri
 func TestCreateSearchTasksDramaCreatesRecords(t *testing.T) {
 	ts := time.Date(2025, time.December, 5, 0, 0, 0, 0, time.Local).Unix()
 	client := &fakeDramaTaskClient{
-		rows: []taskagent.BitableRow{
+		rows: []BitableRow{
 			{Fields: map[string]any{
-				taskagent.DefaultSourceFields().DramaName:      "DramaA",
-				taskagent.DefaultSourceFields().DramaID:        "B1",
-				taskagent.DefaultSourceFields().SearchKeywords: "AliasA|AliasB|DramaA",
-				taskagent.DefaultSourceFields().CaptureDate:    "2025-12-05",
+				DefaultSourceFields().DramaName:      "DramaA",
+				DefaultSourceFields().DramaID:        "B1",
+				DefaultSourceFields().SearchKeywords: "AliasA|AliasB|DramaA",
+				DefaultSourceFields().CaptureDate:    "2025-12-05",
 			}},
 			{Fields: map[string]any{
-				taskagent.DefaultSourceFields().DramaName:      "DramaB",
-				taskagent.DefaultSourceFields().DramaID:        "B2",
-				taskagent.DefaultSourceFields().SearchKeywords: "AliasC",
-				taskagent.DefaultSourceFields().CaptureDate:    fmt.Sprintf("%d", ts),
+				DefaultSourceFields().DramaName:      "DramaB",
+				DefaultSourceFields().DramaID:        "B2",
+				DefaultSourceFields().SearchKeywords: "AliasC",
+				DefaultSourceFields().CaptureDate:    fmt.Sprintf("%d", ts),
 			}},
 			{Fields: map[string]any{
-				taskagent.DefaultSourceFields().DramaName:      "DramaSkip",
-				taskagent.DefaultSourceFields().DramaID:        "B3",
-				taskagent.DefaultSourceFields().SearchKeywords: "Other",
-				taskagent.DefaultSourceFields().CaptureDate:    "2025-12-04",
+				DefaultSourceFields().DramaName:      "DramaSkip",
+				DefaultSourceFields().DramaID:        "B3",
+				DefaultSourceFields().SearchKeywords: "Other",
+				DefaultSourceFields().CaptureDate:    "2025-12-04",
 			}},
 		},
 	}
 
-	cfg := TaskConfig{
+	cfg := SearchTaskConfig{
 		Date:           "2025-12-05",
 		TaskTableURL:   "task",
 		SourceTableURL: "drama",
 		BatchSize:      2,
-		client:         client,
+		Client:         client,
 	}
 
 	res, err := CreateSearchTasks(context.Background(), cfg)
@@ -93,34 +91,34 @@ func TestCreateSearchTasksDramaCreatesRecords(t *testing.T) {
 
 func TestCreateSearchTasksProfileCreatesRecords(t *testing.T) {
 	client := &fakeDramaTaskClient{
-		rows: []taskagent.BitableRow{
+		rows: []BitableRow{
 			{Fields: map[string]any{
-				taskagent.DefaultSourceFields().BizTaskID:      "TASK-1",
-				taskagent.DefaultSourceFields().DramaID:        "B1",
-				taskagent.DefaultSourceFields().AccountID:      "U1",
-				taskagent.DefaultSourceFields().AccountName:    "AliceAccount",
-				taskagent.DefaultSourceFields().SearchKeywords: "Alice|Bob|Alice",
-				taskagent.DefaultSourceFields().Platform:       "快手",
-				taskagent.DefaultSourceFields().CaptureDate:    "2025-12-05",
+				DefaultSourceFields().BizTaskID:      "TASK-1",
+				DefaultSourceFields().DramaID:        "B1",
+				DefaultSourceFields().AccountID:      "U1",
+				DefaultSourceFields().AccountName:    "AliceAccount",
+				DefaultSourceFields().SearchKeywords: "Alice|Bob|Alice",
+				DefaultSourceFields().Platform:       "快手",
+				DefaultSourceFields().CaptureDate:    "2025-12-05",
 			}},
 			{Fields: map[string]any{
-				taskagent.DefaultSourceFields().BizTaskID:      "TASK-2",
-				taskagent.DefaultSourceFields().DramaID:        "B2",
-				taskagent.DefaultSourceFields().AccountID:      "U2",
-				taskagent.DefaultSourceFields().SearchKeywords: "SkipMe",
-				taskagent.DefaultSourceFields().Platform:       "快手",
-				taskagent.DefaultSourceFields().CaptureDate:    "2025-12-04",
+				DefaultSourceFields().BizTaskID:      "TASK-2",
+				DefaultSourceFields().DramaID:        "B2",
+				DefaultSourceFields().AccountID:      "U2",
+				DefaultSourceFields().SearchKeywords: "SkipMe",
+				DefaultSourceFields().Platform:       "快手",
+				DefaultSourceFields().CaptureDate:    "2025-12-04",
 			}},
 		},
 	}
 
-	cfg := TaskConfig{
+	cfg := SearchTaskConfig{
 		Date:           "2025-12-05",
-		Scene:          taskagent.SceneProfileSearch,
+		Scene:          SceneProfileSearch,
 		TaskTableURL:   "task",
 		SourceTableURL: "account",
 		BatchSize:      2,
-		client:         client,
+		Client:         client,
 	}
 
 	res, err := CreateSearchTasks(context.Background(), cfg)
@@ -149,7 +147,7 @@ func TestCreateSearchTasksProfileCreatesRecords(t *testing.T) {
 	if firstBatch[0].BizTaskID != "TASK-1" || firstBatch[0].UserID != "U1" || firstBatch[0].UserName != "AliceAccount" || firstBatch[0].BookID != "B1" {
 		t.Fatalf("unexpected task metadata: %#v", firstBatch[0])
 	}
-	if firstBatch[0].App != "com.smile.gifmaker" || firstBatch[0].Scene != taskagent.SceneProfileSearch {
+	if firstBatch[0].App != "com.smile.gifmaker" || firstBatch[0].Scene != SceneProfileSearch {
 		t.Fatalf("unexpected app/scene: %#v", firstBatch[0])
 	}
 	if firstBatch[0].GroupID != "快手_B1_U1" {
@@ -159,24 +157,24 @@ func TestCreateSearchTasksProfileCreatesRecords(t *testing.T) {
 
 func TestCreateSearchTasksSkipExisting(t *testing.T) {
 	client := &fakeDramaTaskClient{
-		rows: []taskagent.BitableRow{
+		rows: []BitableRow{
 			{Fields: map[string]any{
-				taskagent.DefaultSourceFields().TaskID:         "EXIST-1",
-				taskagent.DefaultSourceFields().DramaID:        "B1",
-				taskagent.DefaultSourceFields().AccountID:      "U1",
-				taskagent.DefaultSourceFields().SearchKeywords: "Alice",
-				taskagent.DefaultSourceFields().CaptureDate:    "2025-12-05",
+				DefaultSourceFields().TaskID:         "EXIST-1",
+				DefaultSourceFields().DramaID:        "B1",
+				DefaultSourceFields().AccountID:      "U1",
+				DefaultSourceFields().SearchKeywords: "Alice",
+				DefaultSourceFields().CaptureDate:    "2025-12-05",
 			}},
 		},
 	}
 
-	cfg := TaskConfig{
+	cfg := SearchTaskConfig{
 		Date:           "2025-12-05",
 		TaskTableURL:   "task",
 		SourceTableURL: "account",
 		BatchSize:      2,
 		SkipExisting:   true,
-		client:         client,
+		Client:         client,
 	}
 
 	res, err := CreateSearchTasks(context.Background(), cfg)
@@ -192,28 +190,27 @@ func TestCreateSearchTasksSkipExisting(t *testing.T) {
 }
 
 func TestCreateSearchTasksProfileErrors(t *testing.T) {
-	cfg := TaskConfig{}
+	cfg := SearchTaskConfig{}
 	if _, err := CreateSearchTasks(context.Background(), cfg); err == nil {
 		t.Fatal("expected error for missing date")
 	}
 
 	client := &fakeDramaTaskClient{}
-	cfg = TaskConfig{
+	cfg = SearchTaskConfig{
 		Date:           "2025-12-05",
 		TaskTableURL:   "task",
 		SourceTableURL: "account",
-		client:         client,
+		Client:         client,
 	}
 	client.createErr = errors.New("boom")
 	cfg.BatchSize = 1
-	cfg.client = client
-	client.rows = []taskagent.BitableRow{
+	client.rows = []BitableRow{
 		{Fields: map[string]any{
-			taskagent.DefaultSourceFields().BizTaskID:      "TASK-1",
-			taskagent.DefaultSourceFields().DramaID:        "B1",
-			taskagent.DefaultSourceFields().AccountID:      "U1",
-			taskagent.DefaultSourceFields().SearchKeywords: "Alice",
-			taskagent.DefaultSourceFields().CaptureDate:    "2025-12-05",
+			DefaultSourceFields().BizTaskID:      "TASK-1",
+			DefaultSourceFields().DramaID:        "B1",
+			DefaultSourceFields().AccountID:      "U1",
+			DefaultSourceFields().SearchKeywords: "Alice",
+			DefaultSourceFields().CaptureDate:    "2025-12-05",
 		}},
 	}
 	if _, err := CreateSearchTasks(context.Background(), cfg); err == nil {
@@ -222,27 +219,26 @@ func TestCreateSearchTasksProfileErrors(t *testing.T) {
 }
 
 func TestCreateSearchTasksDramaErrors(t *testing.T) {
-	cfg := TaskConfig{}
+	cfg := SearchTaskConfig{}
 	if _, err := CreateSearchTasks(context.Background(), cfg); err == nil {
 		t.Fatal("expected error for missing date")
 	}
 
 	client := &fakeDramaTaskClient{}
-	cfg = TaskConfig{
+	cfg = SearchTaskConfig{
 		Date:           "2025-12-05",
 		TaskTableURL:   "task",
 		SourceTableURL: "drama",
-		client:         client,
+		Client:         client,
 	}
 	client.createErr = errors.New("boom")
 	cfg.BatchSize = 1
-	cfg.client = client
-	client.rows = []taskagent.BitableRow{
+	client.rows = []BitableRow{
 		{Fields: map[string]any{
-			taskagent.DefaultSourceFields().DramaName:      "DramaA",
-			taskagent.DefaultSourceFields().DramaID:        "B1",
-			taskagent.DefaultSourceFields().SearchKeywords: "AliasA",
-			taskagent.DefaultSourceFields().CaptureDate:    "2025-12-05",
+			DefaultSourceFields().DramaName:      "DramaA",
+			DefaultSourceFields().DramaID:        "B1",
+			DefaultSourceFields().SearchKeywords: "AliasA",
+			DefaultSourceFields().CaptureDate:    "2025-12-05",
 		}},
 	}
 	if _, err := CreateSearchTasks(context.Background(), cfg); err == nil {

@@ -24,8 +24,8 @@ The tables below enumerate every environment variable TaskAgent reads via `os.Ge
 | `TASK_BITABLE_URL` | Yes for Feishu-backed schedulers | – | `taskagent.Config`, `cmd`, `examples/create_task_with_http`, `examples/create_task_with_sdk` | Source of pending tasks (个人页搜索 / 综合页搜索等). |
 | `SOURCE_SHEET_URL` | Required for sheet-to-task creation | – | `cmd` | Source Feishu spreadsheet URL(s) that feed task creation. Comma-separated list. |
 | `RESULT_BITABLE_URL` | Yes when uploading captures to Feishu | – | `internal/storage`, `cmd` | Result table receiving capture rows + webhook summaries. |
-| `DRAMA_BITABLE_URL` | Required when fetching drama metadata from Feishu | – | `pkg/webhook`, `cmd` | Drama catalog table for ratio/metadata lookups. |
-| `ACCOUNT_BITABLE_URL` | Required when creating profile search tasks from account registry | – | `cmd` | Account registration table (used by `account-tasks`). |
+| `DRAMA_BITABLE_URL` | Required when fetching drama metadata from Feishu | – | `pkg/webhook`, `cmd` | Drama catalog table for ratio/metadata lookups and `create-tasks --source bitable --task-type general-search`. |
+| `ACCOUNT_BITABLE_URL` | Required when creating profile search tasks from account registry | – | `cmd` | Account registration table (used by `create-tasks --source bitable --task-type profile-search`). |
 | `WEBHOOK_BITABLE_URL` | Optional | empty | `pkg/webhook` | Dedicated webhook result table for group-based flows (aggregates TaskIDs + delivery status). |
 | `DEVICE_BITABLE_URL` | Optional | empty | `internal/devrecorder` | Device heartbeat table; leave blank to disable recorder writes. |
 | `DEVICE_TASK_BITABLE_URL` | Optional | empty | `internal/devrecorder`, `internal/storage` | Device-dispatch history table (one row per job). |

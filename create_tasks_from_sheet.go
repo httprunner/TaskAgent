@@ -21,9 +21,8 @@ const (
 	sheetProgressPending = "待传"
 	sheetProgressDone    = "已传"
 
-	sheetSceneSingleURL = "单个链接采集"
-	sheetAppKuaishou    = "com.smile.gifmaker"
-	sheetStatusPending  = "pending"
+	sheetAppKuaishou   = "com.smile.gifmaker"
+	sheetStatusPending = "pending"
 
 	kuaishouLongLinkToken  = "kuaishou.com/short-video"
 	kuaishouShortLinkToken = "v.kuaishou.com"
@@ -240,7 +239,7 @@ func RunSheetTasks(ctx context.Context, opts SheetTaskOptions) error {
 					BookID:      item.BookID,
 					UserID:      item.UserID,
 					App:         sheetAppKuaishou,
-					Scene:       sheetSceneSingleURL,
+					Scene:       SceneSingleURLCapture,
 					Status:      sheetStatusPending,
 					GroupID:     item.GroupID,
 					DatetimeRaw: item.DateRaw,

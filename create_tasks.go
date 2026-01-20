@@ -1,4 +1,4 @@
-package main
+package taskagent
 
 import (
 	"context"
@@ -9,136 +9,29 @@ import (
 	"strings"
 	"time"
 
-	taskagent "github.com/httprunner/TaskAgent"
 	"github.com/rs/zerolog/log"
-	"github.com/spf13/cobra"
 )
-
-func newDramaTasksCmd() *cobra.Command {
-	var (
-		flagDate      string
-		flagDramaURL  string
-		flagAliasSeps []string
-		flagBatchSize int
-		flagSkip      bool
-	)
-
-	cmd := &cobra.Command{
-		Use:   "drama-tasks",
-		Short: "Create 综合页搜索 tasks from drama catalog aliases",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := TaskConfig{
-				Date:              flagDate,
-				App:               firstNonEmpty(rootApp, defaultTaskApp),
-				Scene:             taskagent.SceneGeneralSearch,
-				TaskTableURL:      firstNonEmpty(rootTaskURL, ""),
-				SourceTableURL:    taskagent.EnvString(taskagent.EnvDramaBitableURL, flagDramaURL),
-				KeywordSeparators: flagAliasSeps,
-				BatchSize:         flagBatchSize,
-				SkipExisting:      flagSkip,
-			}
-			res, err := CreateSearchTasks(cmd.Context(), cfg)
-			if err != nil {
-				return err
-			}
-			log.Info().
-				Str("date", res.Date).
-				Int("dramas", res.SourceCount).
-				Int("params", res.TotalParams).
-				Int("created", res.CreatedCount).
-				Msg("drama tasks created")
-			for _, detail := range res.Details {
-				log.Debug().
-					Str("drama", detail.DramaName).
-					Str("book_id", detail.BookID).
-					Int("params", detail.ExpandedParams).
-					Msg("drama params expanded")
-			}
-			return nil
-		},
-	}
-
-	cmd.Flags().StringVar(&flagDate, "date", "", "登记日期 (YYYY-MM-DD)")
-	cmd.Flags().StringVar(&flagDramaURL, "drama-url", "", "覆盖 $DRAMA_BITABLE_URL 的剧单表 URL")
-	cmd.Flags().StringSliceVar(&flagAliasSeps, "alias-sep", []string{"|", "｜"}, "搜索别名分隔符列表（默认支持 | 和 ｜）")
-	cmd.Flags().IntVar(&flagBatchSize, "batch-size", 500, "写入任务时的批大小 (<=500)")
-	cmd.Flags().BoolVar(&flagSkip, "skip-existing", false, "若源表中 TaskID 非空则跳过创建")
-	_ = cmd.MarkFlagRequired("date")
-
-	return cmd
-}
-
-func newAccountTasksCmd() *cobra.Command {
-	var (
-		flagDate        string
-		flagAccountURL  string
-		flagKeywordSeps []string
-		flagBatchSize   int
-		flagSkip        bool
-	)
-
-	cmd := &cobra.Command{
-		Use:   "account-tasks",
-		Short: "Create 个人页搜索 tasks from account registry",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg := TaskConfig{
-				Date:              flagDate,
-				App:               firstNonEmpty(rootApp, defaultTaskApp),
-				Scene:             taskagent.SceneProfileSearch,
-				TaskTableURL:      firstNonEmpty(rootTaskURL, ""),
-				SourceTableURL:    taskagent.EnvString(taskagent.EnvAccountBitableURL, flagAccountURL),
-				KeywordSeparators: flagKeywordSeps,
-				BatchSize:         flagBatchSize,
-				SkipExisting:      flagSkip,
-			}
-			res, err := CreateSearchTasks(cmd.Context(), cfg)
-			if err != nil {
-				return err
-			}
-			log.Info().
-				Str("date", res.Date).
-				Int("accounts", res.SourceCount).
-				Int("params", res.TotalParams).
-				Int("created", res.CreatedCount).
-				Msg("profile search tasks created")
-			for _, detail := range res.Details {
-				log.Debug().
-					Str("biz_task_id", detail.BizTaskID).
-					Str("account_id", detail.AccountID).
-					Str("book_id", detail.BookID).
-					Int("params", detail.ExpandedParams).
-					Msg("profile search params expanded")
-			}
-			return nil
-		},
-	}
-
-	cmd.Flags().StringVar(&flagDate, "date", "", "采集日期 (YYYY-MM-DD)")
-	cmd.Flags().StringVar(&flagAccountURL, "account-url", "", "覆盖 $ACCOUNT_BITABLE_URL 的账号登记表 URL")
-	cmd.Flags().StringSliceVar(&flagKeywordSeps, "keyword-sep", []string{"|", "｜"}, "搜索词分隔符列表（默认支持 | 和 ｜）")
-	cmd.Flags().IntVar(&flagBatchSize, "batch-size", 500, "写入任务时的批大小 (<=500)")
-	cmd.Flags().BoolVar(&flagSkip, "skip-existing", false, "若源表中 TaskID 非空则跳过创建")
-	_ = cmd.MarkFlagRequired("date")
-
-	return cmd
-}
 
 const (
-	defaultTaskApp        = "com.smile.gifmaker"
-	defaultAliasSeparator = "|"
-	defaultTaskBatchSize  = 500
-	dateLayoutYYYYMMDD    = "2006-01-02"
+	DefaultSearchTaskApp       = "com.smile.gifmaker"
+	DefaultSearchTaskBatchSize = 500
+	dateLayoutYYYYMMDD         = "2006-01-02"
 )
 
-var defaultAliasSeparators = []string{defaultAliasSeparator, "｜"}
+var defaultSearchKeywordSeparators = []string{"|", "｜"}
 
-type dramaTaskFeishuClient interface {
-	FetchBitableRows(ctx context.Context, rawURL string, opts *taskagent.FeishuTaskQueryOptions) ([]taskagent.BitableRow, error)
-	CreateTaskRecords(ctx context.Context, rawURL string, records []taskagent.TaskRecordInput, override *taskagent.FeishuTaskFields) ([]string, error)
+// DefaultSearchKeywordSeparators returns a copy of default separators.
+func DefaultSearchKeywordSeparators() []string {
+	return append([]string(nil), defaultSearchKeywordSeparators...)
 }
 
-// TaskConfig controls how drama catalog rows are converted into tasks.
-type TaskConfig struct {
+type SearchTaskClient interface {
+	FetchBitableRows(ctx context.Context, rawURL string, opts *FeishuTaskQueryOptions) ([]BitableRow, error)
+	CreateTaskRecords(ctx context.Context, rawURL string, records []TaskRecordInput, override *FeishuTaskFields) ([]string, error)
+}
+
+// SearchTaskConfig controls how drama/account rows are converted into tasks.
+type SearchTaskConfig struct {
 	SourceTableURL    string // 剧单登记表、账号登记表
 	Date              string
 	App               string
@@ -148,21 +41,20 @@ type TaskConfig struct {
 	KeywordSeparators []string
 	BatchSize         int
 	SkipExisting      bool
-
-	client dramaTaskFeishuClient
+	Client            SearchTaskClient
 }
 
-// TaskResult reports how many dramas and Params were converted into tasks.
-type TaskResult struct {
+// SearchTaskResult reports how many source rows and Params were converted into tasks.
+type SearchTaskResult struct {
 	Date         string
 	SourceCount  int
 	TotalParams  int
 	CreatedCount int
-	Details      []TaskDetail
+	Details      []SearchTaskDetail
 }
 
-// TaskDetail summarizes per-drama fan-out.
-type TaskDetail struct {
+// SearchTaskDetail summarizes per-source fan-out.
+type SearchTaskDetail struct {
 	BizTaskID      string
 	DramaName      string
 	BookID         string
@@ -172,12 +64,12 @@ type TaskDetail struct {
 
 // CreateSearchTasks loads source rows filtered by date and writes pending search tasks into the task table.
 // When AccountID is present, it creates 个人页搜索 tasks; otherwise it creates 综合页搜索 tasks.
-func CreateSearchTasks(ctx context.Context, cfg TaskConfig) (*TaskResult, error) {
+func CreateSearchTasks(ctx context.Context, cfg SearchTaskConfig) (*SearchTaskResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	cfg.applyDefaults()
-	result := &TaskResult{Date: cfg.Date}
+	result := &SearchTaskResult{Date: cfg.Date}
 
 	if strings.TrimSpace(cfg.Date) == "" {
 		return result, errors.New("date is required (YYYY-MM-DD)")
@@ -193,18 +85,18 @@ func CreateSearchTasks(ctx context.Context, cfg TaskConfig) (*TaskResult, error)
 		return result, errors.New("task table url is required (set TASK_BITABLE_URL or --task-url)")
 	}
 
-	client := cfg.client
+	client := cfg.Client
 	if client == nil {
-		feishuClient, err := taskagent.NewFeishuClientFromEnv()
+		feishuClient, err := NewFeishuClientFromEnv()
 		if err != nil {
 			return result, err
 		}
 		client = feishuClient
 	}
 
-	sourceFields := taskagent.DefaultSourceFields()
+	sourceFields := DefaultSourceFields()
 
-	opts := &taskagent.FeishuTaskQueryOptions{}
+	opts := &FeishuTaskQueryOptions{}
 	rows, err := client.FetchBitableRows(ctx, cfg.SourceTableURL, opts)
 	if err != nil {
 		return result, fmt.Errorf("fetch source table rows failed: %w", err)
@@ -213,7 +105,7 @@ func CreateSearchTasks(ctx context.Context, cfg TaskConfig) (*TaskResult, error)
 	keywordsSeps := normalizeKeywordsSeparators(cfg.KeywordSeparators)
 	batchSize := cfg.BatchSize
 	if batchSize <= 0 {
-		batchSize = defaultTaskBatchSize
+		batchSize = DefaultSearchTaskBatchSize
 	}
 
 	type recordKey struct {
@@ -225,8 +117,8 @@ func CreateSearchTasks(ctx context.Context, cfg TaskConfig) (*TaskResult, error)
 		date      string
 	}
 	seen := make(map[recordKey]struct{})
-	records := make([]taskagent.TaskRecordInput, 0)
-	details := make([]TaskDetail, 0)
+	records := make([]TaskRecordInput, 0)
+	details := make([]SearchTaskDetail, 0)
 
 	for _, row := range rows {
 		log.Debug().Any("row", row).Msg("processing source row")
@@ -276,7 +168,7 @@ func CreateSearchTasks(ctx context.Context, cfg TaskConfig) (*TaskResult, error)
 			if searchRaw == "" {
 				continue
 			}
-			groupApp := taskagent.MapAppValue(app)
+			groupApp := MapAppValue(app)
 			if strings.TrimSpace(groupApp) == "" {
 				groupApp = app
 			}
@@ -307,7 +199,7 @@ func CreateSearchTasks(ctx context.Context, cfg TaskConfig) (*TaskResult, error)
 				continue
 			}
 			seen[key] = struct{}{}
-			record := taskagent.TaskRecordInput{
+			record := TaskRecordInput{
 				App:         app,
 				Scene:       cfg.Scene,
 				Params:      param,
@@ -326,7 +218,7 @@ func CreateSearchTasks(ctx context.Context, cfg TaskConfig) (*TaskResult, error)
 			added++
 		}
 		if added > 0 {
-			details = append(details, TaskDetail{
+			details = append(details, SearchTaskDetail{
 				BizTaskID:      bizTaskID,
 				DramaName:      name,
 				BookID:         bookID,
@@ -367,19 +259,19 @@ func CreateSearchTasks(ctx context.Context, cfg TaskConfig) (*TaskResult, error)
 	return result, nil
 }
 
-func (cfg *TaskConfig) applyDefaults() {
+func (cfg *SearchTaskConfig) applyDefaults() {
 	if cfg.App == "" {
-		cfg.App = defaultTaskApp
+		cfg.App = DefaultSearchTaskApp
 	}
 	if cfg.Status == "" {
-		cfg.Status = taskagent.StatusPending
+		cfg.Status = StatusPending
 	}
 	if cfg.TaskTableURL == "" {
-		cfg.TaskTableURL = taskagent.EnvString(taskagent.EnvTaskBitableURL, "")
+		cfg.TaskTableURL = EnvString(EnvTaskBitableURL, "")
 	}
 	cfg.KeywordSeparators = normalizeKeywordsSeparators(cfg.KeywordSeparators)
 	if cfg.BatchSize <= 0 {
-		cfg.BatchSize = defaultTaskBatchSize
+		cfg.BatchSize = DefaultSearchTaskBatchSize
 	}
 }
 
@@ -457,7 +349,7 @@ func normalizeKeywordsSeparators(seps []string) []string {
 		cleaned = append(cleaned, trimmed)
 	}
 	if len(cleaned) == 0 {
-		return append([]string(nil), defaultAliasSeparators...)
+		return append([]string(nil), defaultSearchKeywordSeparators...)
 	}
 	return cleaned
 }
@@ -507,7 +399,7 @@ func normalizeAppPackage(platform, fallback string) string {
 	}
 	switch trimmed {
 	case "快手":
-		return defaultTaskApp
+		return DefaultSearchTaskApp
 	default:
 		return trimmed
 	}
