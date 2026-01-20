@@ -116,6 +116,29 @@ func TestBuildTaskIDsByStatus(t *testing.T) {
 	}
 }
 
+func TestFilterPlanTasks(t *testing.T) {
+	day := "2026-01-20"
+	dayTime := time.Date(2026, 1, 20, 8, 0, 0, 0, time.Local)
+	rows := []taskagent.FeishuTaskRow{
+		{TaskID: 1, GroupID: "g1", Scene: taskagent.SceneProfileSearch, Datetime: &dayTime},
+		{TaskID: 2, GroupID: "g2", Scene: taskagent.SceneProfileSearch, Datetime: &dayTime},
+		{TaskID: 3, GroupID: "g1", Scene: taskagent.SceneGeneralSearch, Datetime: &dayTime},
+		{TaskID: 4, GroupID: "g1", Scene: "other", Datetime: &dayTime},
+		{TaskID: 5, GroupID: "g1", Scene: taskagent.SceneProfileSearch, DatetimeRaw: "2026-01-19"},
+	}
+	scenes := []string{taskagent.SceneProfileSearch, taskagent.SceneGeneralSearch}
+	got := filterPlanTasks(rows, "g1", day, scenes)
+	want := []int64{1, 3}
+	if len(got) != len(want) {
+		t.Fatalf("len=%d want=%d got=%v", len(got), len(want), got)
+	}
+	for i, id := range want {
+		if got[i].TaskID != id {
+			t.Fatalf("idx=%d got=%d want=%d", i, got[i].TaskID, id)
+		}
+	}
+}
+
 func TestBuildTaskItemsByTaskID(t *testing.T) {
 	records := []CaptureRecordPayload{
 		{Fields: map[string]any{"TaskID": "1001", "ItemID": "b"}},

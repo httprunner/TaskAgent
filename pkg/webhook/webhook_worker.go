@@ -387,7 +387,48 @@ func (w *WebhookResultWorker) fetchPlanTasks(ctx context.Context, bizType, group
 	if table == nil {
 		return nil, nil
 	}
-	return table.Rows, nil
+	rows := table.Rows
+	filtered := filterPlanTasks(rows, groupID, day, scenes)
+	if len(rows) > 0 && len(filtered) != len(rows) {
+		log.Warn().
+			Str("biz_type", bizType).
+			Str("group_id", groupID).
+			Str("day", day).
+			Int("fetched", len(rows)).
+			Int("filtered", len(filtered)).
+			Msg("webhook: task rows filtered after fetch; check task field mappings")
+	}
+	return filtered, nil
+}
+
+func filterPlanTasks(rows []taskagent.FeishuTaskRow, groupID, day string, scenes []string) []taskagent.FeishuTaskRow {
+	if len(rows) == 0 {
+		return rows
+	}
+	trimmedGroup := strings.TrimSpace(groupID)
+	trimmedDay := strings.TrimSpace(day)
+	sceneSet := make(map[string]struct{}, len(scenes))
+	for _, scene := range scenes {
+		if trimmed := strings.TrimSpace(scene); trimmed != "" {
+			sceneSet[trimmed] = struct{}{}
+		}
+	}
+	out := make([]taskagent.FeishuTaskRow, 0, len(rows))
+	for _, row := range rows {
+		if trimmedGroup != "" && strings.TrimSpace(row.GroupID) != trimmedGroup {
+			continue
+		}
+		if trimmedDay != "" && dayString(row.Datetime, row.DatetimeRaw) != trimmedDay {
+			continue
+		}
+		if len(sceneSet) > 0 {
+			if _, ok := sceneSet[strings.TrimSpace(row.Scene)]; !ok {
+				continue
+			}
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRow) error {
