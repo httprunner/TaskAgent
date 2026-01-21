@@ -13,7 +13,7 @@ func TestNormalizeDramaInfoForStorage(t *testing.T) {
 	t.Cleanup(feishusdk.RefreshFieldMappings)
 	t.Setenv("SOURCE_FIELD_DRAMA_ID", "短剧 ID")
 	t.Setenv("SOURCE_FIELD_DRAMA_NAME", "短剧名称")
-	t.Setenv("SOURCE_FIELD_TOTAL_DURATION", "全剧时长（秒）")
+	t.Setenv("SOURCE_FIELD_TOTAL_DURATION", "全剧时长（分）")
 	t.Setenv("SOURCE_FIELD_EPISODE_COUNT", "全剧集数")
 	t.Setenv("SOURCE_FIELD_PRIORITY", "优先级")
 	t.Setenv("SOURCE_FIELD_RIGHTS_SCENARIO", "维权场景")
@@ -22,7 +22,7 @@ func TestNormalizeDramaInfoForStorage(t *testing.T) {
 
 	raw := map[string]any{
 		"优先级":     []any{map[string]any{"text": "S-300部", "type": "text"}},
-		"全剧时长（秒）": 9713.522,
+		"全剧时长（分）": 9713.522,
 		"全剧集数":    81,
 		"短剧 ID":   []any{map[string]any{"text": "7536058886885739582", "type": "text"}},
 		"短剧名称":    []any{map[string]any{"text": "掌生1：神算大小姐名满天下", "type": "text"}},

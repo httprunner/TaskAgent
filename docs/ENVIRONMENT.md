@@ -138,7 +138,7 @@ TaskAgent exposes per-table override knobs so you can align with custom schemas 
 | --- | --- | --- |
 | `SOURCE_FIELD_DRAMA_ID` | `短剧 ID` | Unique drama identifier. |
 | `SOURCE_FIELD_DRAMA_NAME` | `短剧名称` | Name used for Params matching. |
-| `SOURCE_FIELD_TOTAL_DURATION` | `全剧时长（秒）` | Total duration (seconds). |
+| `SOURCE_FIELD_TOTAL_DURATION` | `全剧时长（分）` | Total duration (minutes). |
 | `SOURCE_FIELD_EPISODE_COUNT` | `全剧集数` | Episode count in the template schema. |
 | `SOURCE_FIELD_PRIORITY` | `优先级` | Internal priority. |
 | `SOURCE_FIELD_RIGHTS_SCENARIO` | `维权场景` | Rights-protection scenario label. |

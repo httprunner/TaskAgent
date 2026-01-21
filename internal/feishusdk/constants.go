@@ -70,7 +70,7 @@ var (
 		TaskID:                   "TaskID",
 		DramaID:                  "短剧 ID",
 		DramaName:                "短剧名称",
-		TotalDuration:            "全剧时长（秒）",
+		TotalDuration:            "全剧时长（分）",
 		EpisodeCount:             "全剧集数",
 		Priority:                 "优先级",
 		RightsProtectionScenario: "维权场景",

@@ -1327,7 +1327,7 @@ func parseDramaTotalDurationSeconds(dramaRaw map[string]any) (float64, bool) {
 	if err != nil {
 		return 0, false
 	}
-	return v, v > 0
+	return v * 60, v > 0
 }
 
 func sumUniqueItemDurations(records []CaptureRecordPayload) (float64, bool) {
