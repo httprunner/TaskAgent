@@ -37,7 +37,9 @@ type Config struct {
 	AgentVersion          string
 	DeviceRecorder        DeviceRecorder
 	FetchTaskFilters      []TaskFetchFilter
-	DispatchPlanner       DispatchPlanner
+	// AllowedScenes restricts tasks to specific scene names when provided.
+	AllowedScenes   []string
+	DispatchPlanner DispatchPlanner
 }
 
 // DevicePoolAgent coordinates plug-and-play devices with a task source.
@@ -380,6 +382,9 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 		if err != nil {
 			return errors.Wrap(err, "fetch available tasks failed")
 		}
+		if len(a.cfg.AllowedScenes) > 0 {
+			tasks = filterTasksByAllowedScenes(tasks, a.cfg.AllowedScenes)
+		}
 		fetchedInCycle += len(tasks)
 		if len(tasks) == 0 {
 			event := log.Info()
@@ -390,7 +395,7 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 				Int("dispatch_round", round).
 				Int("idle_devices", len(idle)).
 				Int("max_fetch", maxTasks).
-				Msg("device pool dispatch found no available tasks")
+				Msg("device pool dispatch found no available tasks after filtering")
 			return nil
 		}
 
@@ -640,6 +645,44 @@ func filterUndispatchedTasks(tasks []*Task, dispatched map[string]struct{}) []*T
 			continue
 		}
 		if _, ok := dispatched[id]; ok {
+			continue
+		}
+		filtered = append(filtered, task)
+	}
+	return filtered
+}
+
+func filterTasksByAllowedScenes(tasks []*Task, allowedScenes []string) []*Task {
+	if len(tasks) == 0 {
+		return tasks
+	}
+	allowed := make(map[string]struct{}, len(allowedScenes))
+	for _, scene := range allowedScenes {
+		trimmed := strings.TrimSpace(scene)
+		if trimmed == "" {
+			continue
+		}
+		allowed[trimmed] = struct{}{}
+	}
+	if len(allowed) == 0 {
+		return tasks
+	}
+	filtered := tasks[:0]
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		ft, ok := task.Payload.(*FeishuTask)
+		if !ok || ft == nil {
+			filtered = append(filtered, task)
+			continue
+		}
+		scene := strings.TrimSpace(ft.Scene)
+		if _, exists := allowed[scene]; !exists {
+			log.Warn().
+				Str("scene", scene).
+				Str("task_id", strings.TrimSpace(task.ID)).
+				Msg("skip task with unsupported scene")
 			continue
 		}
 		filtered = append(filtered, task)
