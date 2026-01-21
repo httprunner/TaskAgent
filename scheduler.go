@@ -28,6 +28,10 @@ type Config struct {
 	JobTimeout      time.Duration
 	OSType          string
 	App             string
+	// TaskRateLimit caps how many tasks a device can start within TaskRateWindow.
+	// When <=0, rate limiting is disabled.
+	TaskRateLimit  int
+	TaskRateWindow time.Duration
 	// DeviceSerialAllowlist optionally restricts scheduling to these device serials.
 	// When empty, all connected devices are eligible unless overridden by env.
 	DeviceSerialAllowlist []string
@@ -51,6 +55,7 @@ type DevicePoolAgent struct {
 	jobRunner       JobRunner
 	deviceManager   *deviceManager
 	dispatchPlanner DispatchPlanner
+	rateLimiter     *taskRateLimiter
 	jobsMu          sync.RWMutex
 	jobs            map[string]*deviceJob
 	backgroundGroup sync.WaitGroup
@@ -112,6 +117,12 @@ func NewDevicePoolAgent(cfg Config, runner JobRunner) (*DevicePoolAgent, error) 
 	}
 	if cfg.JobTimeout == 0 {
 		cfg.JobTimeout = 30 * time.Minute
+	}
+	if cfg.TaskRateLimit < 0 {
+		return nil, errors.New("task rate limit must be non-negative")
+	}
+	if cfg.TaskRateLimit > 0 && cfg.TaskRateWindow <= 0 {
+		cfg.TaskRateWindow = time.Hour
 	}
 
 	if len(cfg.DeviceSerialAllowlist) == 0 {
@@ -203,6 +214,9 @@ func NewDevicePoolAgent(cfg Config, runner JobRunner) (*DevicePoolAgent, error) 
 		jobs:            make(map[string]*deviceJob),
 		hostUUID:        hostUUID,
 		dispatchPlanner: cfg.DispatchPlanner,
+	}
+	if cfg.TaskRateLimit > 0 {
+		agent.rateLimiter = newTaskRateLimiter(cfg.TaskRateLimit, cfg.TaskRateWindow)
 	}
 	if agent.recorder == nil {
 		agent.recorder = noopRecorder{}
@@ -344,8 +358,51 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 				Msg("device pool dispatch finished: no idle devices")
 			return nil
 		}
+		var rateCaps map[string]int
+		maxTasksPerJob := a.cfg.MaxTasksPerJob
+		if maxTasksPerJob <= 0 {
+			maxTasksPerJob = 1
+		}
+		if a.rateLimiter != nil {
+			idle = normalizeDeviceAllowlist(idle)
+			eligible := make([]string, 0, len(idle))
+			rateCaps = make(map[string]int, len(idle))
+			totalCap := 0
+			now := time.Now()
+			for _, serial := range idle {
+				remaining := a.rateLimiter.remaining(serial, now)
+				if remaining <= 0 {
+					continue
+				}
+				capacity := maxTasksPerJob
+				if remaining < capacity {
+					capacity = remaining
+				}
+				if capacity <= 0 {
+					continue
+				}
+				eligible = append(eligible, serial)
+				rateCaps[serial] = capacity
+				totalCap += capacity
+			}
+			if totalCap == 0 {
+				log.Info().
+					Int("idle_devices", len(idle)).
+					Int("rate_limit", a.cfg.TaskRateLimit).
+					Dur("rate_window", a.cfg.TaskRateWindow).
+					Msg("device pool dispatch skipped: all idle devices are rate-limited")
+				return nil
+			}
+			idle = eligible
+		}
 
-		maxTasks := len(idle) * a.cfg.MaxTasksPerJob
+		maxTasks := len(idle) * maxTasksPerJob
+		if len(rateCaps) > 0 {
+			maxTasks = 0
+			for _, capacity := range rateCaps {
+				maxTasks += capacity
+			}
+		}
 		fetchCap := a.cfg.MaxFetchPerPoll
 		if fetchCap > 0 {
 			remaining := fetchCap - fetchedInCycle
@@ -369,7 +426,7 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 		event.
 			Int("dispatch_round", round).
 			Int("idle_devices", len(idle)).
-			Int("max_tasks_per_job", a.cfg.MaxTasksPerJob).
+			Int("max_tasks_per_job", maxTasksPerJob).
 			Int("fetch_cap", fetchCap).
 			Int("max_fetch", maxTasks).
 			Msg("device pool dispatch requesting tasks")
@@ -407,7 +464,7 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 			return nil
 		}
 
-		dispatchedDevices, err := a.dispatchTasks(ctx, idle, tasks, dispatchedInCycle)
+		dispatchedDevices, err := a.dispatchTasks(ctx, idle, tasks, dispatchedInCycle, rateCaps)
 		if err != nil {
 			return err
 		}
@@ -430,7 +487,7 @@ func (a *DevicePoolAgent) dispatch(ctx context.Context, app string) error {
 	}
 }
 
-func (a *DevicePoolAgent) dispatchTasks(ctx context.Context, idle []string, tasks []*Task, dispatched map[string]struct{}) (int, error) {
+func (a *DevicePoolAgent) dispatchTasks(ctx context.Context, idle []string, tasks []*Task, dispatched map[string]struct{}, rateCaps map[string]int) (int, error) {
 	if a == nil || a.taskManager == nil {
 		return 0, nil
 	}
@@ -441,6 +498,9 @@ func (a *DevicePoolAgent) dispatchTasks(ctx context.Context, idle []string, task
 		assignments, err := a.dispatchPlanner.PlanDispatch(ctx, idle, tasks)
 		if err != nil {
 			return 0, errors.Wrap(err, "dispatch planner failed")
+		}
+		if len(rateCaps) > 0 {
+			assignments = applyRateLimitAssignments(assignments, rateCaps)
 		}
 		dispatchedDevices := 0
 		for _, assignment := range assignments {
@@ -497,6 +557,15 @@ func (a *DevicePoolAgent) dispatchTasks(ctx context.Context, idle []string, task
 		capacity := a.cfg.MaxTasksPerJob
 		if capacity <= 0 {
 			capacity = 1
+		}
+		if len(rateCaps) > 0 {
+			rateCap, ok := rateCaps[serial]
+			if !ok || rateCap <= 0 {
+				continue
+			}
+			if rateCap < capacity {
+				capacity = rateCap
+			}
 		}
 		meta := deviceMeta{}
 		if a.deviceManager != nil {
@@ -923,6 +992,9 @@ func (a *DevicePoolAgent) handleTaskStarted(ctx context.Context, serial string, 
 		return
 	}
 	now := time.Now()
+	if a.rateLimiter != nil {
+		a.rateLimiter.recordStart(serial, now)
+	}
 
 	meta := deviceMeta{}
 	if a.deviceManager != nil {
