@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	taskagent "github.com/httprunner/TaskAgent"
+	"github.com/httprunner/TaskAgent/internal/feishusdk"
 	"github.com/pkg/errors"
 )
 
@@ -214,9 +215,9 @@ func normalizeDramaInfoValue(decoded any) (map[string]any, error) {
 	case []any:
 		// Feishu rich-text fields may be returned as an array of {text,type} objects.
 		// Attempt to flatten it to a JSON string, then parse again.
-		if text := extractTextArray(v); strings.TrimSpace(text) != "" {
+		if text := feishusdk.BitableValueToString(v); text != "" {
 			var nested any
-			if err := json.Unmarshal([]byte(strings.TrimSpace(text)), &nested); err != nil {
+			if err := json.Unmarshal([]byte(text), &nested); err != nil {
 				return nil, err
 			}
 			return normalizeDramaInfoValue(nested)

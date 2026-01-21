@@ -11,6 +11,7 @@ import (
 
 	taskagent "github.com/httprunner/TaskAgent"
 	"github.com/httprunner/TaskAgent/internal/env"
+	"github.com/httprunner/TaskAgent/internal/feishusdk"
 	"github.com/httprunner/TaskAgent/pkg/singleurl"
 	"github.com/pkg/errors"
 	"github.com/rs/zerolog/log"
@@ -721,13 +722,13 @@ func buildTaskItemsByTaskID(records []CaptureRecordPayload, taskIDs []int64) map
 		if rec.Fields == nil {
 			continue
 		}
-		taskID := strings.TrimSpace(getString(rec.Fields, "TaskID"))
+		taskID := feishusdk.BitableFieldString(rec.Fields, "TaskID")
 		if taskID == "" && taskKey != "" {
-			taskID = strings.TrimSpace(getString(rec.Fields, taskKey))
+			taskID = feishusdk.BitableFieldString(rec.Fields, taskKey)
 		}
-		itemID := strings.TrimSpace(getString(rec.Fields, "ItemID"))
+		itemID := feishusdk.BitableFieldString(rec.Fields, "ItemID")
 		if itemID == "" && itemKey != "" {
-			itemID = strings.TrimSpace(getString(rec.Fields, itemKey))
+			itemID = feishusdk.BitableFieldString(rec.Fields, itemKey)
 		}
 		if taskID == "" || itemID == "" {
 			continue
@@ -953,16 +954,16 @@ func pickFirstNonEmptyCaptureFieldByTaskIDs(
 			if rec.Fields == nil {
 				continue
 			}
-			recTaskID := strings.TrimSpace(getString(rec.Fields, "TaskID"))
+			recTaskID := feishusdk.BitableFieldString(rec.Fields, "TaskID")
 			if recTaskID == "" && strings.TrimSpace(taskIDFieldRaw) != "" {
-				recTaskID = strings.TrimSpace(getString(rec.Fields, taskIDFieldRaw))
+				recTaskID = feishusdk.BitableFieldString(rec.Fields, taskIDFieldRaw)
 			}
 			if recTaskID != taskIDStr {
 				continue
 			}
-			val := strings.TrimSpace(getString(rec.Fields, fieldEng))
+			val := feishusdk.BitableFieldString(rec.Fields, fieldEng)
 			if val == "" && strings.TrimSpace(fieldRaw) != "" {
-				val = strings.TrimSpace(getString(rec.Fields, fieldRaw))
+				val = feishusdk.BitableFieldString(rec.Fields, fieldRaw)
 			}
 			if strings.EqualFold(val, "null") {
 				val = ""
@@ -1255,9 +1256,9 @@ func filterRecordsByTaskAndUser(
 		}
 
 		// Resolve TaskID from capture fields.
-		taskIDStr := strings.TrimSpace(getString(rec.Fields, "TaskID"))
+		taskIDStr := feishusdk.BitableFieldString(rec.Fields, "TaskID")
 		if taskIDStr == "" && rawTaskIDField != "" {
-			taskIDStr = strings.TrimSpace(getString(rec.Fields, rawTaskIDField))
+			taskIDStr = feishusdk.BitableFieldString(rec.Fields, rawTaskIDField)
 		}
 		if taskIDStr == "" {
 			continue
@@ -1270,9 +1271,9 @@ func filterRecordsByTaskAndUser(
 
 		// Optionally enforce UserID equality from capture fields.
 		if trimmedUserID != "" {
-			recUserID := strings.TrimSpace(getString(rec.Fields, "UserID"))
+			recUserID := feishusdk.BitableFieldString(rec.Fields, "UserID")
 			if recUserID == "" && rawUserIDField != "" {
-				recUserID = strings.TrimSpace(getString(rec.Fields, rawUserIDField))
+				recUserID = feishusdk.BitableFieldString(rec.Fields, rawUserIDField)
 			}
 			if recUserID == "" || !strings.EqualFold(recUserID, trimmedUserID) {
 				continue
@@ -1344,9 +1345,9 @@ func sumUniqueItemDurations(records []CaptureRecordPayload) (float64, bool) {
 		if rec.Fields == nil {
 			continue
 		}
-		itemID := strings.TrimSpace(getString(rec.Fields, "ItemID"))
+		itemID := feishusdk.BitableFieldString(rec.Fields, "ItemID")
 		if itemID == "" && rawItemID != "" {
-			itemID = strings.TrimSpace(getString(rec.Fields, rawItemID))
+			itemID = feishusdk.BitableFieldString(rec.Fields, rawItemID)
 		}
 		key := itemID
 		if key == "" {
@@ -1360,9 +1361,9 @@ func sumUniqueItemDurations(records []CaptureRecordPayload) (float64, bool) {
 		}
 		seen[key] = struct{}{}
 
-		durStr := strings.TrimSpace(getString(rec.Fields, "ItemDuration"))
+		durStr := feishusdk.BitableFieldString(rec.Fields, "ItemDuration")
 		if durStr == "" && rawDuration != "" {
-			durStr = strings.TrimSpace(getString(rec.Fields, rawDuration))
+			durStr = feishusdk.BitableFieldString(rec.Fields, rawDuration)
 		}
 		if durStr == "" {
 			continue

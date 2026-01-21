@@ -2208,73 +2208,11 @@ func parseBitableTime(raw string) (time.Time, error) {
 }
 
 func toInt64(value any) (int64, error) {
-	switch v := value.(type) {
-	case float64:
-		if math.Mod(v, 1) != 0 {
-			return 0, fmt.Errorf("value %v is not an integer", v)
-		}
-		return int64(v), nil
-	case int:
-		return int64(v), nil
-	case int64:
-		return v, nil
-	case json.Number:
-		return v.Int64()
-	case string:
-		trimmed := strings.TrimSpace(v)
-		if trimmed == "" {
-			return 0, errors.New("empty numeric string")
-		}
-		return strconv.ParseInt(trimmed, 10, 64)
-	default:
-		return 0, fmt.Errorf("unsupported numeric type %T", value)
-	}
+	return BitableValueToInt64Strict(value)
 }
 
 func toString(value any) string {
-	switch v := value.(type) {
-	case json.Number:
-		return v.String()
-	case string:
-		return v
-	case fmt.Stringer:
-		return v.String()
-	case float64:
-		if math.Mod(v, 1) == 0 {
-			return strconv.FormatInt(int64(v), 10)
-		}
-		return strconv.FormatFloat(v, 'f', -1, 64)
-	case int:
-		return strconv.Itoa(v)
-	case int64:
-		return strconv.FormatInt(v, 10)
-	case bool:
-		if v {
-			return "true"
-		}
-		return "false"
-	case []any:
-		for _, item := range v {
-			if str := toString(item); str != "" {
-				return strings.TrimSpace(str)
-			}
-		}
-		return ""
-	case map[string]any:
-		if raw, ok := v["text"]; ok {
-			if str := toString(raw); str != "" {
-				return strings.TrimSpace(str)
-			}
-		}
-		if raw, ok := v["value"]; ok {
-			if str := toString(raw); str != "" {
-				return strings.TrimSpace(str)
-			}
-		}
-		return ""
-	default:
-		return ""
-	}
+	return BitableValueToString(value)
 }
 
 func (c *Client) updateBitableRecord(ctx context.Context, ref BitableRef, recordID string, fields map[string]any) error {

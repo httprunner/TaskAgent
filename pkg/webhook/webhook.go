@@ -10,11 +10,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"reflect"
-	"strings"
 	"time"
 
 	taskagent "github.com/httprunner/TaskAgent"
+	"github.com/httprunner/TaskAgent/internal/feishusdk"
 	"github.com/rs/zerolog/log"
 )
 
@@ -98,9 +97,9 @@ func flattenDramaFields(raw map[string]any, schema taskagent.FeishuSourceFields)
 			// Support both raw Feishu field names (e.g. "短剧名称") and already-normalized
 			// english keys (e.g. "DramaName") so stored DramaInfo can be schema-friendly.
 			if _, ok := raw[engName]; ok {
-				payload[engName] = getString(raw, engName)
+				payload[engName] = feishusdk.BitableFieldString(raw, engName)
 			} else {
-				payload[engName] = getString(raw, rawKey)
+				payload[engName] = feishusdk.BitableFieldString(raw, rawKey)
 			}
 			continue
 		}
@@ -119,7 +118,7 @@ func FlattenRecordsAndCollectItemIDs(records []CaptureRecordPayload, schema task
 	itemIDs := make([]string, 0, len(records))
 	for _, rec := range records {
 		if rawItemKey != "" {
-			itemID := strings.TrimSpace(getString(rec.Fields, rawItemKey))
+			itemID := feishusdk.BitableFieldString(rec.Fields, rawItemKey)
 			if itemID != "" {
 				if _, exists := seenItem[itemID]; exists {
 					continue
@@ -136,7 +135,7 @@ func FlattenRecordsAndCollectItemIDs(records []CaptureRecordPayload, schema task
 				continue
 			}
 			// Downstream webhook schema expects strings for all capture fields, including Extra.
-			fieldValue := getString(rec.Fields, rawKey)
+			fieldValue := feishusdk.BitableFieldString(rec.Fields, rawKey)
 
 			// Apply App field mapping if this is the App field
 			if rawKey == rawAppKey && engName == "App" {
@@ -177,62 +176,3 @@ func sha256HMAC(key []byte, data []byte) []byte {
 }
 
 // getString reads a field value from a Feishu bitable row fields map as string.
-func getString(fields map[string]any, name string) string {
-	if fields == nil || strings.TrimSpace(name) == "" {
-		return ""
-	}
-	if val, ok := fields[name]; ok {
-		if val == nil {
-			return ""
-		}
-		switch v := val.(type) {
-		case string:
-			return strings.TrimSpace(v)
-		case []byte:
-			return strings.TrimSpace(string(v))
-		case json.Number:
-			return strings.TrimSpace(v.String())
-		case []interface{}:
-			if text := extractTextArray(v); text != "" {
-				return text
-			}
-		default:
-			rv := reflect.ValueOf(val)
-			switch rv.Kind() {
-			case reflect.Ptr, reflect.Map, reflect.Slice, reflect.Interface, reflect.Func, reflect.Chan:
-				if rv.IsNil() {
-					return ""
-				}
-			}
-			if b, err := json.Marshal(v); err == nil {
-				out := strings.TrimSpace(string(b))
-				// Ensure JSON null values never leak as the literal string "null".
-				if strings.EqualFold(out, "null") {
-					return ""
-				}
-				return out
-			}
-			return ""
-		}
-	}
-	return ""
-}
-
-// extractTextArray flattens Feishu rich-text array values into a plain string.
-func extractTextArray(arr []interface{}) string {
-	if len(arr) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(arr))
-	for _, item := range arr {
-		if m, ok := item.(map[string]any); ok {
-			if txt, ok := m["text"].(string); ok {
-				trimmed := strings.TrimSpace(txt)
-				if trimmed != "" {
-					parts = append(parts, trimmed)
-				}
-			}
-		}
-	}
-	return strings.Join(parts, " ")
-}

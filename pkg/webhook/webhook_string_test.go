@@ -1,6 +1,10 @@
 package webhook
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/httprunner/TaskAgent/internal/feishusdk"
+)
 
 func TestGetString_NullIsEmpty(t *testing.T) {
 	fields := map[string]any{
@@ -9,7 +13,7 @@ func TestGetString_NullIsEmpty(t *testing.T) {
 		"slice": ([]string)(nil),
 	}
 	for key := range fields {
-		if got := getString(fields, key); got != "" {
+		if got := feishusdk.BitableFieldString(fields, key); got != "" {
 			t.Fatalf("key=%s got=%q want empty", key, got)
 		}
 	}

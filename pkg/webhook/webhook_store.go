@@ -3,13 +3,13 @@ package webhook
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	taskagent "github.com/httprunner/TaskAgent"
+	"github.com/httprunner/TaskAgent/internal/feishusdk"
 	"github.com/pkg/errors"
 )
 
@@ -305,14 +305,14 @@ func decodeWebhookResultRow(row taskagent.BitableRow, fields webhookResultFields
 	out.Status = strings.ToLower(toString(row.Fields[fields.Status]))
 	out.TaskIDs = parseTaskIDs(row.Fields[fields.TaskIDs])
 	out.TaskIDsByStatus = parseTaskIDsStatusMap(row.Fields[fields.TaskIDs])
-	out.DramaInfo = strings.TrimSpace(toJSONString(row.Fields[fields.DramaInfo]))
-	out.UserInfo = strings.TrimSpace(toJSONString(row.Fields[fields.UserInfo]))
-	out.Records = strings.TrimSpace(toJSONString(row.Fields[fields.Records]))
-	out.DateMs = toInt64(row.Fields[fields.Date])
-	out.CreateAtMs = toInt64(row.Fields[fields.CreateAt])
-	out.StartAtMs = toInt64(row.Fields[fields.StartAt])
-	out.EndAtMs = toInt64(row.Fields[fields.EndAt])
-	out.RetryCount = int(toInt64(row.Fields[fields.RetryCount]))
+	out.DramaInfo = feishusdk.BitableValueToJSONString(row.Fields[fields.DramaInfo])
+	out.UserInfo = feishusdk.BitableValueToJSONString(row.Fields[fields.UserInfo])
+	out.Records = feishusdk.BitableValueToJSONString(row.Fields[fields.Records])
+	out.DateMs = feishusdk.BitableValueToInt64(row.Fields[fields.Date])
+	out.CreateAtMs = feishusdk.BitableValueToInt64(row.Fields[fields.CreateAt])
+	out.StartAtMs = feishusdk.BitableValueToInt64(row.Fields[fields.StartAt])
+	out.EndAtMs = feishusdk.BitableValueToInt64(row.Fields[fields.EndAt])
+	out.RetryCount = int(feishusdk.BitableValueToInt64(row.Fields[fields.RetryCount]))
 	out.LastError = toString(row.Fields[fields.LastError])
 	return out
 }
@@ -536,108 +536,5 @@ func uniqueInt64(v []int64) []int64 {
 }
 
 func toString(v any) string {
-	switch x := v.(type) {
-	case nil:
-		return ""
-	case string:
-		return x
-	case []byte:
-		return string(x)
-	case json.Number:
-		return x.String()
-	case map[string]any:
-		// Feishu multi-select and rich-text cells are often encoded as
-		// objects like {"text": "123"} or {"value": "123"}; prefer these
-		// well-known keys before falling back to fmt.Sprint.
-		if raw, ok := x["text"]; ok {
-			if s := toString(raw); strings.TrimSpace(s) != "" {
-				return s
-			}
-		}
-		if raw, ok := x["value"]; ok {
-			if s := toString(raw); strings.TrimSpace(s) != "" {
-				return s
-			}
-		}
-		return fmt.Sprint(x)
-	case []any:
-		// For arrays, return the first non-empty string representation.
-		for _, item := range x {
-			if s := toString(item); strings.TrimSpace(s) != "" {
-				return s
-			}
-		}
-		return ""
-	default:
-		return fmt.Sprint(x)
-	}
-}
-
-func toJSONString(v any) string {
-	switch x := v.(type) {
-	case nil:
-		return ""
-	case string:
-		return x
-	case []byte:
-		return string(x)
-	case json.Number:
-		return x.String()
-	case []any:
-		// Prefer decoding Feishu rich-text arrays to their plain text form.
-		if text := extractTextArray(x); strings.TrimSpace(text) != "" {
-			return text
-		}
-		if b, err := json.Marshal(x); err == nil {
-			return string(b)
-		}
-		return fmt.Sprint(x)
-	default:
-		if b, err := json.Marshal(x); err == nil {
-			return string(b)
-		}
-		return fmt.Sprint(x)
-	}
-}
-
-func toInt64(v any) int64 {
-	switch x := v.(type) {
-	case nil:
-		return 0
-	case int64:
-		return x
-	case int:
-		return int64(x)
-	case float64:
-		return int64(x)
-	case json.Number:
-		if n, err := x.Int64(); err == nil {
-			return n
-		}
-		if f, err := x.Float64(); err == nil {
-			return int64(f)
-		}
-		return 0
-	case string:
-		trimmed := strings.TrimSpace(x)
-		if trimmed == "" {
-			return 0
-		}
-		if n, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
-			return n
-		}
-		if f, err := strconv.ParseFloat(trimmed, 64); err == nil {
-			return int64(f)
-		}
-		return 0
-	default:
-		trimmed := strings.TrimSpace(fmt.Sprint(x))
-		if trimmed == "" {
-			return 0
-		}
-		if n, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
-			return n
-		}
-		return 0
-	}
+	return feishusdk.BitableValueToString(v)
 }

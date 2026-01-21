@@ -2,13 +2,13 @@ package taskagent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/httprunner/TaskAgent/internal/feishusdk"
 	"github.com/rs/zerolog/log"
 )
 
@@ -126,14 +126,14 @@ func CreateSearchTasks(ctx context.Context, cfg SearchTaskConfig) (*SearchTaskRe
 			continue
 		}
 
-		accountID := strings.TrimSpace(getString(row.Fields, sourceFields.AccountID))
-		accountName := strings.TrimSpace(getString(row.Fields, sourceFields.AccountName))
-		rowTaskID := strings.TrimSpace(getString(row.Fields, sourceFields.TaskID))
+		accountID := feishusdk.BitableFieldString(row.Fields, sourceFields.AccountID)
+		accountName := feishusdk.BitableFieldString(row.Fields, sourceFields.AccountName)
+		rowTaskID := feishusdk.BitableFieldString(row.Fields, sourceFields.TaskID)
 		if cfg.SkipExisting && rowTaskID != "" {
 			log.Warn().Any("row", row).Msg("skip existing task")
 			continue
 		}
-		captureRaw := getString(row.Fields, sourceFields.CaptureDate)
+		captureRaw := feishusdk.BitableFieldString(row.Fields, sourceFields.CaptureDate)
 		captureTime, ok := matchCaptureDate(captureRaw, targetDate)
 		if !ok {
 			continue
@@ -143,13 +143,13 @@ func CreateSearchTasks(ctx context.Context, cfg SearchTaskConfig) (*SearchTaskRe
 			captureRaw = captureTime.Format(dateLayoutYYYYMMDD)
 		}
 
-		bookID := strings.TrimSpace(getString(row.Fields, sourceFields.DramaID))
+		bookID := feishusdk.BitableFieldString(row.Fields, sourceFields.DramaID)
 		if bookID == "" {
 			continue
 		}
 
 		app := cfg.App
-		if platform := strings.TrimSpace(getString(row.Fields, sourceFields.Platform)); platform != "" {
+		if platform := feishusdk.BitableFieldString(row.Fields, sourceFields.Platform); platform != "" {
 			app = normalizeAppPackage(platform, cfg.App)
 		}
 		if strings.TrimSpace(app) == "" {
@@ -162,9 +162,9 @@ func CreateSearchTasks(ctx context.Context, cfg SearchTaskConfig) (*SearchTaskRe
 		name := ""
 		searchRaw := ""
 		if accountID != "" {
-			name = strings.TrimSpace(getString(row.Fields, sourceFields.DramaName))
-			bizTaskID = strings.TrimSpace(getString(row.Fields, sourceFields.BizTaskID))
-			searchRaw = strings.TrimSpace(getString(row.Fields, sourceFields.SearchKeywords))
+			name = feishusdk.BitableFieldString(row.Fields, sourceFields.DramaName)
+			bizTaskID = feishusdk.BitableFieldString(row.Fields, sourceFields.BizTaskID)
+			searchRaw = feishusdk.BitableFieldString(row.Fields, sourceFields.SearchKeywords)
 			if searchRaw == "" {
 				continue
 			}
@@ -174,11 +174,11 @@ func CreateSearchTasks(ctx context.Context, cfg SearchTaskConfig) (*SearchTaskRe
 			}
 			groupID = fmt.Sprintf("%s_%s_%s", groupApp, bookID, accountID)
 		} else {
-			name = strings.TrimSpace(getString(row.Fields, sourceFields.DramaName))
+			name = feishusdk.BitableFieldString(row.Fields, sourceFields.DramaName)
 			if name == "" {
 				continue
 			}
-			searchRaw = strings.TrimSpace(getString(row.Fields, sourceFields.SearchKeywords))
+			searchRaw = feishusdk.BitableFieldString(row.Fields, sourceFields.SearchKeywords)
 		}
 		params = buildKeywordsParams(name, searchRaw, keywordsSeps)
 		if len(params) == 0 {
@@ -403,96 +403,4 @@ func normalizeAppPackage(platform, fallback string) string {
 	default:
 		return trimmed
 	}
-}
-
-// getString reads a field value from a Feishu bitable row fields map as string.
-func getString(fields map[string]any, name string) string {
-	if fields == nil || strings.TrimSpace(name) == "" {
-		return ""
-	}
-	if val, ok := fields[name]; ok {
-		switch v := val.(type) {
-		case string:
-			return strings.TrimSpace(v)
-		case []byte:
-			return strings.TrimSpace(string(v))
-		case json.Number:
-			return strings.TrimSpace(v.String())
-		case map[string]any:
-			if text := extractTextFromAny(v); text != "" {
-				return text
-			}
-		case []interface{}:
-			if text := extractTextFromAny(v); text != "" {
-				return text
-			}
-		default:
-			if b, err := json.Marshal(v); err == nil {
-				return strings.TrimSpace(string(b))
-			}
-			return ""
-		}
-	}
-	return ""
-}
-
-// extractTextFromAny tries to normalize Feishu rich-text values into a plain string.
-func extractTextFromAny(val any) string {
-	switch v := val.(type) {
-	case nil:
-		return ""
-	case string:
-		return strings.TrimSpace(v)
-	case []byte:
-		return strings.TrimSpace(string(v))
-	case []interface{}:
-		return extractTextArray(v)
-	case map[string]any:
-		if text, ok := v["text"].(string); ok {
-			return strings.TrimSpace(text)
-		}
-		if nested, ok := v["value"]; ok {
-			return extractTextFromAny(nested)
-		}
-		if nested, ok := v["elements"]; ok {
-			return extractTextFromAny(nested)
-		}
-		if nested, ok := v["content"]; ok {
-			return extractTextFromAny(nested)
-		}
-	}
-	return ""
-}
-
-// extractTextArray flattens Feishu rich-text array values into a plain string.
-func extractTextArray(arr []interface{}) string {
-	if len(arr) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(arr))
-	for _, item := range arr {
-		switch v := item.(type) {
-		case map[string]any:
-			if txt, ok := v["text"].(string); ok {
-				trimmed := strings.TrimSpace(txt)
-				if trimmed != "" {
-					parts = append(parts, trimmed)
-				}
-			} else if nested, ok := v["value"]; ok {
-				if nestedText := extractTextFromAny(nested); nestedText != "" {
-					parts = append(parts, nestedText)
-				}
-			}
-		case string:
-			trimmed := strings.TrimSpace(v)
-			if trimmed != "" {
-				parts = append(parts, trimmed)
-			}
-		case []interface{}:
-			if nested := extractTextArray(v); nested != "" {
-				parts = append(parts, nested)
-			}
-		}
-	}
-	return strings.Join(parts, " ")
 }
