@@ -1044,7 +1044,11 @@ func (c *Client) BatchUpdateTaskFields(ctx context.Context, table *TaskTable, up
 
 // UpdateTaskStatusByTaskID is a convenience helper that fetches the table before applying the update.
 func (c *Client) UpdateTaskStatusByTaskID(ctx context.Context, rawURL string, taskID int64, newStatus string, override *TaskFields) error {
-	table, err := c.FetchTaskTable(ctx, rawURL, override)
+	fields := DefaultTaskFields
+	if override != nil {
+		fields = fields.merge(*override)
+	}
+	table, err := c.FetchTaskTableWithOptions(ctx, rawURL, override, buildTaskIDQueryOptions(fields, []int64{taskID}))
 	if err != nil {
 		return err
 	}
@@ -1149,7 +1153,17 @@ func (c *Client) UpdateTaskStatuses(ctx context.Context, rawURL string, updates 
 	if len(updates) == 0 {
 		return errors.New("feishu: no updates provided")
 	}
-	table, err := c.FetchTaskTable(ctx, rawURL, override)
+	fields := DefaultTaskFields
+	if override != nil {
+		fields = fields.merge(*override)
+	}
+	taskIDs := make([]int64, 0, len(updates))
+	for _, upd := range updates {
+		if upd.TaskID > 0 {
+			taskIDs = append(taskIDs, upd.TaskID)
+		}
+	}
+	table, err := c.FetchTaskTableWithOptions(ctx, rawURL, override, buildTaskIDQueryOptions(fields, taskIDs))
 	if err != nil {
 		return err
 	}
@@ -2129,6 +2143,47 @@ func bitableExtraSegmentString(value any) string {
 	default:
 		return toString(typed)
 	}
+}
+
+func buildTaskIDQueryOptions(fields TaskFields, taskIDs []int64) *QueryOptions {
+	filter := buildTaskIDFilter(fields, taskIDs)
+	if filter == nil {
+		return nil
+	}
+	limit := len(taskIDs)
+	if limit < 0 {
+		limit = 0
+	}
+	return &QueryOptions{
+		Filter:     filter,
+		Limit:      limit,
+		IgnoreView: true,
+	}
+}
+
+func buildTaskIDFilter(fields TaskFields, taskIDs []int64) *FilterInfo {
+	field := strings.TrimSpace(fields.TaskID)
+	if field == "" {
+		return nil
+	}
+	seen := make(map[int64]struct{}, len(taskIDs))
+	conds := make([]*Condition, 0, len(taskIDs))
+	for _, id := range taskIDs {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		conds = append(conds, NewCondition(field, "is", fmt.Sprintf("%d", id)))
+	}
+	if len(conds) == 0 {
+		return nil
+	}
+	filter := NewFilterInfo("or")
+	filter.Conditions = append(filter.Conditions, conds...)
+	return filter
 }
 
 func bitableOptionalTimestamp(fields map[string]any, name string) (string, *time.Time) {
