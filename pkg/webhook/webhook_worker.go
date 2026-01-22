@@ -17,17 +17,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-var webhookPlanScenesByBizType = map[string][]string{
-	WebhookBizTypePiracyGeneralSearch: {
-		taskagent.SceneGeneralSearch,
-		taskagent.SceneProfileSearch,
-		taskagent.SceneCollection,
-		taskagent.SceneAnchorCapture,
-	},
-	WebhookBizTypeVideoScreenCapture: {taskagent.SceneVideoScreenCapture},
-	WebhookBizTypeSingleURLCapture:   {taskagent.SceneSingleURLCapture},
-}
-
 type WebhookResultWorkerConfig struct {
 	TaskBitableURL    string
 	WebhookBitableURL string
@@ -329,107 +318,82 @@ func (w *WebhookResultWorker) markPlanError(ctx context.Context, row webhookResu
 	})
 }
 
-func (w *WebhookResultWorker) fetchPlanTasks(ctx context.Context, bizType, groupID, day string) ([]taskagent.FeishuTaskRow, error) {
+func (w *WebhookResultWorker) fetchTasksByIDs(ctx context.Context, taskIDs []int64) ([]taskagent.FeishuTaskRow, error) {
 	if w == nil || w.taskClient == nil {
 		return nil, errors.New("task client is nil")
 	}
-	bizType = strings.TrimSpace(bizType)
-	groupID = strings.TrimSpace(groupID)
-	day = strings.TrimSpace(day)
-	if bizType == "" {
-		return nil, errors.New("biz type is empty")
-	}
-	if groupID == "" {
-		return nil, errors.New("group id is empty")
-	}
-	if day == "" {
-		return nil, errors.New("day is empty")
-	}
-	scenes := webhookPlanScenesByBizType[bizType]
-	if len(scenes) == 0 {
-		return nil, errors.Errorf("unsupported biz type: %s", bizType)
-	}
-	fields := taskagent.DefaultTaskFields()
-	groupField := strings.TrimSpace(fields.GroupID)
-	sceneField := strings.TrimSpace(fields.Scene)
-	dateField := strings.TrimSpace(fields.Date)
-	if groupField == "" || sceneField == "" || dateField == "" {
-		return nil, errors.New("task table field mapping is missing (GroupID/Scene/Date)")
-	}
-	dateCond := taskagent.ExactDateCondition(dateField, day)
-	if dateCond == nil {
-		return nil, errors.Errorf("invalid day: %s", day)
-	}
-	filter := taskagent.NewFeishuFilterInfo("and")
-	filter.Conditions = append(filter.Conditions,
-		taskagent.NewFeishuCondition(groupField, "is", groupID),
-		dateCond,
-	)
-	sceneConds := make([]*taskagent.FeishuCondition, 0, len(scenes))
-	for _, scene := range scenes {
-		if trimmed := strings.TrimSpace(scene); trimmed != "" {
-			sceneConds = append(sceneConds, taskagent.NewFeishuCondition(sceneField, "is", trimmed))
-		}
-	}
-	if len(sceneConds) == 1 {
-		filter.Conditions = append(filter.Conditions, sceneConds[0])
-	} else if len(sceneConds) > 1 {
-		filter.Children = append(filter.Children, taskagent.NewFeishuChildrenFilter("or", sceneConds...))
-	}
-
-	table, err := w.taskClient.FetchTaskTableWithOptions(ctx, w.taskTableURL, nil, &taskagent.FeishuTaskQueryOptions{
-		Filter:     filter,
-		Limit:      0,
-		IgnoreView: true,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if table == nil {
+	ids := uniqueInt64(taskIDs)
+	if len(ids) == 0 {
 		return nil, nil
 	}
-	rows := table.Rows
-	filtered := filterPlanTasks(rows, groupID, day, scenes)
-	if len(rows) > 0 && len(filtered) != len(rows) {
-		log.Warn().
-			Str("biz_type", bizType).
-			Str("group_id", groupID).
-			Str("day", day).
-			Int("fetched", len(rows)).
-			Int("filtered", len(filtered)).
-			Msg("webhook: task rows filtered after fetch; check task field mappings")
+	fields := taskagent.DefaultTaskFields()
+	taskIDField := strings.TrimSpace(fields.TaskID)
+	if taskIDField == "" {
+		return nil, errors.New("task table field mapping is missing (TaskID)")
 	}
-	return filtered, nil
-}
 
-func filterPlanTasks(rows []taskagent.FeishuTaskRow, groupID, day string, scenes []string) []taskagent.FeishuTaskRow {
-	if len(rows) == 0 {
-		return rows
-	}
-	trimmedGroup := strings.TrimSpace(groupID)
-	trimmedDay := strings.TrimSpace(day)
-	sceneSet := make(map[string]struct{}, len(scenes))
-	for _, scene := range scenes {
-		if trimmed := strings.TrimSpace(scene); trimmed != "" {
-			sceneSet[trimmed] = struct{}{}
+	const maxConditions = 50
+	out := make([]taskagent.FeishuTaskRow, 0, len(ids))
+	seen := make(map[int64]struct{}, len(ids))
+	for start := 0; start < len(ids); start += maxConditions {
+		end := start + maxConditions
+		if end > len(ids) {
+			end = len(ids)
 		}
-	}
-	out := make([]taskagent.FeishuTaskRow, 0, len(rows))
-	for _, row := range rows {
-		if trimmedGroup != "" && strings.TrimSpace(row.GroupID) != trimmedGroup {
+		filter := taskagent.NewFeishuFilterInfo("or")
+		for _, id := range ids[start:end] {
+			filter.Conditions = append(filter.Conditions, taskagent.NewFeishuCondition(taskIDField, "is", strconv.FormatInt(id, 10)))
+		}
+		table, err := w.taskClient.FetchTaskTableWithOptions(ctx, w.taskTableURL, nil, &taskagent.FeishuTaskQueryOptions{
+			Filter:     filter,
+			Limit:      0,
+			IgnoreView: true,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if table == nil {
 			continue
 		}
-		if trimmedDay != "" && dayString(row.Datetime, row.DatetimeRaw) != trimmedDay {
-			continue
-		}
-		if len(sceneSet) > 0 {
-			if _, ok := sceneSet[strings.TrimSpace(row.Scene)]; !ok {
+		for _, row := range table.Rows {
+			if row.TaskID <= 0 {
 				continue
 			}
+			if _, ok := seen[row.TaskID]; ok {
+				continue
+			}
+			seen[row.TaskID] = struct{}{}
+			out = append(out, row)
 		}
-		out = append(out, row)
 	}
-	return out
+	return out, nil
+}
+
+func ensureTaskIDsInStatusMap(taskIDs []int64, byStatus map[string][]int64) map[string][]int64 {
+	if len(taskIDs) == 0 {
+		return byStatus
+	}
+	if byStatus == nil {
+		byStatus = make(map[string][]int64)
+	}
+	present := make(map[int64]struct{}, len(taskIDs))
+	for _, ids := range byStatus {
+		for _, id := range ids {
+			if id > 0 {
+				present[id] = struct{}{}
+			}
+		}
+	}
+	for _, id := range taskIDs {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := present[id]; ok {
+			continue
+		}
+		byStatus["unknown"] = append(byStatus["unknown"], id)
+	}
+	return normalizeTaskIDsByStatus(byStatus)
 }
 
 func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRow) error {
@@ -463,18 +427,25 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 	if err != nil {
 		return w.markPlanError(ctx, row, fmt.Sprintf("invalid Date: %v", err))
 	}
-	tasks, err := w.fetchPlanTasks(ctx, bizType, groupID, day)
+	planTaskIDs := uniqueInt64(row.TaskIDs)
+	if len(planTaskIDs) == 0 {
+		return w.markPlanError(ctx, row, "task ids are empty")
+	}
+	tasks, err := w.fetchTasksByIDs(ctx, planTaskIDs)
 	if err != nil {
 		return err
 	}
 	if len(tasks) == 0 {
-		return w.markPlanError(ctx, row, fmt.Sprintf("no tasks found for biz=%s group=%s date=%s", bizType, groupID, day))
+		return w.markPlanError(ctx, row, fmt.Sprintf("no tasks found for task_ids=%v", planTaskIDs))
 	}
-	taskIDs := extractTaskIDsFromRows(tasks)
+	taskIDs := planTaskIDs
 	if len(taskIDs) == 0 {
 		return w.markPlanError(ctx, row, fmt.Sprintf("no valid TaskID found for biz=%s group=%s date=%s", bizType, groupID, day))
 	}
 	nextTaskIDsByStatus := buildTaskIDsByStatusFromTasks(tasks)
+	if len(planTaskIDs) > 0 {
+		nextTaskIDsByStatus = ensureTaskIDsInStatusMap(planTaskIDs, nextTaskIDsByStatus)
+	}
 	if !equalTaskIDsByStatus(row.TaskIDsByStatus, nextTaskIDsByStatus) {
 		if err := w.store.update(ctx, row.RecordID, webhookResultUpdate{
 			TaskIDsByStatus: &nextTaskIDsByStatus,
@@ -499,6 +470,7 @@ func (w *WebhookResultWorker) handleRow(ctx context.Context, row webhookResultRo
 		Str("group_id", groupID).
 		Str("date", day).
 		Int("task_id_count", len(taskIDs)).
+		Int("plan_task_id_count", len(planTaskIDs)).
 		Int("fetched_tasks", len(tasks)).
 		Interface("task_ids", taskIDs).
 		Msg("webhook: fetched tasks for result row")

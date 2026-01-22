@@ -16,22 +16,14 @@ func TestParseTaskIDs(t *testing.T) {
 		want []int64
 	}{
 		{name: "empty", in: "", want: nil},
-		{name: "string_csv", in: "123,456", want: []int64{123, 456}},
-		{name: "string_mixed", in: " 123 | 456  123 ", want: []int64{123, 456}},
-		{name: "slice_any", in: []any{"123", "456", "123"}, want: []int64{123, 456}},
-		{name: "slice_string", in: []string{"123", "456", "123"}, want: []int64{123, 456}},
-		{
-			name: "feishu_multi_select_objects",
-			in: []any{
-				map[string]any{"text": "123"},
-				map[string]any{"value": "456"},
-				map[string]any{"text": "123"},
-			},
-			want: []int64{123, 456},
-		},
 		{
 			name: "json_status_map_string",
 			in:   `{"success":[123],"failed":["456","123"],"unknown":[0]}`,
+			want: []int64{123, 456},
+		},
+		{
+			name: "json_status_map_slice",
+			in:   []any{`{"pending":[123,456]}`},
 			want: []int64{123, 456},
 		},
 		{
@@ -116,26 +108,19 @@ func TestBuildTaskIDsByStatus(t *testing.T) {
 	}
 }
 
-func TestFilterPlanTasks(t *testing.T) {
-	day := "2026-01-20"
-	dayTime := time.Date(2026, 1, 20, 8, 0, 0, 0, time.Local)
-	rows := []taskagent.FeishuTaskRow{
-		{TaskID: 1, GroupID: "g1", Scene: taskagent.SceneProfileSearch, Datetime: &dayTime},
-		{TaskID: 2, GroupID: "g2", Scene: taskagent.SceneProfileSearch, Datetime: &dayTime},
-		{TaskID: 3, GroupID: "g1", Scene: taskagent.SceneGeneralSearch, Datetime: &dayTime},
-		{TaskID: 4, GroupID: "g1", Scene: "other", Datetime: &dayTime},
-		{TaskID: 5, GroupID: "g1", Scene: taskagent.SceneProfileSearch, DatetimeRaw: "2026-01-19"},
+func TestEnsureTaskIDsInStatusMap(t *testing.T) {
+	byStatus := map[string][]int64{
+		"success": {1},
+		"failed":  {2, 2},
 	}
-	scenes := []string{taskagent.SceneProfileSearch, taskagent.SceneGeneralSearch}
-	got := filterPlanTasks(rows, "g1", day, scenes)
-	want := []int64{1, 3}
-	if len(got) != len(want) {
-		t.Fatalf("len=%d want=%d got=%v", len(got), len(want), got)
+	got := ensureTaskIDsInStatusMap([]int64{1, 2, 3, 3, 0}, byStatus)
+	want := map[string][]int64{
+		"failed":  {2},
+		"success": {1},
+		"unknown": {3},
 	}
-	for i, id := range want {
-		if got[i].TaskID != id {
-			t.Fatalf("idx=%d got=%d want=%d", i, got[i].TaskID, id)
-		}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got=%v want=%v", got, want)
 	}
 }
 

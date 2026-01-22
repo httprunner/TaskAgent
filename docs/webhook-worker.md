@@ -4,7 +4,7 @@ TaskAgent webhook 推送机制统一为「Webhook 结果表」：
 
 - **统一机制**：Webhook 结果表（`WEBHOOK_BITABLE_URL`）+ `WebhookResultWorker`
   - 以结果表行的 `Status in {pending, failed}` 作为触发器；
-  - 以结果表行的 `BizType+GroupID+Date` 在任务状态表中聚合该组所有任务，作为就绪判定与数据汇总主键；
+  - 以结果表行的 `TaskIDs` 作为任务成员清单（任务集合由 creator 在创建计划时保证完整性）；
   - 通过 `BizType` 区分不同业务的汇总策略（例如：综合页搜索→盗版筛查的 Group 聚合、视频录屏采集的 Single 任务）。
 
 ## 统一机制：Webhook 结果表（WEBHOOK_BITABLE_URL）
@@ -12,7 +12,7 @@ TaskAgent webhook 推送机制统一为「Webhook 结果表」：
 说明：
 - `BizType=piracy_general_search`（综合页搜索→盗版筛查，Group 聚合推送）。
 - `BizType=video_screen_capture`（视频录屏采集，Single 推送）及其 Creator/回填器（外部系统创建任务时需要）。
-- `BizType=single_url_capture`（单个链接采集），推送计划可由外部工作流或 `WebhookResultCreator` 创建；`WebhookResultWorker` 按 `BizType+GroupID+Date` 聚合任务状态并推送，同时回写 `TaskIDs` 状态分布。
+- `BizType=single_url_capture`（单个链接采集），推送计划可由外部工作流或 `WebhookResultCreator` 创建；worker 按结果表 `TaskIDs` 处理并回写状态分布。
 
 ### 表定义（Feishu 多维表格）
 
@@ -38,7 +38,7 @@ Webhook 结果表用于存储 webhook 的关联信息和推送结果，核心字
 字段含义补充（按 BizType）：
 - `BizType=piracy_general_search`：`ParentTaskID`、`GroupID` 必填，用于确定“同一父任务下的同一组”。
 - `BizType=video_screen_capture`：当前只强依赖单个 TaskID（写入 `TaskIDs={"pending":[TaskID]}`）；`ParentTaskID/GroupID/DramaInfo` 可先为空（后续 BookID 修复后再补齐）。
-- `BizType=single_url_capture`：推送计划按 `(BizType, GroupID, Date)` 去重；任务集合由 worker 在任务表中按 `BizType+GroupID+Date` 聚合并回写到 `TaskIDs`。
+- `BizType=single_url_capture`：推送计划按 `(BizType, GroupID, Date)` 去重；任务集合由 creator 创建并写入 `TaskIDs`，worker 仅按该清单处理。
 
 环境变量：
 - `WEBHOOK_BITABLE_URL`：Webhook 结果表链接
@@ -101,7 +101,7 @@ creator 会在每轮扫描前把 `ScanDate` 更新为本地当天日期，从而
 worker 定时轮询 webhook 结果表：
 
 1. 候选行：`Status in {pending, failed}`（`error` 跳过）；可通过 `WebhookResultWorkerConfig.DatePresets` 限制只扫描特定日期（例如 `DatePresets=[Today, Yesterday]` 仅扫描“今天 + 昨天”）。
-2. 就绪判定：对候选行按 `BizType+GroupID+Date` 到任务表筛选出该组所有任务并查询状态
+2. 就绪判定：按结果表行 `TaskIDs` 拉取任务并查询状态
    - 若所有任务的 `Status in {success, error}` → 触发推送
    - 若存在 `pending/failed/dispatched/running/空` 等非终态 → 本轮跳过等待下一次轮询
    - 若按筛选条件查不到任何任务行 → 将该结果行标记为 `Status=error` 并写入 `LastError`
@@ -152,7 +152,7 @@ TaskAgent CLI（可选）：
 ## 故障排查速查表
 
 - 若 `WEBHOOK_BITABLE_URL` 行长期 `pending/failed`：
-  - 检查任务表中该 `BizType+GroupID+Date` 下的任务 `Status` 是否已全部到 `success/error`
+  - 检查结果表 `TaskIDs` 对应的任务 `Status` 是否已全部到 `success/error`
   - 检查结果表的 `TaskIDs` 状态分布（由 worker 回写），确认是否仍存在 `dispatched/running/pending/failed` 等非终态
   - 查看 `LastError` 和 `RetryCount`，达到 3 次后会转 `error`
 - `BizType=video_screen_capture` 额外检查项（统一方案）：

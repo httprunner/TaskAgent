@@ -327,17 +327,20 @@ func parseTaskIDs(raw any) []int64 {
 			sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 			return ids
 		}
-		return parseTaskIDsFromString(v)
+		if n := feishusdk.BitableValueToInt64(v); n > 0 {
+			return []int64{n}
+		}
+		return nil
 	case []any:
 		ids := make([]int64, 0, len(v))
 		for _, item := range v {
-			ids = append(ids, parseTaskIDsFromString(toString(item))...)
+			ids = append(ids, parseTaskIDs(item)...)
 		}
 		return uniqueInt64(ids)
 	case []string:
 		ids := make([]int64, 0, len(v))
 		for _, item := range v {
-			ids = append(ids, parseTaskIDsFromString(item)...)
+			ids = append(ids, parseTaskIDs(item)...)
 		}
 		return uniqueInt64(ids)
 	case map[string]any:
@@ -348,7 +351,10 @@ func parseTaskIDs(raw any) []int64 {
 		}
 		return nil
 	default:
-		return parseTaskIDsFromString(toString(v))
+		if n := feishusdk.BitableValueToInt64(v); n > 0 {
+			return []int64{n}
+		}
+		return nil
 	}
 }
 
@@ -493,27 +499,6 @@ func encodeTaskIDsByStatusForFeishu(m map[string][]int64) string {
 		return ""
 	}
 	return string(b)
-}
-
-func parseTaskIDsFromString(v string) []int64 {
-	trimmed := strings.TrimSpace(v)
-	if trimmed == "" {
-		return nil
-	}
-	parts := strings.FieldsFunc(trimmed, func(r rune) bool {
-		return r == ',' || r == '|' || r == ' ' || r == '\n' || r == '\t'
-	})
-	ids := make([]int64, 0, len(parts))
-	for _, part := range parts {
-		p := strings.TrimSpace(part)
-		if p == "" {
-			continue
-		}
-		if n, err := strconv.ParseInt(p, 10, 64); err == nil && n > 0 {
-			ids = append(ids, n)
-		}
-	}
-	return uniqueInt64(ids)
 }
 
 func uniqueInt64(v []int64) []int64 {
