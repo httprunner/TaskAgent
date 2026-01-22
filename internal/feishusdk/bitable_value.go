@@ -99,6 +99,62 @@ func BitableValueToInt64(value any) int64 {
 	}
 }
 
+// BitableValueToFloat64 converts a Feishu bitable cell value into float64 with best-effort parsing.
+func BitableValueToFloat64(value any) (float64, bool) {
+	switch v := value.(type) {
+	case nil:
+		return 0, false
+	case float64:
+		return v, true
+	case float32:
+		return float64(v), true
+	case int:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case int32:
+		return float64(v), true
+	case uint:
+		return float64(v), true
+	case uint64:
+		return float64(v), true
+	case uint32:
+		return float64(v), true
+	case json.Number:
+		if f, err := v.Float64(); err == nil {
+			return f, true
+		}
+		return 0, false
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return 0, false
+		}
+		if f, err := strconv.ParseFloat(trimmed, 64); err == nil {
+			return f, true
+		}
+		return 0, false
+	case []byte:
+		trimmed := strings.TrimSpace(string(v))
+		if trimmed == "" {
+			return 0, false
+		}
+		if f, err := strconv.ParseFloat(trimmed, 64); err == nil {
+			return f, true
+		}
+		return 0, false
+	default:
+		trimmed := strings.TrimSpace(fmt.Sprint(v))
+		if trimmed == "" {
+			return 0, false
+		}
+		if f, err := strconv.ParseFloat(trimmed, 64); err == nil {
+			return f, true
+		}
+		return 0, false
+	}
+}
+
 // BitableValueToInt64Strict converts a Feishu bitable cell value into int64 with strict integer parsing.
 func BitableValueToInt64Strict(value any) (int64, error) {
 	switch v := value.(type) {
