@@ -640,11 +640,22 @@ func (c *Client) FetchTaskTableWithOptions(ctx context.Context, rawURL string, o
 		}
 		row, err := decodeTaskRow(rec, fields)
 		if err != nil {
-			log.Error().Err(err).Str("record_id", larkcore.StringValue(rec.RecordId)).Msg("decode task row failed")
+			if isMissingFieldError(err, fields.Status) {
+				log.Warn().Err(err).
+					Str("record_id", larkcore.StringValue(rec.RecordId)).
+					Any("fields", rec.Fields).
+					Msg("decode task row skipped (missing status)")
+				continue
+			}
+			log.Error().Err(err).
+				Str("record_id", larkcore.StringValue(rec.RecordId)).
+				Any("fields", rec.Fields).
+				Msg("decode task row failed")
 			table.Invalid = append(table.Invalid, TaskRowError{RecordID: strings.TrimSpace(larkcore.StringValue(rec.RecordId)), Err: err})
 			continue
 		}
 		if strings.TrimSpace(row.Status) == "" {
+			log.Warn().Str("record_id", larkcore.StringValue(rec.RecordId)).Msg("decode task row skipped (empty status)")
 			table.Invalid = append(table.Invalid, TaskRowError{RecordID: strings.TrimSpace(larkcore.StringValue(rec.RecordId)), Err: errors.New("empty status after decode")})
 			continue
 		}
@@ -2064,6 +2075,14 @@ func decodeTaskRow(rec *larkbitable.AppTableRecord, fields TaskFields) (TaskRow,
 	}
 
 	return row, nil
+}
+
+func isMissingFieldError(err error, field string) bool {
+	if err == nil || strings.TrimSpace(field) == "" {
+		return false
+	}
+	needle := fmt.Sprintf("missing field %q", field)
+	return strings.Contains(err.Error(), needle)
 }
 
 func bitableIntField(fields map[string]any, name string) (int64, error) {
