@@ -641,7 +641,7 @@ func (c *Client) FetchTaskTableWithOptions(ctx context.Context, rawURL string, o
 		row, err := decodeTaskRow(rec, fields)
 		if err != nil {
 			if isMissingFieldError(err, fields.Status) {
-				log.Warn().Err(err).
+				log.Debug().
 					Str("record_id", larkcore.StringValue(rec.RecordId)).
 					Any("fields", rec.Fields).
 					Msg("decode task row skipped (missing status)")
